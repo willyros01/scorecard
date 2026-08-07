@@ -61,7 +61,11 @@
   }
 
   window.addEventListener("error", function (e) {
-    if (booted) { window.showBanner("Something went wrong", e.message || "Script error"); return; }
+    // Cross-origin scripts (the Firebase SDK on gstatic) report a bare "Script error."
+    // with no detail. It's opaque and usually harmless — don't alarm anyone over it.
+    var opaque = !e.filename && (!e.message || /^script error/i.test(e.message));
+    if (opaque) return;
+    if (booted) { window.showBanner("Something went wrong", e.message); return; }
     startupFailure(e.message || "Script error", e.filename);
   });
 

@@ -139,6 +139,9 @@ pre.msg { white-space: pre-wrap; word-break: break-word; font-family: var(--mono
 
 /* sheet */
 .sheet { position: fixed; inset: 0; z-index: 30; background: rgba(10,22,18,.5); display: flex; align-items: flex-end; }
+/* An author-set `display` beats the `hidden` attribute, so say it explicitly —
+   without this the dimming layer sits over the app and eats every tap. */
+.sheet[hidden] { display: none; }
 .sheet-body { width: 100%; max-width: 620px; margin: 0 auto; background: var(--card); border-radius: 18px 18px 0 0; padding: 16px 16px calc(24px + env(safe-area-inset-bottom)); }
 .sheet h2 { font-family: var(--display); font-weight: 400; font-size: 18px; margin: 0 0 8px; }
 textarea.field { min-height: 110px; font-family: var(--mono); font-size: 11.5px; }
