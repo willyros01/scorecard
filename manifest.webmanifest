@@ -1,0 +1,14 @@
+{
+  "name": "The Scorecard — Golf Handicap",
+  "short_name": "Scorecard",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#FBF7EE",
+  "theme_color": "#1F5641",
+  "description": "Post rounds, track your World Handicap System index, works offline.",
+  "icons": [
+    { "src": "./icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
