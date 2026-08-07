@@ -1,4 +1,4 @@
-/* Storage engine.
+/* Storage engine — Cloud Firestore.
  *
  * Online : Firestore document  users/{uid}/data/scorecard
  * Offline: localStorage key    golf:pending      (deleted the moment it lands in Firestore)
@@ -55,10 +55,10 @@ function describe(e) {
   if (raw.includes("api-key-not-valid") || raw.includes("invalid-api-key"))
     return ["The API key is wrong", "The apiKey in firebase-config.js doesn't match this project. Recopy it from Project settings → Your apps."];
   if (raw.includes("permission-denied") || raw.includes("insufficient permissions"))
-    return ["Firestore refused the write", "The security rules were never published. Paste firestore.rules into Firebase → Firestore → Rules and press Publish."];
-  if (raw.includes("not-found") || raw.includes("project"))
-    return ["Project not found", "Check projectId in firebase-config.js against the Firebase console."];
-  if (raw.includes("unavailable") || raw.includes("network") || raw.includes("failed to fetch") || raw.includes("offline"))
+    return ["Firestore refused the write", "The rules were never published. Paste firestore.rules into Firebase → Firestore → Rules and press Publish."];
+  if (raw.includes("not-found") || raw.includes("no document to update"))
+    return ["Project or database not found", "Check projectId in firebase-config.js, and that the database ID is (default)."];
+  if (raw.includes("unavailable") || raw.includes("client is offline") || raw.includes("network") || raw.includes("failed to fetch") || raw.includes("offline"))
     return ["Can't reach Firebase", "Your rounds are saved on this device and upload as soon as the connection returns."];
   if (raw.includes("quota") || raw.includes("resource-exhausted"))
     return ["Firebase quota reached", "The free tier limit was hit. It resets daily; rounds keep saving on this device meanwhile."];
@@ -113,10 +113,7 @@ export async function init() {
     });
   } catch (e) {
     setStatus(navigator.onLine ? "Sync unavailable" : "Offline", true);
-    if (navigator.onLine) {
-      setError("Couldn't load Firebase",
-        "The Firebase library didn't download. Check the values in firebase-config.js, or try again in a moment. Rounds save on this device meanwhile.");
-    }
+    if (navigator.onLine) report(e);
   }
 
   addEventListener("online", () => { setStatus("Reconnecting"); flush(); });

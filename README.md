@@ -11,11 +11,13 @@ No build step. Plain ES modules, so what's in the repo is what runs.
 ## 1. Firebase (about 5 minutes)
 
 1. At [console.firebase.google.com](https://console.firebase.google.com), create a project. Analytics is optional.
-2. **Build → Firestore Database → Create database**. Start in production mode and pick a region near you.
+2. **Build → Firestore Database → Create database**. Standard edition, Native mode, a nearby region, production mode.
 3. **Rules** tab → paste the contents of `firestore.rules` → **Publish**. These say a scorecard is readable and writable only by the account that owns it.
 4. **Build → Authentication → Get started**. Enable **Anonymous**. Enable **Google** too if you want one scorecard across phone and laptop.
 5. **Project settings → Your apps → Web (`</>`)**. Register the app, copy the `firebaseConfig` object.
 6. Paste those values into `firebase-config.js`.
+
+> **If creating the database shows a billing warning:** check the Firestore panel anyway. The warning is sometimes cosmetic and the database gets provisioned regardless. A healthy setup shows database ID `(default)` and **Spark · No-cost ($0/month)** at the bottom left of the console.
 
 The API key in that file is safe to commit — Firebase web keys identify the project, they don't grant access. The rules in step 3 are what protect the data. Leave the placeholders in place and the app still runs, just without sync.
 
@@ -31,6 +33,8 @@ git push -u origin main
 ```
 
 Then in the repo: **Settings → Pages → Source: GitHub Actions**. The workflow in `.github/workflows/deploy.yml` publishes on every push to `main`; the first run takes a minute or two.
+
+**Uploading through the browser instead of git?** The `.github/` folder won't upload — browsers skip dot-folders, and on iOS it's impossible. Upload the other files, then on the Pages screen click **Configure** on the **Static HTML** suggested-workflow card and commit the file GitHub generates. It does the same job as `deploy.yml`. Keep one or the other, never both — two workflows publishing to Pages will fight over each deploy.
 
 Your app lands at `https://YOUR-USERNAME.github.io/scorecard/`.
 
@@ -120,7 +124,7 @@ There is no 0.96 multiplier. That belonged to the pre-2020 USGA system and still
 | `courses-api.js` | Course search by keyword. Swap providers here |
 | `version.js` | **The one line to bump when you ship a change** — drives both the Summary footer and the offline cache name |
 | `sw.js` | Offline caching. Cache name follows `version.js` |
-| `firestore.rules` | Paste into the Firebase console |
+| `firestore.rules` | Paste into the Firestore → Rules tab |
 
 ## Local development
 
