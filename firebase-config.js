@@ -1,13 +1,12 @@
-// Paste the config object from Firebase console → Project settings → Your apps → Web app.
-// These values are public by design; your data is protected by the rules in firestore.rules.
-// Leave the placeholders in place to run the app in local-only mode (no sync).
+// Firebase config for the scorecard project.
+// These values are public by design; firestore.rules is what protects your data.
 export const firebaseConfig = {
-  apiKey: "PASTE_API_KEY",
-  authDomain: "PASTE_PROJECT.firebaseapp.com",
-  projectId: "PASTE_PROJECT_ID",
-  storageBucket: "PASTE_PROJECT.appspot.com",
-  messagingSenderId: "PASTE_SENDER_ID",
-  appId: "PASTE_APP_ID",
+  apiKey: "AIzaSyA5qWtnz3QHco5YSAlHb7TXmCNg1kUdVhA",
+  authDomain: "scorecard-f41b8.firebaseapp.com",
+  projectId: "scorecard-f41b8",
+  storageBucket: "scorecard-f41b8.firebasestorage.app",
+  messagingSenderId: "811267714235",
+  appId: "1:811267714235:web:b79fbd330f99e211044d9e",
 };
 
 export const isConfigured = !String(firebaseConfig.apiKey).startsWith("PASTE_");
