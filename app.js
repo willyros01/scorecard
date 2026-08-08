@@ -121,6 +121,7 @@ function screenJoin() {
           <button class="btn ghost" data-act="hide-code">Back</button>
         </div>
       </div>
+      ${versionBlock()}
     </div>`;
   }
 
@@ -141,6 +142,7 @@ function screenJoin() {
     <p class="hint" style="text-align:center">
       Joining someone else's group? <button class="linkbtn" data-act="show-code">I was given a code</button>
     </p>`}
+    ${versionBlock()}
   </div>`;
 }
 
