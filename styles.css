@@ -29,6 +29,7 @@
 }
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html { font-size: 16px; }   /* the text-size control scales this, and rem sizes follow */
 html, body { margin: 0; background: var(--card); color: var(--ink); font-family: var(--body); }
 body { padding-bottom: env(safe-area-inset-bottom); }
 button, input, select, textarea { font: inherit; color: inherit; }
@@ -185,3 +186,36 @@ textarea.field { min-height: 110px; font-family: var(--mono); font-size: 11.5px;
   background: var(--paper); border: 1px solid var(--rule); text-align: center;
 }
 .version .sub { margin-top: 3px; }
+
+
+/* ---- readability: larger type, stronger contrast, bigger targets ---- */
+body { font-size: 1rem; }
+.field { font-size: 1.05rem; padding: 0.8rem 0.75rem; }
+.eyebrow { font-size: 0.78rem; letter-spacing: .1em; color: var(--ink); opacity: .75; }
+.small { font-size: 0.9rem; }
+.sub { font-size: 0.86rem; }
+.name { font-size: 1.02rem; }
+.btn { font-size: 1.05rem; padding: 0.95rem 1rem; min-height: 52px; }
+.linkbtn { font-size: 0.95rem; }
+.tabs button { font-size: 0.76rem; padding: 0.7rem 0.15rem; }
+.tabs .ico { font-size: 1.3rem; }
+.chip { font-size: 0.78rem; padding: 0.4rem 0.7rem; }
+.list-row { padding: 0.95rem 0.9rem; min-height: 56px; }
+.iconbtn { padding: 0.7rem; font-size: 1.15rem; min-width: 46px; min-height: 46px; }
+.idx .big { font-size: 2.4rem; }
+.stamp { font-size: 1rem; }
+.empty h2 { font-size: 1.35rem; }
+.empty p { font-size: 1rem; }
+.brand h1 { font-size: 1.35rem; }
+
+/* the muted grey was too light against cream — darken it */
+:root { --muted: #55635C; }
+[data-theme="dark"] { --muted: #A9BBB2; }
+
+/* an obvious, labelled add row instead of a faint ＋ */
+.addrow { display: flex; gap: 8px; padding: 10px; align-items: stretch; }
+.addrow input {
+  flex: 1; min-width: 0; font-size: 1.05rem; padding: 0.8rem 0.75rem;
+  border: 1px solid var(--rule); border-radius: 10px; background: var(--paper); color: var(--ink);
+}
+.addrow .addbtn { width: auto; flex: 0 0 auto; white-space: nowrap; padding: 0.8rem 1rem; }

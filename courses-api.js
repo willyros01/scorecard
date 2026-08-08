@@ -74,6 +74,37 @@ export async function search(query) {
   return usable.slice(0, 8);
 }
 
+/* Providers match on exact-ish names, so a query that reads naturally to a person
+   ("royal ontario golf club") can miss. Try it as typed, then again with the
+   filler words removed, and merge — de-duplicated, best matches first. */
+export async function searchWide(query) {
+  const raw = String(query || "").trim();
+  const trimmed = raw.replace(/\b(golf|club|course|country|links|and|the|&|cc|gc|g&cc)\b/gi, " ")
+                     .replace(/\s+/g, " ").trim();
+
+  const attempts = [raw];
+  if (trimmed && trimmed.toLowerCase() !== raw.toLowerCase() && trimmed.length >= 3) attempts.push(trimmed);
+
+  const seen = new Set();
+  const merged = [];
+  let lastError = null;
+
+  for (const attempt of attempts) {
+    try {
+      for (const course of await search(attempt)) {
+        const fingerprint = course.name.toLowerCase();
+        if (seen.has(fingerprint)) continue;
+        seen.add(fingerprint);
+        merged.push(course);
+      }
+    } catch (e) {
+      lastError = e;
+    }
+  }
+  if (!merged.length) throw lastError || new Error("NO_MATCH");
+  return merged.slice(0, 10);
+}
+
 export function explain(code) {
   switch (String(code)) {
     case "NO_KEY": return "Add a free lookup key below and you can search by name. Without one, type the rating and slope off the scorecard — it takes about twenty seconds.";

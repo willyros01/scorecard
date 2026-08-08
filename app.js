@@ -51,6 +51,27 @@ function diffsFor(golfer) {
 const indexFor = (g) => handicapIndex(diffsFor(g));
 const activeGolfers = () => state.golfers.filter((g) => state.rounds.some((r) => r.golfer === g));
 
+/* ================= text size ================= */
+const SIZES = [
+  { id: "normal", label: "A", scale: 1 },
+  { id: "large",  label: "A+", scale: 1.18 },
+  { id: "huge",   label: "A++", scale: 1.36 },
+];
+function applySize() {
+  const id = localStorage.getItem("golf:textsize") || "normal";
+  const size = SIZES.find((s) => s.id === id) || SIZES[0];
+  document.documentElement.style.fontSize = 16 * size.scale + "px";
+  document.documentElement.dataset.size = size.id;
+  document.getElementById("sizeBtn").textContent = size.label;
+}
+document.getElementById("sizeBtn").onclick = () => {
+  const current = localStorage.getItem("golf:textsize") || "normal";
+  const next = SIZES[(SIZES.findIndex((s) => s.id === current) + 1) % SIZES.length];
+  localStorage.setItem("golf:textsize", next.id);
+  applySize();
+};
+applySize();
+
 /* ================= night mode ================= */
 function applyTheme() {
   const pref = localStorage.getItem("golf:theme") || "auto";
@@ -278,8 +299,10 @@ function screenManage() {
         return `<div class="list-row"><span class="grow name">${esc(g)}</span>
           <button class="iconbtn ${used ? "" : "warn"}" data-del-golfer="${esc(g)}" ${used ? "disabled title='Has posted rounds'" : ""}>🗑</button></div>`;
       }).join("")}
-      <div class="list-row"><input class="grow" name="new-golfer" placeholder="Add a golfer" style="border:0;background:none;font-size:16px;outline:none">
-        <button class="iconbtn" data-act="add-golfer" style="color:var(--pine);font-size:20px">＋</button></div>
+      <div class="addrow">
+        <input name="new-golfer" placeholder="Type a name" autocomplete="off">
+        <button class="btn addbtn" data-act="add-golfer">Add golfer</button>
+      </div>
     </div>
   </section>
   <section>
@@ -443,6 +466,12 @@ function updatePreview() {
   if (adj) adj.placeholder = form.gross || "same";
 }
 
+view.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter") return;
+  if (e.target.name === "new-golfer") { e.preventDefault(); addGolfer(); }
+  if (e.target.name === "finder-q") { e.preventDefault(); runFinder(); }
+});
+
 view.addEventListener("change", (e) => {
   const n = e.target.name, v = e.target.value;
   if (n === "date") { form.date = v; render(); }
@@ -504,24 +533,8 @@ view.addEventListener("click", async (e) => {
     case "drill-back": drill.month ? (drill.month = null) : (drill.year = null); return render();
     case "view-scope": filter = { golfer: "", year: drill.year || "", month: drill.month || "", courseId: "" }; tab = "history"; return render();
     case "post": return post();
-    case "add-golfer": {
-      const input = view.querySelector('[name="new-golfer"]');
-      const name = input.value.trim();
-      if (!name || state.golfers.includes(name)) return;
-      return save({ ...state, golfers: [...state.golfers, name].sort() });
-    }
-    case "find": {
-      const q = (view.querySelector('[name="finder-q"]') || {}).value || finder.q;
-      finder = { q, results: [], busy: true, msg: "Searching…" };
-      render();
-      try {
-        const results = await lookup.search(q);
-        finder = { q, results, busy: false, msg: `${results.length} match${results.length === 1 ? "" : "es"}` };
-      } catch (err) {
-        finder = { q, results: [], busy: false, msg: lookup.explain(err && err.message) };
-      }
-      return render();
-    }
+    case "add-golfer": return addGolfer();
+    case "find": return runFinder();
     case "save-key": {
       const el = view.querySelector('[name="apikey"]');
       lookup.setKey(el ? el.value : "");
@@ -550,6 +563,30 @@ view.addEventListener("click", async (e) => {
     case "backup": return openBackup();
   }
 });
+
+// Search is fussy about wording, so try the query as typed and again with the
+// filler words stripped, then merge whatever comes back.
+async function runFinder() {
+  const q = ((view.querySelector('[name="finder-q"]') || {}).value || finder.q).trim();
+  finder = { q, results: [], busy: true, msg: "Searching…" };
+  render();
+  try {
+    const results = await lookup.searchWide(q);
+    finder = { q, results, busy: false, msg: `${results.length} match${results.length === 1 ? "" : "es"} — tap one to fill in its tees` };
+  } catch (err) {
+    finder = { q, results: [], busy: false, msg: lookup.explain(err && err.message) };
+  }
+  render();
+}
+
+function addGolfer() {
+  const input = view.querySelector('[name="new-golfer"]');
+  const name = (input ? input.value : "").trim();
+  if (!name) { flashMsg("Type a name first"); return; }
+  if (state.golfers.includes(name)) { flashMsg(`${name} is already on the list`); return; }
+  save({ ...state, golfers: [...state.golfers, name].sort() });
+  flashMsg(`${name} added`);
+}
 
 function post() {
   const course = state.courses.find((c) => c.id === form.courseId);
