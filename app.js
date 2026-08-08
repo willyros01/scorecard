@@ -186,7 +186,9 @@ function screenHistory() {
 }
 
 function screenSummary() {
-  if (!state.rounds.length) return empty("Nothing to summarize yet", "Your index, trends and drill-downs appear once you post rounds.");
+  if (!state.rounds.length) {
+    return empty("Nothing to summarize yet", "Your index, trends and drill-downs appear once you post rounds.") + versionBlock();
+  }
 
   const scoped = state.rounds.filter((r) => (!drill.year || r.date.slice(0, 4) === drill.year) && (!drill.month || r.date.slice(5, 7) === drill.month));
   const level = drill.month ? "golfer" : drill.year ? "month" : "year";
@@ -288,6 +290,7 @@ function send(how) {
 /* ---------- manage ---------- */
 let courseDraft = null;
 let finder = { q: "", results: [], busy: false, msg: "" };
+let editingGolfer = null;
 
 function screenManage() {
   return `
@@ -296,8 +299,16 @@ function screenManage() {
     <div class="card list">
       ${state.golfers.map((g) => {
         const used = state.rounds.some((r) => r.golfer === g);
+        if (editingGolfer === g) {
+          return `<div class="addrow">
+            <input name="rename-golfer" value="${esc(g)}" autocomplete="off">
+            <button class="btn addbtn" data-act="save-rename">Save</button>
+            <button class="btn ghost addbtn" data-act="cancel-rename">Cancel</button>
+          </div>`;
+        }
         return `<div class="list-row"><span class="grow name">${esc(g)}</span>
-          <button class="iconbtn ${used ? "" : "warn"}" data-del-golfer="${esc(g)}" ${used ? "disabled title='Has posted rounds'" : ""}>🗑</button></div>`;
+          <button class="rowbtn" data-rename="${esc(g)}">Edit</button>
+          <button class="rowbtn warn" data-del-golfer="${esc(g)}" ${used ? "disabled title='Has posted rounds — delete those first'" : ""}>Delete</button></div>`;
       }).join("")}
       <div class="addrow">
         <input name="new-golfer" placeholder="Type a name" autocomplete="off">
@@ -469,6 +480,7 @@ function updatePreview() {
 view.addEventListener("keydown", (e) => {
   if (e.key !== "Enter") return;
   if (e.target.name === "new-golfer") { e.preventDefault(); addGolfer(); }
+  if (e.target.name === "rename-golfer") { e.preventDefault(); saveRename(); }
   if (e.target.name === "finder-q") { e.preventDefault(); runFinder(); }
 });
 
@@ -488,7 +500,7 @@ view.addEventListener("change", (e) => {
 });
 
 view.addEventListener("click", async (e) => {
-  const t = e.target.closest("[data-act],[data-tee],[data-go],[data-edit],[data-del],[data-confirm-del],[data-unfilter],[data-drill],[data-golfer-index],[data-send],[data-del-golfer],[data-edit-course],[data-del-course],[data-rm-tee],[data-pick]");
+  const t = e.target.closest("[data-act],[data-tee],[data-go],[data-edit],[data-del],[data-confirm-del],[data-unfilter],[data-drill],[data-golfer-index],[data-send],[data-del-golfer],[data-edit-course],[data-del-course],[data-rm-tee],[data-pick],[data-rename]");
   if (!t) return;
   const d = t.dataset;
 
@@ -513,6 +525,7 @@ view.addEventListener("click", async (e) => {
     return render();
   }
   if (d.golferIndex) { filter = { golfer: d.golferIndex, year: "", month: "", courseId: "" }; tab = "history"; return render(); }
+  if (d.rename) { editingGolfer = d.rename; return render(); }
   if (d.delGolfer) return save({ ...state, golfers: state.golfers.filter((g) => g !== d.delGolfer) });
   if (d.editCourse) { courseDraft = JSON.parse(JSON.stringify(state.courses.find((c) => c.id === d.editCourse))); return render(); }
   if (d.delCourse) return save({ ...state, courses: state.courses.filter((c) => c.id !== d.delCourse) });
@@ -534,6 +547,8 @@ view.addEventListener("click", async (e) => {
     case "view-scope": filter = { golfer: "", year: drill.year || "", month: drill.month || "", courseId: "" }; tab = "history"; return render();
     case "post": return post();
     case "add-golfer": return addGolfer();
+    case "save-rename": return saveRename();
+    case "cancel-rename": editingGolfer = null; return render();
     case "find": return runFinder();
     case "save-key": {
       const el = view.querySelector('[name="apikey"]');
@@ -577,6 +592,29 @@ async function runFinder() {
     finder = { q, results: [], busy: false, msg: lookup.explain(err && err.message) };
   }
   render();
+}
+
+function saveRename() {
+  const input = view.querySelector('[name="rename-golfer"]');
+  const next = (input ? input.value : "").trim();
+  const previous = editingGolfer;
+  if (!next) { flashMsg("Type a name first"); return; }
+  if (next === previous) { editingGolfer = null; return render(); }
+  if (state.golfers.includes(next)) { flashMsg(`${next} is already on the list`); return; }
+
+  // Rounds store the golfer by name, so every one of theirs moves with them.
+  const golfers = state.golfers.map((g) => (g === previous ? next : g)).sort();
+  const rounds = state.rounds.map((r) => (r.golfer === previous ? { ...r, golfer: next } : r));
+
+  // Anything currently pointing at the old name follows too.
+  if (form.golfer === previous) form.golfer = next;
+  if (filter.golfer === previous) filter.golfer = next;
+  if (shareGolfer === previous) shareGolfer = next;
+
+  const moved = state.rounds.filter((r) => r.golfer === previous).length;
+  editingGolfer = null;
+  save({ ...state, golfers, rounds });
+  flashMsg(moved ? `Renamed to ${next} — ${moved} round${moved === 1 ? "" : "s"} moved with them` : `Renamed to ${next}`);
 }
 
 function addGolfer() {

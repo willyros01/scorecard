@@ -219,3 +219,14 @@ body { font-size: 1rem; }
   border: 1px solid var(--rule); border-radius: 10px; background: var(--paper); color: var(--ink);
 }
 .addrow .addbtn { width: auto; flex: 0 0 auto; white-space: nowrap; padding: 0.8rem 1rem; }
+
+/* ---- labelled row buttons: readable words, not tiny icons ---- */
+.rowbtn {
+  flex: 0 0 auto; background: transparent; border: 1px solid var(--rule);
+  border-radius: 9px; padding: 0.55rem 0.85rem; font-size: 0.95rem; font-weight: 600;
+  color: var(--pine); min-height: 44px; margin-left: 8px;
+}
+[data-theme="dark"] .rowbtn { color: var(--pine-ink); }
+.rowbtn.warn { color: var(--pencil); border-color: var(--pencil); }
+.rowbtn[disabled] { opacity: .35; }
+.addrow .btn.ghost { flex: 0 0 auto; }

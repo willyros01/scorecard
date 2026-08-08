@@ -4,5 +4,5 @@
  * bumping this one line updates the Summary screen and busts the offline cache
  * at the same time. It is the only place you need to edit when you ship a change.
  */
-self.APP_VERSION = "1.3.0";
+self.APP_VERSION = "1.3.1";
 self.APP_BUILD = "2026-08-06";
