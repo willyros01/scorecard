@@ -100,6 +100,19 @@ export async function init() {
     const instance = app.initializeApp(cfg.firebaseConfig);
     fb = { mod: { auth, store }, auth: auth.getAuth(instance), db: store.getFirestore(instance) };
 
+    /* Coming back from a redirect sign-in. This has to run before anything
+       else touches auth, or the result is discarded. */
+    try {
+      const returned = await auth.getRedirectResult(fb.auth);
+      if (returned && returned.user) clearError();
+    } catch (e) {
+      const code = String((e && e.code) || "");
+      if (code.includes("credential-already-in-use")) {
+        setError("That Google account already has a scorecard",
+          "Signing in switched you to it. Your rounds on this device are still here — use Backup text on the storage panel if you need to move them across.");
+      } else if (code) report(e);
+    }
+
     auth.onAuthStateChanged(fb.auth, async (user) => {
       if (!user) {
         try { await auth.signInAnonymously(fb.auth); }
@@ -177,24 +190,59 @@ export async function flush() {
 }
 
 /* ---------- optional: carry your data across devices ---------- */
+
+/* An app launched from the home screen has no browser chrome and blocks
+   pop-ups outright, whatever Safari's own setting says. Sign-in there has to
+   leave the page and come back rather than open a window. */
+export const isInstalledApp = () => {
+  try {
+    return (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches)
+      || navigator.standalone === true;
+  } catch { return false; }
+};
 export async function signInWithGoogle() {
   if (!configured) throw new Error("Sync isn't set up — add your Firebase config first.");
   if (!fb) throw new Error("Firebase didn't load. Check your connection and reload.");
-  const { GoogleAuthProvider, linkWithPopup, signInWithPopup } = fb.mod.auth;
+  const { GoogleAuthProvider, linkWithPopup, signInWithPopup, linkWithRedirect, signInWithRedirect } = fb.mod.auth;
   const provider = new GoogleAuthProvider();
   const current = fb.auth.currentUser;
+  const anonymous = current && current.isAnonymous;
+
+  /* Installed apps go straight to redirect — a pop-up there is always blocked,
+     so trying one first would just show an error before working. */
+  if (isInstalledApp()) {
+    setStatus("Opening Google sign-in");
+    if (anonymous) return linkWithRedirect(current, provider);
+    return signInWithRedirect(fb.auth, provider);
+  }
+
   try {
-    if (current && current.isAnonymous) await linkWithPopup(current, provider);
+    if (anonymous) await linkWithPopup(current, provider);
     else await signInWithPopup(fb.auth, provider);
     clearError();
   } catch (e) {
-    if (String(e && e.code).includes("credential-already-in-use")) {
+    const code = String((e && e.code) || "");
+
+    /* A blocked pop-up in an ordinary browser tab: fall back to redirect
+       rather than making somebody hunt through Safari settings. */
+    if (code.includes("popup-blocked") || code.includes("popup-closed") || code.includes("cancelled-popup")) {
+      setStatus("Opening Google sign-in");
+      if (anonymous) return linkWithRedirect(current, provider);
+      return signInWithRedirect(fb.auth, provider);
+    }
+    if (code.includes("credential-already-in-use")) {
       try { await signInWithPopup(fb.auth, provider); clearError(); }
       catch (e2) { report(e2); throw e2; }
     } else { report(e); throw e; }
   }
   await flush();
 }
+
+/* Used to decide who sees administrative controls. */
+export const currentEmail = () => {
+  const user = fb && fb.auth.currentUser;
+  return user && !user.isAnonymous ? (user.email || "") : "";
+};
 
 export async function signOutUser() {
   if (!fb) return;

@@ -291,6 +291,8 @@ function send(how) {
 let courseDraft = null;
 let finder = { q: "", results: [], busy: false, msg: "" };
 let editingGolfer = null;
+let openCourse = null;
+const SUPER_ADMIN = "willyros01@gmail.com";
 
 function screenManage() {
   return `
@@ -323,17 +325,28 @@ function screenManage() {
     </div>
     <div class="stack" style="margin-top:8px">
       ${state.courses.length === 0 && !courseDraft ? `<div class="card" style="padding:20px;text-align:center"><p class="small muted" style="margin:0">Add a course with its rating and slope — both are printed on the scorecard.</p></div>` : ""}
+      ${state.courses.length ? `<div class="card list">
       ${state.courses.map((c) => {
         const used = state.rounds.some((r) => r.courseId === c.id);
-        return `<div class="card" style="padding:14px">
-          <div style="display:flex;justify-content:space-between;align-items:flex-start">
-            <div style="font-family:var(--display);font-size:17px">${esc(c.name)}</div>
-            <div><button class="iconbtn" data-edit-course="${c.id}">✎</button>
-              <button class="iconbtn ${used ? "" : "warn"}" data-del-course="${c.id}" ${used ? "disabled" : ""}>🗑</button></div>
-          </div>
-          ${c.tees.map((t) => `<div class="sub" style="display:flex;justify-content:space-between"><span>${esc(t.name)}</span><span>${(+t.rating).toFixed(1)} / ${t.slope} · par ${t.par}</span></div>`).join("")}
+        const open = openCourse === c.id;
+        return `<div>
+          <button class="course-head" data-course="${c.id}" aria-expanded="${open}">
+            <span class="grow">
+              <span class="name">${esc(c.name)}</span><br>
+              <span class="sub">${c.tees.length} tee${c.tees.length === 1 ? "" : "s"}${used ? " · in use" : ""}</span>
+            </span>
+            <span class="chev">${open ? "▾" : "▸"}</span>
+          </button>
+          ${open ? `<div class="course-body">
+            ${c.tees.map((t) => `<div class="teeline"><span>${esc(t.name)}</span><span>${(+t.rating).toFixed(1)} / ${t.slope} · par ${t.par}</span></div>`).join("")}
+            <div class="course-actions">
+              <button class="rowbtn" data-edit-course="${c.id}">Edit</button>
+              <button class="rowbtn warn" data-del-course="${c.id}" ${used ? "disabled title='Rounds use this course'" : ""}>Delete</button>
+            </div>
+          </div>` : ""}
         </div>`;
       }).join("")}
+      </div>` : ""}
       ${courseDraft ? courseEditor() : ""}
     </div>
   </section>
@@ -349,10 +362,25 @@ function screenManage() {
     </div>
     <p class="small muted" style="margin-top:8px">Signing in with Google carries this scorecard to your other devices.</p>
   </section>
-  <section>
-    <div class="eyebrow">Course lookup</div>
+  ${lookupSection()}`;
+}
+
+/* Administrative, and only for the account that owns the app. Everyone else
+   never learns the key box exists — searching simply works for them. */
+function lookupSection() {
+  if (db.currentEmail() !== SUPER_ADMIN) return "";
+  if (lookup.usingEmbeddedKey()) {
+    return `<section>
+      <div class="eyebrow">Course lookup — super admin</div>
+      <div class="card" style="padding:14px">
+        <p class="small" style="margin:0">The search key is built into the app, so nobody has to enter one. To change it, edit <b>lookup-key.js</b> in the repository and commit — everyone picks it up on their next reload.</p>
+      </div>
+    </section>`;
+  }
+  return `<section>
+    <div class="eyebrow">Course lookup — super admin</div>
     <div class="card" style="padding:14px">
-      <p class="small muted" style="margin:0 0 10px">Optional. With a free key you can search courses by name instead of copying rating and slope off the scorecard. Get one at <b>golfcourseapi.com</b>. The key stays on this device.</p>
+      <p class="small muted" style="margin:0 0 10px">No key is built into the app yet. Paste one from <b>golfcourseapi.com</b> to enable search on this device, or add it to <b>lookup-key.js</b> in the repository so everyone gets it.</p>
       <input class="field" name="apikey" value="${esc(lookup.getKey())}" placeholder="Paste your lookup key">
       <div class="row" style="margin-top:10px">
         <button class="btn ghost" data-act="save-key">${lookup.hasKey() ? "Update key" : "Save key"}</button>
@@ -500,7 +528,7 @@ view.addEventListener("change", (e) => {
 });
 
 view.addEventListener("click", async (e) => {
-  const t = e.target.closest("[data-act],[data-tee],[data-go],[data-edit],[data-del],[data-confirm-del],[data-unfilter],[data-drill],[data-golfer-index],[data-send],[data-del-golfer],[data-edit-course],[data-del-course],[data-rm-tee],[data-pick],[data-rename]");
+  const t = e.target.closest("[data-act],[data-tee],[data-go],[data-edit],[data-del],[data-confirm-del],[data-unfilter],[data-drill],[data-golfer-index],[data-send],[data-del-golfer],[data-edit-course],[data-del-course],[data-rm-tee],[data-pick],[data-rename],[data-course]");
   if (!t) return;
   const d = t.dataset;
 
@@ -526,6 +554,7 @@ view.addEventListener("click", async (e) => {
   }
   if (d.golferIndex) { filter = { golfer: d.golferIndex, year: "", month: "", courseId: "" }; tab = "history"; return render(); }
   if (d.rename) { editingGolfer = d.rename; return render(); }
+  if (d.course) { openCourse = openCourse === d.course ? null : d.course; return render(); }
   if (d.delGolfer) return save({ ...state, golfers: state.golfers.filter((g) => g !== d.delGolfer) });
   if (d.editCourse) { courseDraft = JSON.parse(JSON.stringify(state.courses.find((c) => c.id === d.editCourse))); return render(); }
   if (d.delCourse) return save({ ...state, courses: state.courses.filter((c) => c.id !== d.delCourse) });
@@ -568,6 +597,7 @@ view.addEventListener("click", async (e) => {
       if (!c.name || !c.tees.length) return;
       const exists = state.courses.some((x) => x.id === c.id);
       courseDraft = null;
+      openCourse = null;
       finder = { q: "", results: [], busy: false, msg: "" };
       return save({ ...state, courses: exists ? state.courses.map((x) => (x.id === c.id ? c : x)) : [...state.courses, c] });
     }

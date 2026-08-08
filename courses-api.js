@@ -9,10 +9,19 @@
  */
 
 const KEY_STORE = "golf:courselookup";
+
+/* The embedded key ships with the app and needs no setup. A key saved on the
+   device is only a fallback, kept so the feature still works if the embedded
+   one is ever empty. */
+const embeddedKey = () => {
+  try { return (self.COURSE_LOOKUP_KEY || "").trim(); } catch { return ""; }
+};
+export const usingEmbeddedKey = () => !!embeddedKey();
 const ENDPOINT = "https://api.golfcourseapi.com/v1/search?search_query=";
 const AUTH = (key) => ({ Authorization: "Key " + key });
 
-export const getKey = () => { try { return localStorage.getItem(KEY_STORE) || ""; } catch { return ""; } };
+const savedKey = () => { try { return localStorage.getItem(KEY_STORE) || ""; } catch { return ""; } };
+export const getKey = () => embeddedKey() || savedKey();
 export const hasKey = () => !!getKey();
 export function setKey(k) {
   try { k && k.trim() ? localStorage.setItem(KEY_STORE, k.trim()) : localStorage.removeItem(KEY_STORE); } catch {}
@@ -107,7 +116,7 @@ export async function searchWide(query) {
 
 export function explain(code) {
   switch (String(code)) {
-    case "NO_KEY": return "Add a free lookup key below and you can search by name. Without one, type the rating and slope off the scorecard — it takes about twenty seconds.";
+    case "NO_KEY": return "Course search is not set up yet. Type the rating and slope off the scorecard for now — it takes about twenty seconds.";
     case "TOO_SHORT": return "Type at least three letters of the course or club name.";
     case "OFFLINE": return "You're offline, so lookup isn't available. Enter the tees by hand — everything else works.";
     case "UNREACHABLE": return "The lookup service couldn't be reached from this browser. Enter the tees by hand.";

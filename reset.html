@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reset The Scorecard</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+         background: #FBF7EE; color: #14261F; margin: 0; padding: 32px 22px;
+         font-size: 20px; line-height: 1.6; }
+  .box { max-width: 520px; margin: 0 auto; }
+  h1 { font-family: Georgia, serif; font-weight: 400; font-size: 30px; margin: 0 0 18px; }
+  p { margin: 0 0 16px; }
+  #log { background: #fff; border: 1px solid #D5CBB4; border-radius: 12px;
+         padding: 16px 18px; font-size: 19px; }
+  #log div { padding: 5px 0; }
+  .ok::before { content: "✓ "; color: #1F5641; font-weight: 700; }
+  .done { background: #1F5641; color: #fff; border-radius: 12px;
+          padding: 18px 20px; margin-top: 20px; font-weight: 700; }
+  a.btn { display: block; text-align: center; background: #1F5641; color: #fff;
+          text-decoration: none; padding: 18px; border-radius: 12px;
+          font-weight: 700; margin-top: 20px; font-size: 21px; }
+</style>
+</head>
+<body>
+<div class="box">
+  <h1>Resetting The Scorecard</h1>
+  <p>This clears the saved copy of the app on this device so the newest version loads. Your rounds are safe — they live in Firebase, not here.</p>
+  <div id="log"></div>
+  <div id="finish"></div>
+</div>
+
+<script>
+/* This page exists because a service worker can get stuck serving old files.
+   It removes every worker and every cache for this site, then sends you back
+   to a fresh copy of the app. */
+(async function () {
+  const log = document.getElementById("log");
+  const say = (text) => {
+    const line = document.createElement("div");
+    line.className = "ok";
+    line.textContent = text;
+    log.appendChild(line);
+  };
+
+  try {
+    if ("serviceWorker" in navigator) {
+      const workers = await navigator.serviceWorker.getRegistrations();
+      for (const worker of workers) await worker.unregister();
+      say(workers.length ? `Removed ${workers.length} stuck app copy` : "No stuck app copy found");
+    }
+  } catch { say("Could not check for stuck copies"); }
+
+  try {
+    const names = await caches.keys();
+    for (const name of names) await caches.delete(name);
+    say(names.length ? `Cleared ${names.length} saved file store` : "No saved files to clear");
+  } catch { say("Could not clear saved files"); }
+
+  say("Done");
+
+  document.getElementById("finish").innerHTML =
+    '<div class="done">Now tap the button below, then check Summary for the version.</div>' +
+    '<a class="btn" href="./?fresh=' + Date.now() + '">Open the app</a>';
+})();
+</script>
+</body>
+</html>

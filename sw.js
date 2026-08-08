@@ -80,5 +80,9 @@ self.addEventListener("fetch", (e) => {
     return;
   }
 
+  /* The reset page must never be served from cache — it is the escape hatch
+     when a previous worker is stuck. */
+  if (url.pathname.endsWith("/reset.html")) return;
+
   if (url.origin === location.origin) e.respondWith(networkFirst(e.request));
 });
