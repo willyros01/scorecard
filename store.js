@@ -164,12 +164,24 @@ export async function createAssociation({ name, displayName }) {
   const { setDoc, serverTimestamp } = fb.mod.store;
 
   /* Written directly rather than queued: there is no point creating a group
-     offline, and the owner needs the id back immediately. */
+     offline, and the owner needs the id back immediately.
+
+     The group has to exist before the membership, because the rule that
+     authorises an owner membership reads ownerUid off the group document. */
   await setDoc(ref("associations", association.id), { ...association, createdAt: serverTimestamp() });
-  await setDoc(ref("associations", association.id, "members", uid), {
-    ...model.buildMember({ uid, displayName, role: "owner", joinCode: association.joinCode }),
-    joinedAt: serverTimestamp(),
-  });
+
+  try {
+    await setDoc(ref("associations", association.id, "members", uid), {
+      ...model.buildMember({ uid, displayName, role: "owner", joinCode: association.joinCode }),
+      joinedAt: serverTimestamp(),
+    });
+  } catch (e) {
+    /* Almost always out-of-date rules in the console. Naming that saves an
+       afternoon of guessing, and stops repeated taps piling up empty groups. */
+    setError("The rules in Firebase are out of date",
+      "Creating a group needs the latest firestore.rules published in the Firebase console. Publish them, then tap Start again.");
+    throw e;
+  }
 
   /* The code index, so somebody handed only a code can find this group.
      Deliberately not fatal: if the rules in the console predate this index,
@@ -184,6 +196,7 @@ export async function createAssociation({ name, displayName }) {
 
   assocId = association.id;
   rememberAssociation(association.id);
+  rememberGroup(association.id, association.name);
   return association;
 }
 
@@ -210,6 +223,9 @@ export async function joinAssociation({ associationId, code, displayName }) {
   try {
     await setDoc(ref("associations", associationId, "members", uid), { ...member, joinedAt: serverTimestamp() });
     assocId = associationId;
+    rememberAssociation(associationId);
+    const group = await loadAssociation(associationId);
+    rememberGroup(associationId, group ? group.name : "Group");
     clearError();
     return { ok: true };
   } catch (e) {
@@ -242,7 +258,7 @@ export function postRound({ golfer, course, tee, date, gross, adjusted, notes, g
   });
 
   const window = model.insertIntoWindow(golfer.recentWindow, {
-    roundId: round.id, date: round.date, differential: round.differential,
+    roundId: round.id, date: round.date, differential: round.differential, assocId,
   });
 
   outbox.enqueue({
@@ -254,7 +270,7 @@ export function postRound({ golfer, course, tee, date, gross, adjusted, notes, g
 
   outbox.enqueue({
     type: "update",
-    path: ["associations", assocId, "golfers", golfer.id],
+    path: ["golfers", golfer.id],
     data: {
       recentWindow: window,
       handicapIndex: model.indexFromWindow(window),
@@ -269,28 +285,35 @@ export function postRound({ golfer, course, tee, date, gross, adjusted, notes, g
 
 /* Editing or deleting is rarer, and correctness matters more than avoiding a
    read, so the window is rebuilt from the golfer's last twenty rounds. */
+/* Rebuilds after an edit or deletion.
+ *
+ * Only this group's rounds are readable from here, so entries belonging to the
+ * player's other groups are kept as they are and merged back. Without that,
+ * correcting a score in one group would quietly wipe half of somebody's
+ * handicap history. */
 export async function rebuildGolferIndex(golferId) {
-  const { getDocs, query, where, orderBy, limit } = fb.mod.store;
+  const { getDoc, getDocs, query, where, orderBy, limit } = fb.mod.store;
+
+  let kept = [];
+  try {
+    const person = await getDoc(ref("golfers", golferId));
+    if (person.exists()) kept = model.windowFromOtherGroups(person.data().recentWindow, assocId);
+  } catch { /* nothing kept; the fresh scan below still runs */ }
+
   const snapshot = await getDocs(
-    query(
-      col("associations", assocId, "rounds"),
-      where("golferId", "==", golferId),
-      orderBy("date", "desc"),
-      limit(20)
-    )
+    query(col("associations", assocId, "rounds"),
+      where("golferId", "==", golferId), orderBy("date", "desc"), limit(20))
   );
-  let window = [];
+  const fresh = [];
   snapshot.forEach((d) => {
     const r = d.data();
-    window = model.insertIntoWindow(window, { roundId: r.id, date: r.date, differential: r.differential });
+    fresh.push({ roundId: r.id, date: r.date, differential: r.differential, assocId });
   });
 
-  outbox.enqueue({
-    type: "update",
-    path: ["associations", assocId, "golfers", golferId],
+  const window = model.mergeWindow(kept, fresh);
+  outbox.enqueue({ type: "update", path: ["golfers", golferId],
     data: { recentWindow: window, handicapIndex: model.indexFromWindow(window) },
-    opId: `golfer-rebuild-${golferId}-${Date.now()}`,
-  });
+    opId: `golfer-rebuild-${golferId}-${Date.now()}` });
   flush();
   return window;
 }
@@ -306,16 +329,50 @@ export function deleteRound(roundId) {
 
 /* ---------------- roster, courses, games ---------------- */
 
-export function addGolfer({ name }) {
-  const golfer = model.buildGolfer({ name });
-  outbox.enqueue({
-    type: "set",
-    path: ["associations", assocId, "golfers", golfer.id],
-    data: golfer,
-    opId: `golfer-create-${golfer.id}`,
-  });
+/* Adds a golfer to THIS group.
+ *
+ * If that person already exists — because they play in another of your groups —
+ * the same record is reused rather than a second one created. That is the whole
+ * point: one person, one handicap, however many groups.
+ *
+ * Returns { golfer, reused } so the interface can say which happened.
+ */
+export async function addGolfer({ name }) {
+  const key = model.nameKey(name);
+  if (!key) throw new Error("A golfer needs a name.");
+
+  const { getDoc, setDoc } = fb.mod.store;
+  let golfer = null;
+  let reused = false;
+
+  /* The name index is what enforces uniqueness across every group. */
+  try {
+    const claimed = await getDoc(ref("golferNames", key));
+    if (claimed.exists()) {
+      const found = await getDoc(ref("golfers", claimed.data().golferId));
+      if (found.exists()) { golfer = found.data(); reused = true; }
+    }
+  } catch { /* offline: fall through and create, the index will reconcile */ }
+
+  if (!golfer) {
+    golfer = model.buildGolfer({ name });
+    await setDoc(ref("golfers", golfer.id), golfer);
+    await setDoc(ref("golferNames", key), { golferId: golfer.id, name: golfer.name });
+  }
+
+  /* The roster says this person plays in this group. */
+  outbox.enqueue({ type: "set", path: ["associations", assocId, "roster", golfer.id],
+    data: { golferId: golfer.id, addedAt: Date.now() }, opId: `roster-${assocId}-${golfer.id}` });
   flush();
-  return golfer;
+  return { golfer, reused };
+}
+
+/* Takes them off this group's roster. The person and their rounds elsewhere
+   are untouched — they simply no longer play here. */
+export function removeFromRoster(golferId) {
+  outbox.enqueue({ type: "delete", path: ["associations", assocId, "roster", golferId],
+    opId: `roster-remove-${assocId}-${golferId}-${Date.now()}` });
+  flush();
 }
 
 /* Courses are top level and shared, so one entry serves every group. */
@@ -345,13 +402,23 @@ export function addGame({ date, courseId, name }) {
 
 /* ---------------- live reads ---------------- */
 
+/* Every golfer in the whole system. Their index lives here, so it is the same
+   number no matter which group you are looking at. */
 export function watchGolfers(callback) {
   const { onSnapshot } = fb.mod.store;
-  const stop = onSnapshot(
-    col("associations", assocId, "golfers"),
+  const stop = onSnapshot(col("golfers"),
     (snap) => { clearError(); callback(snap.docs.map((d) => d.data())); },
-    (e) => report(e)
-  );
+    (e) => report(e));
+  unsubscribers.push(stop);
+  return stop;
+}
+
+/* Which of them play in this group. */
+export function watchRoster(callback) {
+  const { onSnapshot } = fb.mod.store;
+  const stop = onSnapshot(col("associations", assocId, "roster"),
+    (snap) => callback(snap.docs.map((d) => d.id)),
+    (e) => report(e));
   unsubscribers.push(stop);
   return stop;
 }
@@ -518,18 +585,32 @@ export function canEditRound(round) {
   return Date.now() - entered < 24 * 60 * 60 * 1000;
 }
 
-/* A rename touches one document, because rounds reference a golfer by id.
-   Version 1 had to rewrite every round; this does not. */
-export function renameGolfer(golferId, name) {
-  outbox.enqueue({ type: "update", path: ["associations", assocId, "golfers", golferId],
-    data: { name: String(name).trim() }, opId: `golfer-rename-${golferId}-${Date.now()}` });
-  flush();
-}
+/* Renaming changes the person everywhere, in every group. Rounds are unaffected
+   because they reference the golfer by id, not by name.
+   Returns false if the new name already belongs to somebody else. */
+export async function renameGolfer(golferId, name) {
+  const { getDoc, setDoc, deleteDoc } = fb.mod.store;
+  const tidy = String(name).trim();
+  const key = model.nameKey(tidy);
+  if (!key) return { ok: false, reason: "EMPTY" };
 
-export function deleteGolfer(golferId) {
-  outbox.enqueue({ type: "delete", path: ["associations", assocId, "golfers", golferId],
-    opId: `golfer-delete-${golferId}` });
-  flush();
+  const existing = await getDoc(ref("golfers", golferId));
+  if (!existing.exists()) return { ok: false, reason: "MISSING" };
+  const before = existing.data();
+  if (before.nameKey === key) {
+    await setDoc(ref("golfers", golferId), { name: tidy }, { merge: true });
+    return { ok: true };
+  }
+
+  const claimed = await getDoc(ref("golferNames", key));
+  if (claimed.exists() && claimed.data().golferId !== golferId) {
+    return { ok: false, reason: "TAKEN" };
+  }
+
+  await setDoc(ref("golfers", golferId), { name: tidy, nameKey: key }, { merge: true });
+  await setDoc(ref("golferNames", key), { golferId, name: tidy });
+  if (before.nameKey) { try { await deleteDoc(ref("golferNames", before.nameKey)); } catch {} }
+  return { ok: true };
 }
 
 
@@ -627,32 +708,19 @@ export function restoreBackup({ golfers = [], courses = [], rounds = [] }) {
  * feel broken.
  */
 export async function linkGolferForMember(displayName) {
-  const { getDocs } = fb.mod.store;
-  const wanted = String(displayName || "").trim().toLowerCase();
-  if (!wanted) return null;
+  const name = String(displayName || "").trim();
+  if (!name) return null;
 
-  let existing = null;
-  try {
-    const snap = await getDocs(col("associations", assocId, "golfers"));
-    snap.forEach((d) => {
-      const g = d.data();
-      if (!existing && String(g.name || "").trim().toLowerCase() === wanted) existing = g;
-    });
-  } catch { /* offline, or not readable yet — fall through and create one */ }
+  /* addGolfer already reuses an existing person if the name matches, so a
+     member joining a second group lands on the same record and keeps their
+     handicap rather than starting again. */
+  const { golfer } = await addGolfer({ name });
 
-  if (existing) {
-    if (!existing.linkedUid) {
-      outbox.enqueue({ type: "update", path: ["associations", assocId, "golfers", existing.id],
-        data: { linkedUid: uid }, opId: `golfer-link-${existing.id}` });
-      flush();
-    }
-    return { ...existing, linkedUid: uid };
+  if (!golfer.linkedUid) {
+    outbox.enqueue({ type: "update", path: ["golfers", golfer.id],
+      data: { linkedUid: uid }, opId: `golfer-link-${golfer.id}` });
+    flush();
   }
-
-  const golfer = { ...model.buildGolfer({ name: displayName }), linkedUid: uid };
-  outbox.enqueue({ type: "set", path: ["associations", assocId, "golfers", golfer.id],
-    data: golfer, opId: `golfer-create-${golfer.id}` });
-  flush();
   return golfer;
 }
 
@@ -661,3 +729,38 @@ export const myGolferId = (golfers) => {
   const mine = (golfers || []).find((g) => g.linkedUid === uid);
   return mine ? mine.id : "";
 };
+
+
+/* ---------------- the groups this person belongs to ---------------- */
+
+/* Firestore cannot ask "which groups am I in" directly without a collection
+   group query and an index, so membership is remembered on the device as it
+   happens. It is a convenience list, not a source of truth — the rules still
+   decide what can actually be read. */
+const GROUPS_KEY = "golf:v2:groups";
+
+export function rememberGroup(id, name) {
+  try {
+    const list = JSON.parse(localStorage.getItem(GROUPS_KEY) || "[]");
+    const without = list.filter((g) => g.id !== id);
+    localStorage.setItem(GROUPS_KEY, JSON.stringify([...without, { id, name }]));
+  } catch {}
+}
+
+export function knownGroups() {
+  try { return JSON.parse(localStorage.getItem(GROUPS_KEY) || "[]"); } catch { return []; }
+}
+
+export function forgetGroup(id) {
+  try {
+    const list = JSON.parse(localStorage.getItem(GROUPS_KEY) || "[]");
+    localStorage.setItem(GROUPS_KEY, JSON.stringify(list.filter((g) => g.id !== id)));
+  } catch {}
+}
+
+/* Starting a second or third group, once you already belong to one. */
+export async function createAnotherGroup({ name, displayName }) {
+  const created = await createAssociation({ name, displayName });
+  await linkGolferForMember(displayName);
+  return created;
+}

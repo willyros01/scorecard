@@ -76,7 +76,14 @@ export async function run({ db, mod, uid, v1, assocName, displayName }) {
   await head.commit();
 
   await commitInChunks(courses, (c) => ["courses", c.id], "courses");
-  await commitInChunks(golfers, (g) => ["associations", assocId, "golfers", g.id], "golfers");
+
+  /* Golfers are people and live at the top level, so an imported player who
+     also appears in another group keeps one handicap rather than two. */
+  await commitInChunks(golfers, (g) => ["golfers", g.id], "golfers");
+  await commitInChunks(golfers.map((g) => ({ golferId: g.id, name: g.name })),
+    (g) => ["golferNames", model.nameKey(g.name)], "golfers");
+  await commitInChunks(golfers.map((g) => ({ golferId: g.id, addedAt: Date.now() })),
+    (g) => ["associations", assocId, "roster", g.golferId], "golfers");
 
   /* Rounds carry enteredAt so the 24-hour rule has something to measure
      against. Imported rounds are historical, so the window has long passed —
@@ -98,7 +105,7 @@ export async function run({ db, mod, uid, v1, assocName, displayName }) {
 export async function verify({ db, mod, assocId, expected }) {
   const { getDocs, collection } = mod;
   const [golfers, rounds] = await Promise.all([
-    getDocs(collection(db, "associations", assocId, "golfers")),
+    getDocs(collection(db, "associations", assocId, "roster")),
     getDocs(collection(db, "associations", assocId, "rounds")),
   ]);
   return {

@@ -60,6 +60,9 @@ export const courseHandicap = (index, slopeRating, courseRating, par) =>
    differentials, so posting a round never has to query a round history.
    Entries are { roundId, date, differential }, held newest first. */
 
+/* Entries carry their group. A rebuild triggered in one group replaces only
+   that group's entries and leaves the rest alone — without this, editing a
+   round in group one would silently drop every round played in group two. */
 export function insertIntoWindow(window, entry, limit = 20) {
   const without = (window || []).filter((e) => e.roundId !== entry.roundId);
   const merged = [...without, entry].sort(
@@ -73,6 +76,16 @@ export function removeFromWindow(window, roundId) {
 }
 
 /* The window is newest-first; the index calculation wants oldest-first. */
+export const windowFromOtherGroups = (window, assocId) =>
+  (window || []).filter((e) => e.assocId && e.assocId !== assocId);
+
+export function mergeWindow(kept, fresh, limit = 20) {
+  const merged = [...kept, ...fresh].sort(
+    (a, b) => b.date.localeCompare(a.date) || String(b.roundId).localeCompare(String(a.roundId))
+  );
+  return merged.slice(0, limit);
+}
+
 export const windowToChronological = (window) =>
   [...(window || [])].sort((a, b) => a.date.localeCompare(b.date)).map((e) => e.differential);
 
@@ -127,14 +140,30 @@ export function buildRound({
   };
 }
 
+/* A golfer is a person, not a group member.
+ *
+ * One record, one handicap index, however many groups they play in. This is
+ * not a convenience: the World Handicap System defines an index over a
+ * player's last twenty rounds, full stop. Splitting those rounds across groups
+ * and averaging each pile separately produces two indexes, neither of which is
+ * the player's handicap. It would look tidy and be wrong.
+ */
 export const buildGolfer = ({ name, linkedUid = null, id = newId() }) => ({
   id,
   name: String(name).trim(),
+  nameKey: nameKey(name),
   linkedUid,
   handicapIndex: null,
   roundCount: 0,
   recentWindow: [],
 });
+
+/* Names are matched on this, so "Willy  Rosales" and "willy rosales" are the
+   same person. It is also the key of the uniqueness index. */
+export const nameKey = (name) =>
+  String(name || "").trim().toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
 
 export const buildCourse = ({ name, club = "", location = "", country = "", tees, createdBy, id = newId() }) => ({
   id,
@@ -200,7 +229,7 @@ export function migrateFromV1(v1, { assocId, assocName, ownerUid, joinCode }) {
 
   const golfers = (v1.golfers || []).map((name) =>
     buildGolfer({ id: stableId("golfer", name), name })
-  );
+  );   /* buildGolfer sets nameKey, which the uniqueness index needs */
   const golferByName = new Map(golfers.map((g) => [g.name, g]));
 
   /* Chronological, so each golfer's window ends up in the right order. */
@@ -240,7 +269,7 @@ export function migrateFromV1(v1, { assocId, assocName, ownerUid, joinCode }) {
     const theirs = rounds.filter((r) => r.golferId === golfer.id);
     let window = [];
     for (const r of theirs) {
-      window = insertIntoWindow(window, { roundId: r.id, date: r.date, differential: r.differential });
+      window = insertIntoWindow(window, { roundId: r.id, date: r.date, differential: r.differential, assocId });
     }
     golfer.recentWindow = window;
     golfer.roundCount = theirs.length;

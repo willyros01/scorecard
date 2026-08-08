@@ -74,15 +74,30 @@ service cloud.firestore {
 
         allow read: if isMember(assocId);
 
-        /* Joining. Note what this permits: a signed-in stranger may create
-           their OWN membership, and only if they present the correct code and
-           ask for the ordinary member role. The rules can read the association
-           document to compare codes even though that person cannot read it
-           themselves, so the code is never exposed. */
+        /* Two ways a membership is created, and only ever for yourself.
+         *
+         * 1. The owner. Whoever created the group writes their own membership
+         *    as owner. Proven against ownerUid on the group document, which
+         *    only they could have set, because creating the group required it
+         *    to equal their own account.
+         *
+         * 2. Everybody else. They present the join code and ask for the
+         *    ordinary member role. The rules can read the group document to
+         *    compare codes even though that person cannot read it themselves,
+         *    so the code is never exposed.
+         *
+         * The owner case was missing before, which meant creating a group
+         * always failed at this step and left the group behind with nobody in
+         * it. */
         allow create: if signedIn()
           && memberUid == request.auth.uid
-          && request.resource.data.role == 'member'
-          && request.resource.data.joinCode == association(assocId).joinCode;
+          && (
+            (request.resource.data.role == 'owner'
+              && association(assocId).ownerUid == request.auth.uid)
+            ||
+            (request.resource.data.role == 'member'
+              && request.resource.data.joinCode == association(assocId).joinCode)
+          );
 
         /* Only the owner changes roles, and never the owner's own. */
         allow update: if isOwner(assocId)
@@ -94,16 +109,13 @@ service cloud.firestore {
           && (memberUid == request.auth.uid || isOwner(assocId));
       }
 
-      /* ---------------- golfers (the roster) ---------------- */
+      /* ---------------- roster: which golfers play in this group ---------------- */
 
-      match /golfers/{golferId} {
+      /* Just a list of ids. The golfers themselves live at the top level,
+         because a person belongs to no single group. */
+      match /roster/{golferId} {
         allow read: if isMember(assocId);
-
-        /* Any member may add a golfer and may write index updates, because
-           posting a round for somebody moves that golfer's index. */
         allow create, update: if isMember(assocId);
-
-        /* Deleting a golfer discards their history, so it is an admin act. */
         allow delete: if isAdmin(assocId);
       }
 
@@ -141,6 +153,35 @@ service cloud.firestore {
         allow update, delete: if isAdmin(assocId)
           || (isMember(assocId) && resource.data.createdBy == request.auth.uid);
       }
+    }
+
+    /* ---------------- golfers: people, not group members ---------------- */
+
+    /* A golfer exists once, at the top level, and carries one handicap index
+     * built from their last twenty rounds wherever those were played.
+     *
+     * This is the only structure that produces a correct index for somebody
+     * who plays in more than one group. Storing golfers under a group would
+     * give them one index per group, each computed from a slice of their golf
+     * and none of them their actual handicap.
+     *
+     * Readable and writable by anyone signed in, because posting a round for
+     * a playing partner has to move that partner's index, and the partner may
+     * be in a group you are not. Deleting is not permitted from the app —
+     * rounds reference golfers, and an orphaned round has no owner. */
+    match /golfers/{golferId} {
+      allow read: if signedIn();
+      allow create, update: if signedIn();
+      allow delete: if false;
+    }
+
+    /* Name uniqueness. One document per name, so two people cannot both be
+       "Willy Rosales" and rounds can never be filed against the wrong one.
+       Firestore refuses a second document with the same id, which is what
+       makes the guarantee real rather than a check the app could skip. */
+    match /golferNames/{nameKey} {
+      allow read: if signedIn();
+      allow create, update, delete: if signedIn();
     }
 
     /* ---------------- join codes ---------------- */

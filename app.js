@@ -17,6 +17,10 @@ let rounds = [];
 let courses = [];
 let games = [];
 let members = [];
+let roster = [];        /* golfer ids playing in this group */
+let allGolfers = [];    /* every golfer, everywhere */
+let switching = false;
+let newGroupDraft = false;
 
 let tab = "enter";
 let sync = { text: "Starting", alert: false };
@@ -40,8 +44,11 @@ const sheetEl = document.getElementById("sheet");
 const tabsEl = document.getElementById("tabs");
 
 const sortedCourses = () => [...courses].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
-const sortedGolfers = () => [...golfers].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
-const golferById = (id) => golfers.find((g) => g.id === id);
+/* The people on this group's roster, resolved from the global golfer list. */
+const sortedGolfers = () => allGolfers
+  .filter((g) => roster.includes(g.id))
+  .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+const golferById = (id) => allGolfers.find((g) => g.id === id);
 const courseById = (id) => courses.find((c) => c.id === id);
 
 /* ================= appearance ================= */
@@ -536,8 +543,21 @@ function screenManage() {
   if (!db.canManage()) return empty("Manage is for organisers", "Your group's organiser looks after the roster and courses. You can post rounds on the Enter tab.");
 
   return `${flashBar()}
+  ${newGroupDraft ? `<section class="panel">
+    <div class="card editor">
+      <div class="editor-title">Start another group</div>
+      <p class="hint">A separate set of rounds and games. Golfers you add to both keep one handicap across them.</p>
+      <label class="lbl">Group name</label>
+      <input class="field" name="new-group-name" placeholder="Tuesday Fourball">
+      <div class="inline-actions stacked">
+        <button class="btn" data-act="save-new-group">Create it</button>
+        <button class="btn ghost" data-act="cancel-new-group">Cancel</button>
+      </div>
+    </div>
+  </section>` : ""}
+
   <section class="panel">
-    <div class="panel-head"><h2 class="panel-title">Golfers</h2><span class="panel-count">${golfers.length || ""}</span></div>
+    <div class="panel-head"><h2 class="panel-title">Golfers in this group</h2><span class="panel-count">${golfers.length || ""}</span></div>
     <div class="card">
       ${golfers.length ? `<div class="list">
         ${sortedGolfers().map((g) => {
@@ -553,8 +573,8 @@ function screenManage() {
           return `<div class="list-row">
             <span class="grow"><span class="name">${esc(g.name)}</span><br>
               <span class="sub">${g.handicapIndex == null ? "no index yet" : `index ${(+g.handicapIndex).toFixed(1)}`} · ${g.roundCount || 0} round${g.roundCount === 1 ? "" : "s"}</span></span>
-            <button class="rowbtn" data-rename="${g.id}">Edit</button>
-            <button class="rowbtn warn" data-del-golfer="${g.id}" ${used ? "disabled title='Has rounds'" : ""}>Delete</button>
+            <button class="rowbtn" data-rename="${g.id}">Rename</button>
+            <button class="rowbtn warn" data-del-golfer="${g.id}">Remove</button>
           </div>`;
         }).join("")}
       </div>` : `<p class="blank">Nobody on the roster yet.</p>`}
@@ -563,6 +583,7 @@ function screenManage() {
         <div class="inline-actions"><button class="btn compact" data-act="add-golfer">Add golfer</button></div>
       </div>
     </div>
+    <p class="hint">Rename changes that person in every group. Remove takes them off this group's roster only — their rounds and handicap stay.</p>
   </section>
 
   <section class="panel">
@@ -592,6 +613,27 @@ function screenManage() {
 
 /* Everything to do with people, permissions and settings, in one place that
    only the owner can reach. Nobody else knows it exists. */
+/* Every group this person belongs to, with a way to start another.
+   Only shown when it is relevant — one group and there is nothing to switch. */
+function groupSwitcher() {
+  const groups = db.knownGroups();
+  const current = db.currentAssociation();
+  return `<div class="sheet-body">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <h2>Your groups</h2><button class="rowbtn" data-close="1">Close</button></div>
+    <div class="card list" style="margin-top:0.6rem">
+      ${groups.map((g) => `<button class="list-row" data-goto-group="${esc(g.id)}">
+        <span class="grow"><span class="name">${esc(g.name)}</span>${g.id === current ? `<br><span class="sub">you are here</span>` : ""}</span>
+        ${g.id === current ? `<span class="chev">✓</span>` : `<span class="chev">›</span>`}
+      </button>`).join("")}
+    </div>
+    <div class="inline-actions stacked">
+      <button class="btn ghost" data-act="new-group">Start another group</button>
+    </div>
+    <p class="hint">A golfer's handicap is the same in every group — it is built from all their rounds, wherever they played them.</p>
+  </div>`;
+}
+
 function screenAdmin() {
   if (!db.isOwner()) return empty("Not your area", "Only the group owner manages people and settings.");
 
@@ -875,6 +917,8 @@ function courseEditor() {
   </div>`;
 }
 
+function refreshScope() { golfers = sortedGolfers(); }
+
 function versionBlock() {
   return `<section class="version">
     <div><b>The Scorecard</b> <span class="mono">v${VERSION}</span></div>
@@ -920,7 +964,10 @@ function render() {
       const screens = { enter: screenEnter, history: screenHistory, summary: screenSummary,
                         games: screenGames, manage: screenManage, admin: screenAdmin };
       view.innerHTML = (screens[tab] || screenEnter)();
-      document.getElementById("brandSub").textContent = association ? association.name : "Handicap tracking";
+      const sub = document.getElementById("brandSub");
+      const groups = db.knownGroups();
+      sub.textContent = (association ? association.name : "Handicap tracking") + (groups.length > 1 ? "  ▾" : "");
+      sub.dataset.act = "switch-group";
     }
   } catch (e) {
     view.innerHTML = `<div class="fatal"><div class="fatal-mark">!</div>
@@ -963,6 +1010,12 @@ tabsEl.addEventListener("click", (e) => {
 });
 
 document.getElementById("statusBtn").onclick = () => openBackupSheet();
+
+document.getElementById("brandSub").onclick = () => {
+  if (!db.currentAssociation()) return;
+  sheetEl.hidden = false;
+  sheetEl.innerHTML = groupSwitcher();
+};
 
 view.addEventListener("input", (e) => {
   const n = e.target.name;
@@ -1026,7 +1079,11 @@ view.addEventListener("click", async (e) => {
   }
   if (d.rename) { editingGolfer = d.rename; return render(); }
   if (d.course) { openCourse = openCourse === d.course ? null : d.course; return render(); }
-  if (d.delGolfer) { db.deleteGolfer(d.delGolfer); flashMsg("Removed from the roster"); return render(); }
+  if (d.delGolfer) {
+    db.removeFromRoster(d.delGolfer);
+    flashMsg("Taken off this group's roster. Their rounds and handicap are untouched.");
+    return render();
+  }
   if (d.rmTee) { courseDraft.tees.splice(+d.rmTee, 1); return render(); }
   if (d.role) {
     const [memberUid, role] = d.role.split(":");
@@ -1078,6 +1135,21 @@ view.addEventListener("click", async (e) => {
     case "import-v1": return importV1();
 
     case "add-golfer": return addGolfer();
+    case "save-new-group": {
+      const field = view.querySelector('[name="new-group-name"]');
+      const name = (field ? field.value : "").trim();
+      if (!name) { flashMsg("Give the group a name"); return; }
+      newGroupDraft = false;
+      flashMsg("Creating…");
+      try {
+        const me = members.find((m) => m.uid === db.status().uid);
+        const created = await db.createAnotherGroup({ name, displayName: me ? me.displayName : "Me" });
+        await start(created.id);
+        flashMsg(`${name} created. You are its owner.`);
+      } catch { flashMsg("Couldn't create it — the red bar above says why."); render(); }
+      return;
+    }
+    case "cancel-new-group": newGroupDraft = false; return render();
     case "save-rename": return saveRename();
     case "cancel-rename": editingGolfer = null; return render();
 
@@ -1132,8 +1204,28 @@ view.addEventListener("click", async (e) => {
   }
 });
 
-sheetEl.addEventListener("click", (e) => {
+sheetEl.addEventListener("click", async (e) => {
   if (e.target === sheetEl || e.target.closest("[data-close]")) { sheetEl.hidden = true; return; }
+
+  const goto = e.target.closest("[data-goto-group]");
+  if (goto) {
+    sheetEl.hidden = true;
+    const id = goto.dataset.gotoGroup;
+    if (id === db.currentAssociation()) return;
+    switching = true; render();
+    const member = await db.loadMembership(id);
+    switching = false;
+    if (member) { await start(id); flashMsg("Switched"); }
+    else flashMsg("You are no longer a member of that group.");
+    return;
+  }
+
+  if (e.target.closest('[data-act="new-group"]')) {
+    sheetEl.hidden = true;
+    newGroupDraft = true;
+    render();
+    return;
+  }
   const send = e.target.closest("[data-send]");
   if (!send) return;
   const text = sheetEl.dataset.text || "";
@@ -1210,29 +1302,36 @@ async function createGroup(name) {
     flashMsg("Ready. Post a round, or invite the others from the Admin tab.");
   } catch {
     joining = false;
-    flashMsg("Couldn't set up the group. See the message at the top.");
+    flashMsg("Couldn't set up the group — the red bar above says why.");
     render();
   }
 }
 
-function addGolfer() {
+async function addGolfer() {
   const input = view.querySelector('[name="new-golfer"]');
   const name = (input ? input.value : "").trim();
   if (!name) { flashMsg("Type a name first"); return; }
-  if (golfers.some((g) => g.name.toLowerCase() === name.toLowerCase())) { flashMsg(`${name} is already on the roster`); return; }
-  db.addGolfer({ name });
-  flashMsg(`${name} added`);
+  if (golfers.some((g) => g.name.toLowerCase() === name.toLowerCase())) { flashMsg(`${name} is already in this group`); return; }
+  try {
+    const { golfer, reused } = await db.addGolfer({ name });
+    flashMsg(reused
+      ? `${golfer.name} added — same person as in your other group, so their handicap comes with them.`
+      : `${golfer.name} added`);
+  } catch { flashMsg("Couldn't add them — the red bar above says why."); }
+  render();
 }
 
-function saveRename() {
+async function saveRename() {
   const input = view.querySelector('[name="rename-golfer"]');
   const next = (input ? input.value : "").trim();
   if (!next) { flashMsg("Type a name first"); return; }
-  /* Rounds reference the golfer by id, so a rename touches one document —
-     unlike version 1, where every round had to be rewritten. */
-  db.renameGolfer(editingGolfer, next);
+  const id = editingGolfer;
   editingGolfer = null;
-  flashMsg(`Renamed to ${next}`);
+  const result = await db.renameGolfer(id, next);
+  if (result.ok) flashMsg(`Renamed to ${next}. That is their name in every group.`);
+  else if (result.reason === "TAKEN") flashMsg(`Another golfer is already called ${next}. Names have to be unique — try adding an initial.`);
+  else flashMsg("Couldn't rename them.");
+  render();
 }
 
 function saveCourse() {
@@ -1307,7 +1406,8 @@ async function start(assocId) {
     lookup.setSharedKey(doc.lookupKey || "");
     render();
   });
-  db.watchGolfers((list) => { golfers = list; render(); });
+  db.watchGolfers((list) => { allGolfers = list; refreshScope(); render(); });
+  db.watchRoster((ids) => { roster = ids; refreshScope(); render(); });
   db.watchRounds((list) => { rounds = list; render(); });
   db.watchCourses((list) => { courses = list; render(); });
   db.watchGames((list) => { games = list; render(); });
