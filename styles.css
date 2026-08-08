@@ -212,13 +212,7 @@ body { font-size: 1rem; }
 :root { --muted: #55635C; }
 [data-theme="dark"] { --muted: #A9BBB2; }
 
-/* an obvious, labelled add row instead of a faint ＋ */
-.addrow { display: flex; gap: 8px; padding: 10px; align-items: stretch; }
-.addrow input {
-  flex: 1; min-width: 0; font-size: 1.05rem; padding: 0.8rem 0.75rem;
-  border: 1px solid var(--rule); border-radius: 10px; background: var(--paper); color: var(--ink);
-}
-.addrow .addbtn { width: auto; flex: 0 0 auto; white-space: nowrap; padding: 0.8rem 1rem; }
+
 
 /* ---- labelled row buttons: readable words, not tiny icons ---- */
 .rowbtn {
@@ -229,7 +223,7 @@ body { font-size: 1rem; }
 [data-theme="dark"] .rowbtn { color: var(--pine-ink); }
 .rowbtn.warn { color: var(--pencil); border-color: var(--pencil); }
 .rowbtn[disabled] { opacity: .35; }
-.addrow .btn.ghost { flex: 0 0 auto; }
+
 
 /* ---- Manage: collapsed course rows ---- */
 .course-head {
@@ -246,5 +240,76 @@ body { font-size: 1rem; }
   font-family: var(--mono); font-size: 0.88rem; color: var(--muted);
   padding: 0.3rem 0; border-top: 1px dotted var(--rule);
 }
-.course-actions { display: flex; gap: 8px; margin-top: 12px; }
-.course-actions .rowbtn { margin-left: 0; }
+
+
+
+/* ================= Manage: one layout system =================
+   Every panel, every input row and every action group on this screen uses the
+   same spacing scale. The golfer and course areas were built weeks apart and
+   had drifted apart visually; this brings them back onto one grid. */
+
+.panel + .panel { margin-top: 30px; }
+.panel-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 12px; margin-bottom: 10px; padding: 0 2px;
+}
+.panel-title {
+  font-family: var(--display); font-weight: 400; font-size: 1.3rem;
+  margin: 0; color: var(--ink);
+}
+.panel-count { font-family: var(--mono); font-size: 0.95rem; color: var(--muted); }
+
+.card.padded { padding: 1rem; }
+.blank { margin: 0; padding: 1.1rem 1rem; color: var(--muted); font-size: 0.95rem; }
+
+/* An input with its action beneath it. Stacking rather than sitting side by
+   side means the button keeps a full, readable label at any text size. */
+.inline-form { padding: 0.9rem; }
+.inline-form.bordered { border-top: 1px solid var(--rule); }
+.inline-input {
+  display: block; width: 100%; font-size: 1.05rem; padding: 0.8rem 0.75rem;
+  border: 1px solid var(--rule); border-radius: 10px;
+  background: var(--paper); color: var(--ink); margin-bottom: 0.7rem;
+}
+[data-theme="dark"] .inline-input { background: rgba(255,255,255,.04); }
+
+.inline-actions { display: flex; gap: 0.6rem; flex-wrap: wrap; }
+.inline-actions .btn { width: auto; flex: 1 1 auto; }
+.inline-actions.stacked { margin-top: 0.9rem; }
+.inline-actions.spread { margin-top: 0.9rem; }
+.inline-actions.spread .rowbtn { margin-left: 0; flex: 1 1 auto; text-align: center; }
+.btn.compact { min-height: 48px; padding: 0.75rem 1rem; }
+
+.hint { font-size: 0.92rem; color: var(--muted); margin: 0.7rem 0 0; line-height: 1.5; }
+
+/* Search results sit inside the editor, so they are tinted rather than
+   outlined — a second box border inside a box reads as clutter. */
+.results {
+  margin-top: 0.9rem; border-radius: 10px; overflow: hidden;
+  background: var(--card); border: 1px solid var(--rule);
+}
+
+.card.editor { padding: 1rem; border-width: 2px; border-color: var(--pine); margin-top: 0.9rem; }
+[data-theme="dark"] .card.editor { border-color: #7EBEA0; }
+.editor-title { font-family: var(--display); font-size: 1.15rem; margin-bottom: 0.4rem; }
+.lbl {
+  display: block; font-size: 0.8rem; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--muted); margin: 1.2rem 0 0.45rem;
+}
+.editor-actions { margin-top: 1.3rem; }
+
+/* Tees get one card each. Four inputs on a single row was unreadable on a
+   phone and impossible at larger text sizes. */
+.tee-row {
+  border: 1px solid var(--rule); border-radius: 10px;
+  padding: 0.8rem; margin-bottom: 0.7rem; background: var(--card);
+}
+.tee-head { display: flex; gap: 0.6rem; align-items: center; }
+.tee-head .field { flex: 1; min-width: 0; }
+.tee-head .rowbtn { margin-left: 0; flex: 0 0 auto; }
+.tee-nums { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.6rem; margin-top: 0.6rem; }
+.tee-nums label {
+  display: block; font-size: 0.78rem; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--muted);
+}
+.tee-nums .field { margin-top: 0.3rem; text-align: center; padding: 0.7rem 0.4rem; }

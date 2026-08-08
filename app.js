@@ -49,6 +49,11 @@ function diffsFor(golfer) {
     .sort((a, b) => a.date.localeCompare(b.date)).map((r) => r.differential);
 }
 const indexFor = (g) => handicapIndex(diffsFor(g));
+
+/* Courses are listed alphabetically everywhere. localeCompare rather than a
+   plain sort, so accented and non-English names land where a person expects. */
+const sortedCourses = () =>
+  [...state.courses].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
 const activeGolfers = () => state.golfers.filter((g) => state.rounds.some((r) => r.golfer === g));
 
 /* ================= text size ================= */
@@ -121,7 +126,7 @@ function screenEnter() {
     </div>
     <div><div class="eyebrow">Course</div>
       <select class="field" name="courseId"><option value="">Select…</option>
-      ${state.courses.map((c) => `<option value="${c.id}" ${c.id === form.courseId ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select>
+      ${sortedCourses().map((c) => `<option value="${c.id}" ${c.id === form.courseId ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select>
     </div>
     ${course ? `<div><div class="eyebrow">Tees</div><div class="tees">
       ${course.tees.map((t) => `<button class="tee ${t.id === form.teeId ? "on" : ""}" data-tee="${t.id}">
@@ -161,7 +166,7 @@ function screenHistory() {
     <select class="field" name="f-year"><option value="">All years</option>
       ${years.map((y) => `<option ${y === filter.year ? "selected" : ""}>${y}</option>`).join("")}</select>
     <select class="field" name="f-course"><option value="">All courses</option>
-      ${state.courses.map((c) => `<option value="${c.id}" ${c.id === filter.courseId ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select>
+      ${sortedCourses().map((c) => `<option value="${c.id}" ${c.id === filter.courseId ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select>
   </div>
   ${chips ? `<div class="pills">${chips}<button class="linkbtn" data-act="clear-filters">Clear</button></div>` : ""}
   ${rows.length === 0 ? empty("No rounds here yet", "Post one from the Enter tab, or widen the filters above.") : `
@@ -295,38 +300,51 @@ let openCourse = null;
 const SUPER_ADMIN = "willyros01@gmail.com";
 
 function screenManage() {
+  const golfers = state.golfers;
+  const courses = sortedCourses();
+
   return `
-  <section>
-    <div class="eyebrow">Golfers</div>
-    <div class="card list">
-      ${state.golfers.map((g) => {
-        const used = state.rounds.some((r) => r.golfer === g);
-        if (editingGolfer === g) {
-          return `<div class="addrow">
-            <input name="rename-golfer" value="${esc(g)}" autocomplete="off">
-            <button class="btn addbtn" data-act="save-rename">Save</button>
-            <button class="btn ghost addbtn" data-act="cancel-rename">Cancel</button>
+  <section class="panel">
+    <div class="panel-head">
+      <h2 class="panel-title">Golfers</h2>
+      <span class="panel-count">${golfers.length || ""}</span>
+    </div>
+    <div class="card">
+      ${golfers.length ? `<div class="list">
+        ${golfers.map((g) => {
+          const used = state.rounds.some((r) => r.golfer === g);
+          if (editingGolfer === g) {
+            return `<div class="inline-form">
+              <input name="rename-golfer" class="inline-input" value="${esc(g)}" autocomplete="off">
+              <div class="inline-actions">
+                <button class="btn compact" data-act="save-rename">Save</button>
+                <button class="btn ghost compact" data-act="cancel-rename">Cancel</button>
+              </div>
+            </div>`;
+          }
+          return `<div class="list-row">
+            <span class="grow name">${esc(g)}</span>
+            <button class="rowbtn" data-rename="${esc(g)}">Edit</button>
+            <button class="rowbtn warn" data-del-golfer="${esc(g)}" ${used ? "disabled title='Has posted rounds — delete those first'" : ""}>Delete</button>
           </div>`;
-        }
-        return `<div class="list-row"><span class="grow name">${esc(g)}</span>
-          <button class="rowbtn" data-rename="${esc(g)}">Edit</button>
-          <button class="rowbtn warn" data-del-golfer="${esc(g)}" ${used ? "disabled title='Has posted rounds — delete those first'" : ""}>Delete</button></div>`;
-      }).join("")}
-      <div class="addrow">
-        <input name="new-golfer" placeholder="Type a name" autocomplete="off">
-        <button class="btn addbtn" data-act="add-golfer">Add golfer</button>
+        }).join("")}
+      </div>` : `<p class="blank">Nobody on the roster yet.</p>`}
+      <div class="inline-form bordered">
+        <input name="new-golfer" class="inline-input" placeholder="Type a name" autocomplete="off">
+        <div class="inline-actions">
+          <button class="btn compact" data-act="add-golfer">Add golfer</button>
+        </div>
       </div>
     </div>
   </section>
-  <section>
-    <div style="display:flex;justify-content:space-between;align-items:center">
-      <div class="eyebrow" style="margin:0">Courses and tees</div>
-      <button class="linkbtn" data-act="new-course">＋ New</button>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2 class="panel-title">Courses</h2>
+      ${courseDraft ? "" : `<button class="linkbtn" data-act="new-course">Add a course</button>`}
     </div>
-    <div class="stack" style="margin-top:8px">
-      ${state.courses.length === 0 && !courseDraft ? `<div class="card" style="padding:20px;text-align:center"><p class="small muted" style="margin:0">Add a course with its rating and slope — both are printed on the scorecard.</p></div>` : ""}
-      ${state.courses.length ? `<div class="card list">
-      ${state.courses.map((c) => {
+    ${courses.length ? `<div class="card list">
+      ${courses.map((c) => {
         const used = state.rounds.some((r) => r.courseId === c.id);
         const open = openCourse === c.id;
         return `<div>
@@ -339,29 +357,30 @@ function screenManage() {
           </button>
           ${open ? `<div class="course-body">
             ${c.tees.map((t) => `<div class="teeline"><span>${esc(t.name)}</span><span>${(+t.rating).toFixed(1)} / ${t.slope} · par ${t.par}</span></div>`).join("")}
-            <div class="course-actions">
+            <div class="inline-actions spread">
               <button class="rowbtn" data-edit-course="${c.id}">Edit</button>
               <button class="rowbtn warn" data-del-course="${c.id}" ${used ? "disabled title='Rounds use this course'" : ""}>Delete</button>
             </div>
           </div>` : ""}
         </div>`;
       }).join("")}
-      </div>` : ""}
-      ${courseDraft ? courseEditor() : ""}
-    </div>
+    </div>` : (courseDraft ? "" : `<div class="card"><p class="blank">No courses yet. Add one with its rating and slope — both are printed on the scorecard.</p></div>`)}
+    ${courseDraft ? courseEditor() : ""}
   </section>
-  <section>
-    <div class="eyebrow">Sync</div>
-    <div class="card" style="padding:14px">
-      <div class="small">${esc(db.accountLabel())}</div>
-      <div class="sub" style="margin-bottom:10px">${esc(sync.text)}${db.hasPending() ? " · changes waiting to upload" : ""}</div>
-      <div class="row">
+
+  <section class="panel">
+    <div class="panel-head"><h2 class="panel-title">Sync</h2></div>
+    <div class="card padded">
+      <div class="name">${esc(db.accountLabel())}</div>
+      <div class="sub">${esc(sync.text)}${db.hasPending() ? " · changes waiting to upload" : ""}</div>
+      <div class="inline-actions stacked">
         <button class="btn ghost" data-act="google">Use a Google account</button>
         <button class="btn ghost" data-act="backup">Backup text</button>
       </div>
+      <p class="hint">Signing in with Google carries this scorecard to your other devices.</p>
     </div>
-    <p class="small muted" style="margin-top:8px">Signing in with Google carries this scorecard to your other devices.</p>
   </section>
+
   ${lookupSection()}`;
 }
 
@@ -392,287 +411,52 @@ function lookupSection() {
 
 function courseEditor() {
   const d = courseDraft;
-  return `<div class="card" style="padding:14px;border-width:2px;border-color:var(--pine)">
-    <div class="eyebrow">Find a course by name</div>
-    <div class="row" style="gap:6px">
-      <input class="field" name="finder-q" value="${esc(finder.q)}" placeholder="e.g. Pebble Creek, or a club name">
-      <button class="btn" data-act="find" style="flex:0 0 92px" ${finder.busy ? "disabled" : ""}>${finder.busy ? "…" : "Search"}</button>
+  const existing = state.courses.some((c) => c.id === d.id);
+
+  return `<div class="card editor">
+    <div class="editor-title">${existing ? "Edit course" : "New course"}</div>
+
+    ${existing ? "" : `
+    <label class="lbl">Find it by name</label>
+    <div class="inline-form">
+      <input name="finder-q" class="inline-input" value="${esc(finder.q)}" placeholder="Course or club name" autocomplete="off">
+      <div class="inline-actions">
+        <button class="btn compact" data-act="find" ${finder.busy ? "disabled" : ""}>${finder.busy ? "Searching…" : "Search"}</button>
+      </div>
     </div>
-    ${finder.msg ? `<p class="small muted" style="margin-top:8px">${esc(finder.msg)}</p>` : ""}
-    ${finder.results.length ? `<div class="card list" style="margin-top:10px">
+    ${finder.msg ? `<p class="hint">${esc(finder.msg)}</p>` : ""}
+    ${finder.results.length ? `<div class="results list">
       ${finder.results.map((c, i) => `<button class="list-row" data-pick="${i}">
-        <span class="grow"><span class="name">${esc(c.name)}</span><br>
-        <span class="sub">${esc(c.where || "")}${c.where ? " · " : ""}${c.tees.length} rated tee${c.tees.length === 1 ? "" : "s"}</span></span>
-        <span class="caret">›</span></button>`).join("")}
-    </div>
-    <p class="small muted" style="margin-top:6px">Tap one to fill in the tees, then check them against the scorecard before saving.</p>` : ""}
-    <div class="eyebrow" style="margin-top:16px">Course name</div>
-    <input class="field" name="c-name" value="${esc(d.name)}" placeholder="Pebble Creek">
-    <div class="eyebrow" style="margin-top:12px">Tees</div>
-    ${d.tees.map((t, i) => `<div class="row" style="margin-bottom:8px;gap:6px">
-      <input class="field" data-tee-field="${i}:name" value="${esc(t.name)}" placeholder="Blue" style="flex:1.2">
-      <input class="field mono" data-tee-field="${i}:rating" value="${esc(t.rating)}" placeholder="Rating" inputmode="decimal">
-      <input class="field mono" data-tee-field="${i}:slope" value="${esc(t.slope)}" placeholder="Slope" inputmode="numeric">
-      <input class="field mono" data-tee-field="${i}:par" value="${esc(t.par)}" placeholder="Par" inputmode="numeric" style="flex:.7">
-      ${d.tees.length > 1 ? `<button class="iconbtn warn" data-rm-tee="${i}" style="flex:0">✕</button>` : ""}
+        <span class="grow">
+          <span class="name">${esc(c.name)}</span><br>
+          <span class="sub">${esc(c.where || "")}${c.where ? " · " : ""}${c.tees.length} rated tee${c.tees.length === 1 ? "" : "s"}</span>
+        </span>
+        <span class="chev">›</span>
+      </button>`).join("")}
+    </div>` : ""}`}
+
+    <label class="lbl">Course name</label>
+    <input class="field" name="c-name" value="${esc(d.name)}" placeholder="Royal Ontario" autocomplete="off">
+
+    <label class="lbl">Tees</label>
+    ${d.tees.map((t, i) => `<div class="tee-row">
+      <div class="tee-head">
+        <input class="field" data-tee-field="${i}:name" value="${esc(t.name)}" placeholder="Tee name, e.g. Blue" autocomplete="off">
+        ${d.tees.length > 1 ? `<button class="rowbtn warn" data-rm-tee="${i}">Remove</button>` : ""}
+      </div>
+      <div class="tee-nums">
+        <label>Rating<input class="field mono" data-tee-field="${i}:rating" value="${esc(t.rating)}" placeholder="71.2" inputmode="decimal"></label>
+        <label>Slope<input class="field mono" data-tee-field="${i}:slope" value="${esc(t.slope)}" placeholder="131" inputmode="numeric"></label>
+        <label>Par<input class="field mono" data-tee-field="${i}:par" value="${esc(t.par)}" placeholder="72" inputmode="numeric"></label>
+      </div>
     </div>`).join("")}
-    <button class="linkbtn" data-act="add-tee">＋ Add a tee</button>
-    <div class="row" style="margin-top:14px">
+    <button class="linkbtn" data-act="add-tee">Add another tee</button>
+
+    <div class="inline-actions stacked editor-actions">
       <button class="btn" data-act="save-course">Save course</button>
       <button class="btn ghost" data-act="cancel-course">Cancel</button>
     </div>
   </div>`;
-}
-
-/* ================= render ================= */
-function render() {
-  const screens = { enter: screenEnter, history: screenHistory, summary: screenSummary, share: screenShare, manage: screenManage };
-  try {
-    view.innerHTML = screens[tab]();
-  } catch (e) {
-    // A screen failed to draw. Say so and offer a way back instead of showing nothing.
-    view.innerHTML = `<div class="fatal"><div class="fatal-mark">!</div>
-      <h2>This screen couldn't be drawn</h2>
-      <p>Your rounds are safe. Try another tab, or reload.</p>
-      <button class="btn" data-act="recover">Back to Enter</button>
-      <details><summary>Technical detail</summary><pre>${esc(e && e.message)}</pre></details></div>`;
-  }
-  document.querySelectorAll(".tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === tab));
-  const btn = document.getElementById("statusBtn");
-  btn.textContent = sync.text;
-  btn.classList.toggle("alert", !!sync.alert);
-  paintAlert();
-  if (window.__scorecardBooted) window.__scorecardBooted();
-}
-
-/* One banner, above the screen. Never blocks what you were doing. */
-let dismissed = "";
-function paintAlert() {
-  const el = document.getElementById("alert");
-  const err = sync.error;
-  if (!err || dismissed === err.short + err.full) { el.hidden = true; return; }
-  el.hidden = false;
-  el.innerHTML = `<b>${esc(err.short)}</b> ${esc(err.full)} <button class="linkbtn" data-act="dismiss-alert">Dismiss</button>`;
-}
-document.getElementById("alert").addEventListener("click", (e) => {
-  if (e.target.dataset.act === "dismiss-alert" && sync.error) {
-    dismissed = sync.error.short + sync.error.full;
-    paintAlert();
-  }
-});
-
-function flashMsg(msg) { flash = msg; render(); setTimeout(() => { flash = null; render(); }, 2600); }
-
-/* ================= events ================= */
-document.querySelector(".tabs").addEventListener("click", (e) => {
-  const b = e.target.closest("button[data-tab]"); if (!b) return;
-  tab = b.dataset.tab; if (tab === "enter") editingId = null; render();
-});
-document.getElementById("statusBtn").onclick = () => openBackup();
-
-// Text fields update state without a re-render, so the keyboard and caret stay put.
-view.addEventListener("input", (e) => {
-  const n = e.target.name;
-  if (n === "gross" || n === "adjusted") {
-    form[n] = e.target.value.replace(/\D/g, "");
-    e.target.value = form[n];
-    return updatePreview();
-  }
-  if (n === "notes") { form.notes = e.target.value; return; }
-  if (n === "finder-q") { finder.q = e.target.value; return; }
-  if (e.target.dataset.teeField) {
-    const [i, key] = e.target.dataset.teeField.split(":");
-    courseDraft.tees[+i][key] = e.target.value;
-    return;
-  }
-  if (n === "c-name") courseDraft.name = e.target.value;
-});
-
-// Redraw only the differential panel and the post button while typing a score.
-function updatePreview() {
-  const course = state.courses.find((c) => c.id === form.courseId);
-  const tee = course && course.tees.find((t) => t.id === form.teeId);
-  const box = view.querySelector(".preview");
-  const btn = view.querySelector('[data-act="post"]');
-  if (btn) btn.disabled = !(form.golfer && tee && +form.gross > 0);
-  if (!box || !tee) return;
-  const stamp = box.querySelector(".stamp");
-  if (!form.gross) { if (stamp) stamp.remove(); return; }
-  const d = differential(+(form.adjusted || form.gross), tee.rating, tee.slope).toFixed(1);
-  if (stamp) stamp.textContent = d;
-  else box.insertAdjacentHTML("beforeend", `<span class="stamp">${d}</span>`);
-  const adj = view.querySelector('[name="adjusted"]');
-  if (adj) adj.placeholder = form.gross || "same";
-}
-
-view.addEventListener("keydown", (e) => {
-  if (e.key !== "Enter") return;
-  if (e.target.name === "new-golfer") { e.preventDefault(); addGolfer(); }
-  if (e.target.name === "rename-golfer") { e.preventDefault(); saveRename(); }
-  if (e.target.name === "finder-q") { e.preventDefault(); runFinder(); }
-});
-
-view.addEventListener("change", (e) => {
-  const n = e.target.name, v = e.target.value;
-  if (n === "date") { form.date = v; render(); }
-  if (n === "golfer") { form.golfer = v; render(); }
-  if (n === "courseId") {
-    const c = state.courses.find((x) => x.id === v);
-    form.courseId = v; form.teeId = c && c.tees.length === 1 ? c.tees[0].id : "";
-    render();
-  }
-  if (n === "f-golfer") { filter.golfer = v; render(); }
-  if (n === "f-year") { filter.year = v; filter.month = ""; render(); }
-  if (n === "f-course") { filter.courseId = v; render(); }
-  if (n === "share-golfer") { shareGolfer = v; render(); }
-});
-
-view.addEventListener("click", async (e) => {
-  const t = e.target.closest("[data-act],[data-tee],[data-go],[data-edit],[data-del],[data-confirm-del],[data-unfilter],[data-drill],[data-golfer-index],[data-send],[data-del-golfer],[data-edit-course],[data-del-course],[data-rm-tee],[data-pick],[data-rename],[data-course]");
-  if (!t) return;
-  const d = t.dataset;
-
-  if (d.go) { tab = d.go; return render(); }
-  if (d.tee) { form.teeId = d.tee; return render(); }
-  if (d.send) return send(d.send);
-
-  if (d.unfilter) { filter[d.unfilter] = ""; return render(); }
-  if (d.edit) {
-    const r = state.rounds.find((x) => x.id === d.edit);
-    editingId = r.id;
-    form = { date: r.date, golfer: r.golfer, courseId: r.courseId, teeId: r.teeId,
-      gross: String(r.gross), adjusted: r.adjusted === r.gross ? "" : String(r.adjusted), notes: r.notes || "" };
-    tab = "enter"; return render();
-  }
-  if (d.del) { confirmId = d.del; return render(); }
-  if (d.confirmDel) { confirmId = null; return save({ ...state, rounds: state.rounds.filter((r) => r.id !== d.confirmDel) }); }
-  if (d.drill) {
-    if (!drill.year) drill.year = d.drill;
-    else if (!drill.month) drill.month = d.drill;
-    else { filter = { golfer: d.drill, year: drill.year, month: drill.month, courseId: "" }; tab = "history"; }
-    return render();
-  }
-  if (d.golferIndex) { filter = { golfer: d.golferIndex, year: "", month: "", courseId: "" }; tab = "history"; return render(); }
-  if (d.rename) { editingGolfer = d.rename; return render(); }
-  if (d.course) { openCourse = openCourse === d.course ? null : d.course; return render(); }
-  if (d.delGolfer) return save({ ...state, golfers: state.golfers.filter((g) => g !== d.delGolfer) });
-  if (d.editCourse) { courseDraft = JSON.parse(JSON.stringify(state.courses.find((c) => c.id === d.editCourse))); return render(); }
-  if (d.delCourse) return save({ ...state, courses: state.courses.filter((c) => c.id !== d.delCourse) });
-  if (d.rmTee) { courseDraft.tees.splice(+d.rmTee, 1); return render(); }
-  if (d.pick) {
-    const c = finder.results[+d.pick];
-    courseDraft.name = c.name;
-    courseDraft.tees = c.tees.map((t) => ({ id: uid(), name: t.name, rating: String(t.rating), slope: String(t.slope), par: String(t.par) }));
-    finder = { q: "", results: [], busy: false, msg: `Filled in ${c.tees.length} tee${c.tees.length === 1 ? "" : "s"} — check them against the scorecard.` };
-    return render();
-  }
-
-  switch (d.act) {
-    case "recover": tab = "enter"; return render();
-    case "cancel-edit": editingId = null; form = { ...form, gross: "", adjusted: "", notes: "" }; return render();
-    case "cancel-del": confirmId = null; return render();
-    case "clear-filters": filter = { golfer: "", year: "", month: "", courseId: "" }; return render();
-    case "drill-back": drill.month ? (drill.month = null) : (drill.year = null); return render();
-    case "view-scope": filter = { golfer: "", year: drill.year || "", month: drill.month || "", courseId: "" }; tab = "history"; return render();
-    case "post": return post();
-    case "add-golfer": return addGolfer();
-    case "save-rename": return saveRename();
-    case "cancel-rename": editingGolfer = null; return render();
-    case "find": return runFinder();
-    case "save-key": {
-      const el = view.querySelector('[name="apikey"]');
-      lookup.setKey(el ? el.value : "");
-      flashMsg(lookup.hasKey() ? "Lookup key saved on this device" : "Lookup key removed");
-      return;
-    }
-    case "clear-key": lookup.setKey(""); flashMsg("Lookup key removed"); return render();
-    case "new-course":
-      finder = { q: "", results: [], busy: false, msg: lookup.hasKey() ? "" : lookup.explain("NO_KEY") };
-      courseDraft = { id: uid(), name: "", tees: [{ id: uid(), name: "", rating: "", slope: "", par: "72" }] };
-      return render();
-    case "add-tee": courseDraft.tees.push({ id: uid(), name: "", rating: "", slope: "", par: "72" }); return render();
-    case "cancel-course": courseDraft = null; finder = { q: "", results: [], busy: false, msg: "" }; return render();
-    case "save-course": {
-      const c = { ...courseDraft, name: courseDraft.name.trim(), tees: courseDraft.tees.filter((t) => t.name.trim() && t.rating && t.slope && t.par) };
-      if (!c.name || !c.tees.length) return;
-      const exists = state.courses.some((x) => x.id === c.id);
-      courseDraft = null;
-      openCourse = null;
-      finder = { q: "", results: [], busy: false, msg: "" };
-      return save({ ...state, courses: exists ? state.courses.map((x) => (x.id === c.id ? c : x)) : [...state.courses, c] });
-    }
-    case "google":
-      try { await db.signInWithGoogle(); flashMsg("Signed in — this scorecard now follows your Google account"); }
-      catch (err) { flashMsg("Sign-in didn't complete. See the message at the top of the screen."); }
-      return;
-    case "backup": return openBackup();
-  }
-});
-
-// Search is fussy about wording, so try the query as typed and again with the
-// filler words stripped, then merge whatever comes back.
-async function runFinder() {
-  const q = ((view.querySelector('[name="finder-q"]') || {}).value || finder.q).trim();
-  finder = { q, results: [], busy: true, msg: "Searching…" };
-  render();
-  try {
-    const results = await lookup.searchWide(q);
-    finder = { q, results, busy: false, msg: `${results.length} match${results.length === 1 ? "" : "es"} — tap one to fill in its tees` };
-  } catch (err) {
-    finder = { q, results: [], busy: false, msg: lookup.explain(err && err.message) };
-  }
-  render();
-}
-
-function saveRename() {
-  const input = view.querySelector('[name="rename-golfer"]');
-  const next = (input ? input.value : "").trim();
-  const previous = editingGolfer;
-  if (!next) { flashMsg("Type a name first"); return; }
-  if (next === previous) { editingGolfer = null; return render(); }
-  if (state.golfers.includes(next)) { flashMsg(`${next} is already on the list`); return; }
-
-  // Rounds store the golfer by name, so every one of theirs moves with them.
-  const golfers = state.golfers.map((g) => (g === previous ? next : g)).sort();
-  const rounds = state.rounds.map((r) => (r.golfer === previous ? { ...r, golfer: next } : r));
-
-  // Anything currently pointing at the old name follows too.
-  if (form.golfer === previous) form.golfer = next;
-  if (filter.golfer === previous) filter.golfer = next;
-  if (shareGolfer === previous) shareGolfer = next;
-
-  const moved = state.rounds.filter((r) => r.golfer === previous).length;
-  editingGolfer = null;
-  save({ ...state, golfers, rounds });
-  flashMsg(moved ? `Renamed to ${next} — ${moved} round${moved === 1 ? "" : "s"} moved with them` : `Renamed to ${next}`);
-}
-
-function addGolfer() {
-  const input = view.querySelector('[name="new-golfer"]');
-  const name = (input ? input.value : "").trim();
-  if (!name) { flashMsg("Type a name first"); return; }
-  if (state.golfers.includes(name)) { flashMsg(`${name} is already on the list`); return; }
-  save({ ...state, golfers: [...state.golfers, name].sort() });
-  flashMsg(`${name} added`);
-}
-
-function post() {
-  const course = state.courses.find((c) => c.id === form.courseId);
-  const tee = course.tees.find((t) => t.id === form.teeId);
-  const ags = +(form.adjusted || form.gross);
-  const rec = {
-    id: editingId || uid(), date: form.date, golfer: form.golfer,
-    courseId: course.id, courseName: course.name, teeId: tee.id, teeName: tee.name,
-    rating: +tee.rating, slope: +tee.slope, par: +tee.par,
-    gross: +form.gross, adjusted: ags, differential: differential(ags, tee.rating, tee.slope),
-    notes: form.notes.trim(),
-  };
-  const rounds = editingId ? state.rounds.map((r) => (r.id === editingId ? rec : r)) : [...state.rounds, rec];
-  const msg = editingId ? "Round updated" : `Round posted — differential ${rec.differential.toFixed(1)}`;
-  editingId = null;
-  form = { ...form, gross: "", adjusted: "", notes: "", date: today() };
-  save({ ...state, rounds });
-  flashMsg(msg);
 }
 
 /* ---------- backup sheet ---------- */
