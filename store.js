@@ -171,8 +171,33 @@ export async function createAssociation({ name, displayName }) {
     joinedAt: serverTimestamp(),
   });
 
+  /* The code index, so somebody handed only a code can find this group.
+     Deliberately not fatal: if the rules in the console predate this index,
+     creating the group must still succeed. Invitation links work regardless —
+     only typing a code by hand needs the index. */
+  try {
+    await setDoc(ref("joinCodes", association.joinCode), { assocId: association.id });
+  } catch {
+    setError("Codes typed by hand will not work yet",
+      "Publish the latest rules from firestore.rules to enable them. Invitation links work either way, and nothing else is affected.");
+  }
+
   assocId = association.id;
+  rememberAssociation(association.id);
   return association;
+}
+
+/* Turns a code into the group it belongs to. Returns null when no such code
+   exists, which is what a typo looks like. */
+export async function findAssociationByCode(code) {
+  if (!fb) return null;
+  const { getDoc } = fb.mod.store;
+  const tidy = String(code || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (!tidy) return null;
+  try {
+    const snap = await getDoc(ref("joinCodes", tidy));
+    return snap.exists() ? snap.data().assocId : null;
+  } catch { return null; }
 }
 
 /* The code is checked by the security rules, not here. This request simply
@@ -589,3 +614,50 @@ export function restoreBackup({ golfers = [], courses = [], rounds = [] }) {
   flush();
   return { queued };
 }
+
+/* ---------------- linking a person to their place on the roster ---------------- */
+
+/* When somebody joins, they should not have to find themselves in a dropdown.
+ * This ties their account to a golfer record: matching one already on the
+ * roster if the name fits, creating one if not.
+ *
+ * Matching by name is deliberate. The organiser usually adds all sixteen names
+ * before anybody joins, and a second "Willy Rosales" appearing on the roster
+ * because he typed his own name is exactly the sort of mess that makes an app
+ * feel broken.
+ */
+export async function linkGolferForMember(displayName) {
+  const { getDocs } = fb.mod.store;
+  const wanted = String(displayName || "").trim().toLowerCase();
+  if (!wanted) return null;
+
+  let existing = null;
+  try {
+    const snap = await getDocs(col("associations", assocId, "golfers"));
+    snap.forEach((d) => {
+      const g = d.data();
+      if (!existing && String(g.name || "").trim().toLowerCase() === wanted) existing = g;
+    });
+  } catch { /* offline, or not readable yet — fall through and create one */ }
+
+  if (existing) {
+    if (!existing.linkedUid) {
+      outbox.enqueue({ type: "update", path: ["associations", assocId, "golfers", existing.id],
+        data: { linkedUid: uid }, opId: `golfer-link-${existing.id}` });
+      flush();
+    }
+    return { ...existing, linkedUid: uid };
+  }
+
+  const golfer = { ...model.buildGolfer({ name: displayName }), linkedUid: uid };
+  outbox.enqueue({ type: "set", path: ["associations", assocId, "golfers", golfer.id],
+    data: golfer, opId: `golfer-create-${golfer.id}` });
+  flush();
+  return golfer;
+}
+
+/* The golfer record belonging to whoever is using the app right now. */
+export const myGolferId = (golfers) => {
+  const mine = (golfers || []).find((g) => g.linkedUid === uid);
+  return mine ? mine.id : "";
+};

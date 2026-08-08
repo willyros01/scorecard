@@ -143,6 +143,21 @@ service cloud.firestore {
       }
     }
 
+    /* ---------------- join codes ---------------- */
+
+    /* A tiny index: code -> group. Without it, somebody given only a code has
+       no way to discover which group it belongs to, because group documents
+       are readable by members only.
+       Readable by anyone signed in, which is safe: knowing that a code exists
+       gets you nothing. Joining still requires presenting the matching code,
+       and that check happens against the group document itself. */
+    match /joinCodes/{code} {
+      allow read: if signedIn();
+      allow create, update: if signedIn()
+        && get(/databases/$(database)/documents/associations/$(request.resource.data.assocId)).data.ownerUid == request.auth.uid;
+      allow delete: if false;
+    }
+
     /* ---------------- version 1 data, kept readable ---------------- */
 
     /* The version 1 single-document scorecard still lives here.

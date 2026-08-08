@@ -330,3 +330,7 @@ body { font-size: 1rem; }
   font-weight: 700; font-size: 1.15rem; color: var(--ink); line-height: 1.25;
 }
 .netavg .sub { font-weight: 400; }
+
+/* a value the person cannot change — shown, not editable */
+.field.locked { background: var(--tint); border-style: dashed; color: var(--ink); font-weight: 600; }
+.filters.two { grid-template-columns: 1fr 1fr; }

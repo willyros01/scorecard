@@ -89,19 +89,29 @@ function flashMsg(msg) { flash = msg; render(); setTimeout(() => { flash = null;
 
 /* Shown until this device belongs to a group. Everything else is unreachable
    until then, which is what makes the rest of the app simpler. */
+/* The first screen. One box, one button.
+ *
+ * Whether this ends up joining a group or starting one depends on how the
+ * person arrived, not on a choice they have to understand. Somebody sent an
+ * invitation link: they join it. Nobody did: they get their own group, which
+ * can be renamed later. Either way the next thing they see is the Enter tab.
+ */
 function screenJoin() {
   const invite = db.readJoinLink();
 
-  if (invite) {
+  if (showCodeEntry) {
     return `<div class="stack">
       ${flashBar()}
       <div class="card padded">
-        <h2 class="panel-title">You have been invited</h2>
-        <p class="hint">Enter the name you play under, and you are in. No account, no password.</p>
+        <h2 class="panel-title">Join with a code</h2>
+        <p class="hint">Six characters, like ABC234.</p>
         <label class="lbl">Your name</label>
         <input class="field" name="join-name" value="${esc(joinForm.name)}" placeholder="e.g. Willy" autocomplete="name">
+        <label class="lbl">Group code</label>
+        <input class="field mono" name="join-code" value="${esc(joinForm.code)}" placeholder="ABC234" autocapitalize="characters" autocomplete="off">
         <div class="inline-actions stacked">
-          <button class="btn" data-act="accept-invite">Join the group</button>
+          <button class="btn" data-act="join-by-code" ${joining ? "disabled" : ""}>${joining ? "Checking…" : "Join"}</button>
+          <button class="btn ghost" data-act="hide-code">Back</button>
         </div>
       </div>
     </div>`;
@@ -110,37 +120,28 @@ function screenJoin() {
   return `<div class="stack">
     ${flashBar()}
     <div class="card padded">
-      <h2 class="panel-title">Join a group</h2>
-      <p class="hint">Someone in your group can send you a link. Tapping it is all it takes. If you have a code instead, enter it here.</p>
+      <h2 class="panel-title">${invite ? "You have been invited" : "Welcome"}</h2>
+      <p class="hint">${invite
+        ? "Type the name you play under and you are in."
+        : "Type your name to begin. Everything else can wait."}</p>
       <label class="lbl">Your name</label>
-      <input class="field" name="join-name" value="${esc(joinForm.name)}" placeholder="e.g. Willy" autocomplete="name">
-      <label class="lbl">Group code</label>
-      <input class="field mono" name="join-code" value="${esc(joinForm.code)}" placeholder="ABC234" autocapitalize="characters" autocomplete="off">
+      <input class="field" name="join-name" value="${esc(joinForm.name)}" placeholder="e.g. Willy Rosales" autocomplete="name">
       <div class="inline-actions stacked">
-        <button class="btn" data-act="join-by-code">Join</button>
+        <button class="btn" data-act="begin" ${joining ? "disabled" : ""}>${joining ? "One moment…" : "Start"}</button>
       </div>
     </div>
-
-    <div class="card padded">
-      <h2 class="panel-title">Or start a new group</h2>
-      <p class="hint">You become the owner and can invite everybody else with one link.</p>
-      <label class="lbl">Group name</label>
-      <input class="field" name="group-name" value="${esc(joinForm.groupName)}" placeholder="Saturday Group">
-      <label class="lbl">Your name</label>
-      <input class="field" name="join-name-2" value="${esc(joinForm.name)}" placeholder="e.g. Willy">
-      <div class="inline-actions stacked">
-        <button class="btn ghost" data-act="create-group">Create the group</button>
-      </div>
-    </div>
-
-    ${migrationCard()}
-    ${versionBlock()}
+    ${invite ? "" : `${migrationCard()}
+    <p class="hint" style="text-align:center">
+      Joining someone else's group? <button class="linkbtn" data-act="show-code">I was given a code</button>
+    </p>`}
   </div>`;
 }
 
 let legacy = null;          /* { v1, preview } once found */
 let importing = false;
 let editingKey = false;
+let showCodeEntry = false;
+let joining = false;
 
 function migrationCard() {
   if (!legacy) return "";
@@ -215,9 +216,9 @@ function screenEnter() {
       </div>
       <div>
         <div class="eyebrow">Golfer</div>
-        <select class="field" name="golferId"><option value="">Select…</option>
+        ${db.canManage() ? `<select class="field" name="golferId"><option value="">Select…</option>
           ${sortedGolfers().map((g) => `<option value="${g.id}" ${g.id === form.golferId ? "selected" : ""}>${esc(g.name)}</option>`).join("")}
-        </select>
+        </select>` : `<div class="field locked">${esc((golferById(form.golferId) || {}).name || "You")}</div>`}
       </div>
     </div>
 
@@ -271,8 +272,12 @@ const courseName = (id) => { const c = courseById(id); return c ? c.name : "Unkn
 /* ================= history ================= */
 
 function screenHistory() {
-  const years = [...new Set(rounds.map((r) => r.date.slice(0, 4)))].sort().reverse();
-  const rows = rounds.filter((r) =>
+  /* A guest sees their own rounds. Nothing is hidden that concerns them, and
+     nothing is shown that does not. */
+  const mine = db.myGolferId(golfers);
+  const scope = db.canManage() ? rounds : rounds.filter((r) => r.golferId === mine);
+  const years = [...new Set(scope.map((r) => r.date.slice(0, 4)))].sort().reverse();
+  const rows = scope.filter((r) =>
     (!filter.golferId || r.golferId === filter.golferId) &&
     (!filter.year || r.date.slice(0, 4) === filter.year) &&
     (!filter.month || r.date.slice(5, 7) === filter.month) &&
@@ -283,9 +288,9 @@ function screenHistory() {
     `<button class="pill" data-unfilter="${k}">${k === "month" ? MONTHS[+v - 1] : k === "courseId" ? esc(courseName(v)) : esc((golferById(v) || {}).name || v)} ✕</button>`).join("");
 
   return `${flashBar()}
-  <div class="filters">
-    <select class="field" name="f-golfer"><option value="">All golfers</option>
-      ${sortedGolfers().map((g) => `<option value="${g.id}" ${g.id === filter.golferId ? "selected" : ""}>${esc(g.name)}</option>`).join("")}</select>
+  <div class="filters${db.canManage() ? "" : " two"}">
+    ${db.canManage() ? `<select class="field" name="f-golfer"><option value="">All golfers</option>
+      ${sortedGolfers().map((g) => `<option value="${g.id}" ${g.id === filter.golferId ? "selected" : ""}>${esc(g.name)}</option>`).join("")}</select>` : ""}
     <select class="field" name="f-year"><option value="">All years</option>
       ${years.map((y) => `<option ${y === filter.year ? "selected" : ""}>${y}</option>`).join("")}</select>
     <select class="field" name="f-course"><option value="">All courses</option>
@@ -408,7 +413,9 @@ function screenGames() {
     <div class="panel-head"><h2 class="panel-title">Games</h2>
       ${db.canManage() && !gameDraft ? `<button class="linkbtn" data-act="new-game">Add a game</button>` : ""}</div>
     ${gameDraft ? gameEditor() : ""}
-    ${games.length === 0 && !gameDraft ? `<div class="card"><p class="blank">No games yet. A game groups everyone's rounds from one outing, so you get a leaderboard for the day.</p></div>` : ""}
+    ${games.length === 0 && !gameDraft ? `<div class="card"><p class="blank">${db.canManage()
+      ? "No games yet. A game groups everyone's rounds from one outing, so you get a leaderboard for the day."
+      : "No games yet. Whoever organises your group sets these up."}</p></div>` : ""}
     ${games.length ? `<div class="card list">
       ${games.map((g) => {
         const played = rounds.filter((r) => r.gameId === g.id);
@@ -580,12 +587,57 @@ function screenManage() {
     ${courseDraft ? courseEditor() : ""}
   </section>
 
-  ${backupSection()}
-  ${membersSection()}
-  ${accountSection()}
-  ${lookupSection()}
   ${versionBlock()}`;
 }
+
+/* Everything to do with people, permissions and settings, in one place that
+   only the owner can reach. Nobody else knows it exists. */
+function screenAdmin() {
+  if (!db.isOwner()) return empty("Not your area", "Only the group owner manages people and settings.");
+
+  return `${flashBar()}
+  <section class="panel">
+    <div class="panel-head"><h2 class="panel-title">People</h2><span class="panel-count">${members.length || ""}</span></div>
+    <div class="card">
+      <div class="list">
+        ${members.map((m) => {
+          const you = m.uid === db.status().uid;
+          return `<div class="list-row">
+            <span class="grow"><span class="name">${esc(m.displayName || "Unnamed")}</span><br>
+              <span class="sub">${roleLabel(m.role)}${you ? " · you" : ""}</span></span>
+            ${m.role === "owner" ? "" : `<button class="rowbtn" data-role="${m.uid}:${m.role === "admin" ? "member" : "admin"}">${m.role === "admin" ? "Make guest" : "Make admin"}</button>`}
+          </div>`;
+        }).join("")}
+      </div>
+      <div class="inline-form bordered">
+        <p class="hint" style="margin:0 0 0.7rem">Send this link to add somebody. They tap it, type their name, and they are in as a guest.</p>
+        <div class="inline-actions">
+          <button class="btn compact" data-act="share-invite">Send an invitation</button>
+          <button class="btn ghost compact" data-act="show-code">Show the code</button>
+        </div>
+      </div>
+    </div>
+    <p class="hint"><b>Guests</b> post their own rounds and see the results. <b>Admins</b> also add courses, manage the roster and post for anybody. <b>You</b> can do everything, and only you can change these.</p>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head"><h2 class="panel-title">Group</h2></div>
+    <div class="card padded">
+      <label class="lbl" style="margin-top:0">Group name</label>
+      <input class="field" name="assoc-name" value="${esc(association ? association.name : "")}">
+      <div class="inline-actions stacked">
+        <button class="btn ghost" data-act="rename-group">Save the name</button>
+      </div>
+    </div>
+  </section>
+
+  ${backupSection()}
+  ${lookupSection()}
+  ${accountSection()}
+  ${versionBlock()}`;
+}
+
+const roleLabel = (role) => (role === "owner" ? "owner" : role === "admin" ? "admin" : "guest");
 
 function backupSection() {
   return `<section class="panel">
@@ -733,29 +785,6 @@ function askForBackupFile() {
   picker.click();
 }
 
-function membersSection() {
-  return `<section class="panel">
-    <div class="panel-head"><h2 class="panel-title">People</h2><span class="panel-count">${members.length || ""}</span></div>
-    <div class="card">
-      <div class="list">
-        ${members.map((m) => `<div class="list-row">
-          <span class="grow"><span class="name">${esc(m.displayName || "Unnamed")}</span><br>
-            <span class="sub">${m.role}${m.uid === db.status().uid ? " · you" : ""}</span></span>
-          ${db.isOwner() && m.role !== "owner" ? `<button class="rowbtn" data-role="${m.uid}:${m.role === "admin" ? "member" : "admin"}">${m.role === "admin" ? "Make guest" : "Make admin"}</button>` : ""}
-        </div>`).join("")}
-      </div>
-      ${association ? `<div class="inline-form bordered">
-        <p class="hint" style="margin:0 0 0.7rem">Invite somebody by sending this link. One tap and they are in — no account, no password.</p>
-        <div class="inline-actions">
-          <button class="btn compact" data-act="share-invite">Send an invitation</button>
-          <button class="btn ghost compact" data-act="show-code">Show the code</button>
-        </div>
-      </div>` : ""}
-    </div>
-    <p class="hint">Admins can manage the roster and edit any round. Guests can post rounds on the Enter tab.</p>
-  </section>`;
-}
-
 function accountSection() {
   return `<section class="panel">
     <div class="panel-head"><h2 class="panel-title">Account</h2></div>
@@ -765,7 +794,7 @@ function accountSection() {
       <div class="inline-actions stacked">
         <button class="btn ghost" data-act="google">${db.currentEmail() ? "Signed in" : "Sign in with Google (optional)"}</button>
       </div>
-      <p class="hint">Optional. Signing in only ties this device to a Google account so it survives clearing your browser data. The group key already does everything else.</p>
+      <p class="hint">Optional, and not needed for anything. It only ties this device to a Google account so your access survives clearing browser data.</p>
     </div>
   </section>`;
 }
@@ -856,17 +885,23 @@ function versionBlock() {
 
 /* ================= render ================= */
 
-const TABS = [
-  ["enter", "Enter", "✎"],
-  ["history", "History", "≡"],
-  ["summary", "Summary", "▤"],
-  ["games", "Games", "⚑"],
-  ["manage", "Manage", "⚙"],
-];
+/* Tabs are the whole permission model as far as anybody using the app is
+   concerned. Nothing they cannot do is ever on screen, so there is nothing to
+   tap and be refused. */
+function visibleTabs() {
+  const tabs = [
+    ["enter", "Enter", "✎"],
+    ["history", db.canManage() ? "History" : "My rounds", "≡"],
+    ["summary", "Summary", "▤"],
+    ["games", "Games", "⚑"],
+  ];
+  if (db.canManage()) tabs.push(["manage", "Manage", "⚙"]);
+  if (db.isOwner()) tabs.push(["admin", "Admin", "★"]);
+  return tabs;
+}
 
 function renderTabs() {
-  const visible = TABS.filter(([id]) => id !== "manage" || db.canManage());
-  tabsEl.innerHTML = visible.map(([id, label, icon]) =>
+  tabsEl.innerHTML = visibleTabs().map(([id, label, icon]) =>
     `<button data-tab="${id}" class="${tab === id ? "on" : ""}" role="tab"><span class="ico">${icon}</span>${label}</button>`).join("");
 }
 
@@ -879,9 +914,11 @@ function render() {
       view.innerHTML = screenJoin();
       document.getElementById("brandSub").textContent = "Getting started";
     } else {
+      const allowed = visibleTabs().map(([id]) => id);
+      if (!allowed.includes(tab)) tab = "enter";
       renderTabs();
-      const screens = { enter: screenEnter, history: screenHistory, summary: screenSummary, games: screenGames, manage: screenManage };
-      if (tab === "manage" && !db.canManage()) tab = "enter";
+      const screens = { enter: screenEnter, history: screenHistory, summary: screenSummary,
+                        games: screenGames, manage: screenManage, admin: screenAdmin };
       view.innerHTML = (screens[tab] || screenEnter)();
       document.getElementById("brandSub").textContent = association ? association.name : "Handicap tracking";
     }
@@ -1032,8 +1069,11 @@ view.addEventListener("click", async (e) => {
     case "view-scope": filter = { golferId: "", year: drill.year || "", month: drill.month || "", courseId: "" }; tab = "history"; return render();
     case "post": return postRound();
 
+    case "begin": return begin();
     case "accept-invite": return acceptInvite();
     case "join-by-code": return joinByCode();
+    case "show-code": showCodeEntry = true; return render();
+    case "hide-code": showCodeEntry = false; return render();
     case "create-group": return createGroup();
     case "import-v1": return importV1();
 
@@ -1063,6 +1103,14 @@ view.addEventListener("click", async (e) => {
       `Join our golf scorecard:\n${db.joinLink(association)}\n\nOne tap, enter your name, done.`, "Invitation");
     case "show-code": return flashMsg(`Group code: ${association.joinCode}`);
 
+    case "rename-group": {
+      const field = view.querySelector('[name="assoc-name"]');
+      const name = (field ? field.value : "").trim();
+      if (!name) { flashMsg("Give the group a name"); return; }
+      db.updateAssociation({ name });
+      flashMsg("Renamed");
+      return;
+    }
     case "backup": return openBackupSheet();
     case "restore": return askForBackupFile();
     case "edit-key": editingKey = true; return render();
@@ -1101,31 +1149,70 @@ sheetEl.addEventListener("click", (e) => {
 
 /* ================= actions ================= */
 
+/* Joins or creates, whichever fits, then lands on Enter. */
+async function begin() {
+  const name = ((view.querySelector('[name="join-name"]') || {}).value || joinForm.name).trim();
+  if (!name) { flashMsg("Type the name you play under"); return; }
+  joinForm.name = name;
+  const invite = db.readJoinLink();
+  if (invite) return acceptInvite();
+  return createGroup(name);
+}
+
 async function acceptInvite() {
   const invite = db.readJoinLink();
-  const name = (view.querySelector('[name="join-name"]') || {}).value || joinForm.name;
-  if (!name.trim()) { flashMsg("Type the name you play under"); return; }
+  const name = ((view.querySelector('[name="join-name"]') || {}).value || joinForm.name).trim();
+  if (!name) { flashMsg("Type the name you play under"); return; }
+  joining = true;
   flashMsg("Joining…");
-  const result = await db.joinAssociation({ associationId: invite.associationId, code: invite.code, displayName: name.trim() });
-  if (result.ok) { db.clearJoinLink(); await start(invite.associationId); flashMsg("You're in"); }
-  else render();
+  const result = await db.joinAssociation({ associationId: invite.associationId, code: invite.code, displayName: name });
+  if (result.ok) {
+    db.clearJoinLink();
+    await db.linkGolferForMember(name);
+    await start(invite.associationId);
+    joining = false;
+    flashMsg("You're in. Post your round on the Enter tab.");
+  } else { joining = false; render(); }
 }
 
 async function joinByCode() {
-  flashMsg("A code on its own isn't enough — ask for the invitation link, which carries the group as well as the code.");
+  const name = ((view.querySelector('[name="join-name"]') || {}).value || joinForm.name).trim();
+  const code = ((view.querySelector('[name="join-code"]') || {}).value || joinForm.code).trim();
+  if (!name) { flashMsg("Type the name you play under"); return; }
+  if (!code) { flashMsg("Type the group code"); return; }
+
+  joining = true;
+  flashMsg("Checking the code…");
+  const assocId = await db.findAssociationByCode(code);
+  if (!assocId) {
+    joining = false;
+    flashMsg("No group has that code. Codes are six characters — check it, or ask for the invitation link instead.");
+    return render();
+  }
+  const result = await db.joinAssociation({ associationId: assocId, code, displayName: name });
+  if (result.ok) {
+    await db.linkGolferForMember(name);
+    await start(assocId);
+    joining = false;
+    flashMsg("You're in. Post your round on the Enter tab.");
+  } else { joining = false; render(); }
 }
 
-async function createGroup() {
-  const groupName = (view.querySelector('[name="group-name"]') || {}).value || joinForm.groupName;
-  const name = (view.querySelector('[name="join-name-2"]') || {}).value || joinForm.name;
-  if (!groupName.trim()) { flashMsg("Give the group a name"); return; }
-  if (!name.trim()) { flashMsg("Type the name you play under"); return; }
-  flashMsg("Creating…");
+async function createGroup(name) {
+  joining = true;
+  flashMsg("Setting up…");
   try {
-    const created = await db.createAssociation({ name: groupName.trim(), displayName: name.trim() });
+    /* Named after them for now. Renaming it lives in Admin, for later. */
+    const created = await db.createAssociation({ name: `${name}'s group`, displayName: name });
+    await db.linkGolferForMember(name);
     await start(created.id);
-    flashMsg("Group created. Invite the others from Manage.");
-  } catch { flashMsg("Couldn't create the group. See the message at the top."); }
+    joining = false;
+    flashMsg("Ready. Post a round, or invite the others from the Admin tab.");
+  } catch {
+    joining = false;
+    flashMsg("Couldn't set up the group. See the message at the top.");
+    render();
+  }
 }
 
 function addGolfer() {
