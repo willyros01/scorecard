@@ -459,6 +459,257 @@ function courseEditor() {
   </div>`;
 }
 
+/* ================= render ================= */
+function render() {
+  const screens = { enter: screenEnter, history: screenHistory, summary: screenSummary, share: screenShare, manage: screenManage };
+  try {
+    view.innerHTML = screens[tab]();
+  } catch (e) {
+    // A screen failed to draw. Say so and offer a way back instead of showing nothing.
+    view.innerHTML = `<div class="fatal"><div class="fatal-mark">!</div>
+      <h2>This screen couldn't be drawn</h2>
+      <p>Your rounds are safe. Try another tab, or reload.</p>
+      <button class="btn" data-act="recover">Back to Enter</button>
+      <details><summary>Technical detail</summary><pre>${esc(e && e.message)}</pre></details></div>`;
+  }
+  document.querySelectorAll(".tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === tab));
+  const btn = document.getElementById("statusBtn");
+  btn.textContent = sync.text;
+  btn.classList.toggle("alert", !!sync.alert);
+  paintAlert();
+  if (window.__scorecardBooted) window.__scorecardBooted();
+}
+
+/* One banner, above the screen. Never blocks what you were doing. */
+let dismissed = "";
+function paintAlert() {
+  const el = document.getElementById("alert");
+  const err = sync.error;
+  if (!err || dismissed === err.short + err.full) { el.hidden = true; return; }
+  el.hidden = false;
+  el.innerHTML = `<b>${esc(err.short)}</b> ${esc(err.full)} <button class="linkbtn" data-act="dismiss-alert">Dismiss</button>`;
+}
+document.getElementById("alert").addEventListener("click", (e) => {
+  if (e.target.dataset.act === "dismiss-alert" && sync.error) {
+    dismissed = sync.error.short + sync.error.full;
+    paintAlert();
+  }
+});
+
+function flashMsg(msg) { flash = msg; render(); setTimeout(() => { flash = null; render(); }, 2600); }
+
+/* ================= events ================= */
+document.querySelector(".tabs").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-tab]"); if (!b) return;
+  tab = b.dataset.tab; if (tab === "enter") editingId = null; render();
+});
+document.getElementById("statusBtn").onclick = () => openBackup();
+
+// Text fields update state without a re-render, so the keyboard and caret stay put.
+view.addEventListener("input", (e) => {
+  const n = e.target.name;
+  if (n === "gross" || n === "adjusted") {
+    form[n] = e.target.value.replace(/\D/g, "");
+    e.target.value = form[n];
+    return updatePreview();
+  }
+  if (n === "notes") { form.notes = e.target.value; return; }
+  if (n === "finder-q") { finder.q = e.target.value; return; }
+  if (e.target.dataset.teeField) {
+    const [i, key] = e.target.dataset.teeField.split(":");
+    courseDraft.tees[+i][key] = e.target.value;
+    return;
+  }
+  if (n === "c-name") courseDraft.name = e.target.value;
+});
+
+// Redraw only the differential panel and the post button while typing a score.
+function updatePreview() {
+  const course = state.courses.find((c) => c.id === form.courseId);
+  const tee = course && course.tees.find((t) => t.id === form.teeId);
+  const box = view.querySelector(".preview");
+  const btn = view.querySelector('[data-act="post"]');
+  if (btn) btn.disabled = !(form.golfer && tee && +form.gross > 0);
+  if (!box || !tee) return;
+  const stamp = box.querySelector(".stamp");
+  if (!form.gross) { if (stamp) stamp.remove(); return; }
+  const d = differential(+(form.adjusted || form.gross), tee.rating, tee.slope).toFixed(1);
+  if (stamp) stamp.textContent = d;
+  else box.insertAdjacentHTML("beforeend", `<span class="stamp">${d}</span>`);
+  const adj = view.querySelector('[name="adjusted"]');
+  if (adj) adj.placeholder = form.gross || "same";
+}
+
+view.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter") return;
+  if (e.target.name === "new-golfer") { e.preventDefault(); addGolfer(); }
+  if (e.target.name === "rename-golfer") { e.preventDefault(); saveRename(); }
+  if (e.target.name === "finder-q") { e.preventDefault(); runFinder(); }
+});
+
+view.addEventListener("change", (e) => {
+  const n = e.target.name, v = e.target.value;
+  if (n === "date") { form.date = v; render(); }
+  if (n === "golfer") { form.golfer = v; render(); }
+  if (n === "courseId") {
+    const c = state.courses.find((x) => x.id === v);
+    form.courseId = v; form.teeId = c && c.tees.length === 1 ? c.tees[0].id : "";
+    render();
+  }
+  if (n === "f-golfer") { filter.golfer = v; render(); }
+  if (n === "f-year") { filter.year = v; filter.month = ""; render(); }
+  if (n === "f-course") { filter.courseId = v; render(); }
+  if (n === "share-golfer") { shareGolfer = v; render(); }
+});
+
+view.addEventListener("click", async (e) => {
+  const t = e.target.closest("[data-act],[data-tee],[data-go],[data-edit],[data-del],[data-confirm-del],[data-unfilter],[data-drill],[data-golfer-index],[data-send],[data-del-golfer],[data-edit-course],[data-del-course],[data-rm-tee],[data-pick],[data-rename],[data-course]");
+  if (!t) return;
+  const d = t.dataset;
+
+  if (d.go) { tab = d.go; return render(); }
+  if (d.tee) { form.teeId = d.tee; return render(); }
+  if (d.send) return send(d.send);
+
+  if (d.unfilter) { filter[d.unfilter] = ""; return render(); }
+  if (d.edit) {
+    const r = state.rounds.find((x) => x.id === d.edit);
+    editingId = r.id;
+    form = { date: r.date, golfer: r.golfer, courseId: r.courseId, teeId: r.teeId,
+      gross: String(r.gross), adjusted: r.adjusted === r.gross ? "" : String(r.adjusted), notes: r.notes || "" };
+    tab = "enter"; return render();
+  }
+  if (d.del) { confirmId = d.del; return render(); }
+  if (d.confirmDel) { confirmId = null; return save({ ...state, rounds: state.rounds.filter((r) => r.id !== d.confirmDel) }); }
+  if (d.drill) {
+    if (!drill.year) drill.year = d.drill;
+    else if (!drill.month) drill.month = d.drill;
+    else { filter = { golfer: d.drill, year: drill.year, month: drill.month, courseId: "" }; tab = "history"; }
+    return render();
+  }
+  if (d.golferIndex) { filter = { golfer: d.golferIndex, year: "", month: "", courseId: "" }; tab = "history"; return render(); }
+  if (d.rename) { editingGolfer = d.rename; return render(); }
+  if (d.course) { openCourse = openCourse === d.course ? null : d.course; return render(); }
+  if (d.delGolfer) return save({ ...state, golfers: state.golfers.filter((g) => g !== d.delGolfer) });
+  if (d.editCourse) { courseDraft = JSON.parse(JSON.stringify(state.courses.find((c) => c.id === d.editCourse))); return render(); }
+  if (d.delCourse) return save({ ...state, courses: state.courses.filter((c) => c.id !== d.delCourse) });
+  if (d.rmTee) { courseDraft.tees.splice(+d.rmTee, 1); return render(); }
+  if (d.pick) {
+    const c = finder.results[+d.pick];
+    courseDraft.name = c.name;
+    courseDraft.tees = c.tees.map((t2) => ({ id: uid(), name: t2.name, rating: String(t2.rating), slope: String(t2.slope), par: String(t2.par) }));
+    finder = { q: "", results: [], busy: false, msg: `Filled in ${c.tees.length} tee${c.tees.length === 1 ? "" : "s"} — check them against the scorecard.` };
+    return render();
+  }
+
+  switch (d.act) {
+    case "recover": tab = "enter"; return render();
+    case "cancel-edit": editingId = null; form = { ...form, gross: "", adjusted: "", notes: "" }; return render();
+    case "cancel-del": confirmId = null; return render();
+    case "clear-filters": filter = { golfer: "", year: "", month: "", courseId: "" }; return render();
+    case "drill-back": drill.month ? (drill.month = null) : (drill.year = null); return render();
+    case "view-scope": filter = { golfer: "", year: drill.year || "", month: drill.month || "", courseId: "" }; tab = "history"; return render();
+    case "post": return post();
+    case "add-golfer": return addGolfer();
+    case "save-rename": return saveRename();
+    case "cancel-rename": editingGolfer = null; return render();
+    case "find": return runFinder();
+    case "save-key": {
+      const el = view.querySelector('[name="apikey"]');
+      lookup.setKey(el ? el.value : "");
+      flashMsg(lookup.hasKey() ? "Lookup key saved on this device" : "Lookup key removed");
+      return;
+    }
+    case "clear-key": lookup.setKey(""); flashMsg("Lookup key removed"); return render();
+    case "new-course":
+      finder = { q: "", results: [], busy: false, msg: lookup.hasKey() ? "" : lookup.explain("NO_KEY") };
+      courseDraft = { id: uid(), name: "", tees: [{ id: uid(), name: "", rating: "", slope: "", par: "72" }] };
+      openCourse = null;
+      return render();
+    case "add-tee": courseDraft.tees.push({ id: uid(), name: "", rating: "", slope: "", par: "72" }); return render();
+    case "cancel-course": courseDraft = null; finder = { q: "", results: [], busy: false, msg: "" }; return render();
+    case "save-course": {
+      const c = { ...courseDraft, name: courseDraft.name.trim(), tees: courseDraft.tees.filter((t2) => t2.name.trim() && t2.rating && t2.slope && t2.par) };
+      if (!c.name || !c.tees.length) { flashMsg("A course needs a name and at least one complete tee"); return; }
+      const exists = state.courses.some((x) => x.id === c.id);
+      courseDraft = null;
+      openCourse = null;
+      finder = { q: "", results: [], busy: false, msg: "" };
+      return save({ ...state, courses: exists ? state.courses.map((x) => (x.id === c.id ? c : x)) : [...state.courses, c] });
+    }
+    case "google":
+      try { await db.signInWithGoogle(); flashMsg("Signed in — this scorecard now follows your Google account"); }
+      catch (err) { flashMsg("Sign-in didn't complete. See the message at the top of the screen."); }
+      return;
+    case "backup": return openBackup();
+  }
+});
+
+// Search is fussy about wording, so try the query as typed and again with the
+// filler words stripped, then merge whatever comes back.
+async function runFinder() {
+  const q = ((view.querySelector('[name="finder-q"]') || {}).value || finder.q).trim();
+  finder = { q, results: [], busy: true, msg: "Searching…" };
+  render();
+  try {
+    const results = await lookup.searchWide(q);
+    finder = { q, results, busy: false, msg: `${results.length} match${results.length === 1 ? "" : "es"} — tap one to fill in its tees` };
+  } catch (err) {
+    finder = { q, results: [], busy: false, msg: lookup.explain(err && err.message) };
+  }
+  render();
+}
+
+function addGolfer() {
+  const input = view.querySelector('[name="new-golfer"]');
+  const name = (input ? input.value : "").trim();
+  if (!name) { flashMsg("Type a name first"); return; }
+  if (state.golfers.includes(name)) { flashMsg(`${name} is already on the list`); return; }
+  save({ ...state, golfers: [...state.golfers, name].sort() });
+  flashMsg(`${name} added`);
+}
+
+function saveRename() {
+  const input = view.querySelector('[name="rename-golfer"]');
+  const next = (input ? input.value : "").trim();
+  const previous = editingGolfer;
+  if (!next) { flashMsg("Type a name first"); return; }
+  if (next === previous) { editingGolfer = null; return render(); }
+  if (state.golfers.includes(next)) { flashMsg(`${next} is already on the list`); return; }
+
+  // Rounds store the golfer by name, so every one of theirs moves with them.
+  const golfers = state.golfers.map((g) => (g === previous ? next : g)).sort();
+  const rounds = state.rounds.map((r) => (r.golfer === previous ? { ...r, golfer: next } : r));
+
+  if (form.golfer === previous) form.golfer = next;
+  if (filter.golfer === previous) filter.golfer = next;
+  if (shareGolfer === previous) shareGolfer = next;
+
+  const moved = state.rounds.filter((r) => r.golfer === previous).length;
+  editingGolfer = null;
+  save({ ...state, golfers, rounds });
+  flashMsg(moved ? `Renamed to ${next} — ${moved} round${moved === 1 ? "" : "s"} moved with them` : `Renamed to ${next}`);
+}
+
+function post() {
+  const course = state.courses.find((c) => c.id === form.courseId);
+  const tee = course.tees.find((t) => t.id === form.teeId);
+  const ags = +(form.adjusted || form.gross);
+  const rec = {
+    id: editingId || uid(), date: form.date, golfer: form.golfer,
+    courseId: course.id, courseName: course.name, teeId: tee.id, teeName: tee.name,
+    rating: +tee.rating, slope: +tee.slope, par: +tee.par,
+    gross: +form.gross, adjusted: ags, differential: differential(ags, tee.rating, tee.slope),
+    notes: form.notes.trim(),
+  };
+  const rounds = editingId ? state.rounds.map((r) => (r.id === editingId ? rec : r)) : [...state.rounds, rec];
+  const msg = editingId ? "Round updated" : `Round posted — differential ${rec.differential.toFixed(1)}`;
+  editingId = null;
+  form = { ...form, gross: "", adjusted: "", notes: "", date: today() };
+  save({ ...state, rounds });
+  flashMsg(msg);
+}
+
 /* ---------- backup sheet ---------- */
 function openBackup() {
   const pending = db.hasPending();
