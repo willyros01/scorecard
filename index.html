@@ -3,8 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>The Scorecard — Golf Handicap</title>
-<meta name="description" content="Post rounds, track your World Handicap System index, works offline." />
+<title>The Scorecard</title>
 <meta name="theme-color" content="#1F5641" />
 <link rel="manifest" href="./manifest.webmanifest" />
 <link rel="icon" href="./icon.svg" type="image/svg+xml" />
@@ -12,79 +11,41 @@
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <link rel="stylesheet" href="./styles.css" />
 <script src="./version.js"></script>
-<script src="./lookup-key.js"></script>
-
-<!-- Runs before the app. A classic script, so it still works when the module chain fails to parse. -->
 <script>
 (function () {
-  var booted = false;
-  var shown = false;
-
-  function esc(s) { var d = document.createElement("div"); d.textContent = s == null ? "" : s; return d.innerHTML; }
-
-  // Called by app.js once the first screen has painted.
-  window.__scorecardBooted = function () { booted = true; };
-
-  // Full-screen failure: something stopped the app from starting at all.
+  var booted = false, shown = false;
+  function esc(s){ var d=document.createElement("div"); d.textContent = s==null?"":s; return d.innerHTML; }
+  window.__scorecardBooted = function(){ booted = true; };
   window.showFatal = function (title, detail, hint) {
-    if (shown) return;
-    shown = true;
-    var v = document.getElementById("view");
-    if (!v) return;
-    v.innerHTML =
-      '<div class="fatal">' +
-        '<div class="fatal-mark">!</div>' +
-        "<h2>" + esc(title) + "</h2>" +
-        (hint ? "<p>" + esc(hint) + "</p>" : "") +
-        '<button class="btn" id="reloadBtn">Reload</button>' +
-        (detail ? '<details><summary>Technical detail</summary><pre>' + esc(detail) + "</pre></details>" : "") +
-        '<p class="small muted">Your saved rounds are still on this device. Nothing has been lost.</p>' +
-      "</div>";
-    var b = document.getElementById("reloadBtn");
-    if (b) b.onclick = function () { location.reload(); };
+    if (shown) return; shown = true;
+    var v = document.getElementById("view"); if (!v) return;
+    v.innerHTML = '<div class="fatal"><div class="fatal-mark">!</div><h2>' + esc(title) + "</h2>" +
+      (hint ? "<p>" + esc(hint) + "</p>" : "") +
+      '<button class="btn" id="reloadBtn">Reload</button>' +
+      (detail ? '<details><summary>Technical detail</summary><pre>' + esc(detail) + "</pre></details>" : "") +
+      '<p class="small muted">Your rounds are safe.</p></div>';
+    var b = document.getElementById("reloadBtn"); if (b) b.onclick = function(){ location.reload(); };
   };
-
-  // A problem after the app is running: show a banner, keep the app usable.
   window.showBanner = function (title, detail) {
-    var a = document.getElementById("alert");
-    if (!a) return;
+    var a = document.getElementById("alert"); if (!a) return;
     a.hidden = false;
-    a.innerHTML = "<b>" + esc(title) + "</b> " + esc(detail || "") +
-      ' <button class="linkbtn" onclick="document.getElementById(\'alert\').hidden=true">Dismiss</button>';
+    a.innerHTML = "<b>" + esc(title) + "</b> " + esc(detail || "");
   };
-
-  function startupFailure(message, file) {
-    var hint = "Something in the app files stopped it loading.";
-    var f = (file || "").split("/").pop();
-    if (/firebase-config/.test(f)) hint = "firebase-config.js could not be read. This is nearly always a missing quote or comma in the values you pasted from the Firebase console.";
-    else if (/db\.js/.test(f)) hint = "The sync layer failed to load. Check firebase-config.js for a typo.";
-    window.showFatal("The app couldn't start", message + (f ? "  (" + f + ")" : ""), hint);
-  }
-
   window.addEventListener("error", function (e) {
-    // Cross-origin scripts (the Firebase SDK on gstatic) report a bare "Script error."
-    // with no detail. It's opaque and usually harmless — don't alarm anyone over it.
     var opaque = !e.filename && (!e.message || /^script error/i.test(e.message));
     if (opaque) return;
     if (booted) { window.showBanner("Something went wrong", e.message); return; }
-    startupFailure(e.message || "Script error", e.filename);
+    window.showFatal("The app couldn't start", (e.message || "Script error") + (e.filename ? "  (" + e.filename.split("/").pop() + ")" : ""),
+      /firebase-config/.test(e.filename || "") ? "firebase-config.js could not be read — usually a missing quote or comma." : "");
   });
-
   window.addEventListener("unhandledrejection", function (e) {
     var m = (e.reason && (e.reason.message || e.reason.code)) || String(e.reason || "Unknown error");
     if (booted) { window.showBanner("Something went wrong", m); return; }
-    startupFailure(m, "");
+    window.showFatal("The app couldn't start", m, "");
   });
-
-  // Nothing at all happened? Say so rather than sitting on a blank page.
   setTimeout(function () {
-    if (!booted) {
-      window.showFatal(
-        "The app didn't finish loading",
-        "No screen was drawn within 8 seconds.",
-        "If you just edited firebase-config.js, check it for a missing quote or comma. If you edited any other file, bump the CACHE version in sw.js and reload."
-      );
-    }
+    if (!booted) window.showFatal("The app didn't finish loading", "No screen was drawn within 8 seconds.",
+      "If you just edited firebase-config.js, check it for a missing quote or comma.");
   }, 8000);
 })();
 </script>
@@ -93,35 +54,26 @@
   <header class="top">
     <div class="brand">
       <h1>The Scorecard</h1>
-      <p>Handicap tracking</p>
+      <p id="brandSub">Handicap tracking</p>
     </div>
     <div class="top-actions">
-      <button id="sizeBtn" class="chip" title="Text size" aria-label="Change text size">A</button>
-      <button id="themeBtn" class="chip" title="Light, dark or automatic" aria-label="Change appearance">Auto</button>
-      <button id="statusBtn" class="chip" title="Storage and sync">Starting</button>
+      <button id="sizeBtn" class="chip" aria-label="Text size">A</button>
+      <button id="themeBtn" class="chip" aria-label="Appearance">Auto</button>
+      <button id="statusBtn" class="chip">Starting</button>
     </div>
   </header>
 
   <div id="alert" class="alert" role="alert" hidden></div>
 
-  <main id="view" aria-live="polite">
-    <div class="boot">Opening your scorecard…</div>
-  </main>
+  <main id="view" aria-live="polite"><div class="boot">Opening your scorecard…</div></main>
 
-  <nav class="tabs" role="tablist">
-    <button data-tab="enter" class="on" role="tab"><span class="ico">✎</span>Enter</button>
-    <button data-tab="history" role="tab"><span class="ico">≡</span>History</button>
-    <button data-tab="summary" role="tab"><span class="ico">▤</span>Summary</button>
-    <button data-tab="share" role="tab"><span class="ico">↗</span>Share</button>
-    <button data-tab="manage" role="tab"><span class="ico">⚙</span>Manage</button>
-  </nav>
-
+  <nav class="tabs" id="tabs" role="tablist"></nav>
   <div id="sheet" class="sheet" hidden></div>
 
   <script type="module" src="./app.js"></script>
   <script>
     if ("serviceWorker" in navigator) {
-      window.addEventListener("load", function () { navigator.serviceWorker.register("./sw.js").catch(function () {}); });
+      window.addEventListener("load", function(){ navigator.serviceWorker.register("./sw.js").catch(function(){}); });
     }
   </script>
 </body>

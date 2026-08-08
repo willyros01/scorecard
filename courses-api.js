@@ -10,18 +10,18 @@
 
 const KEY_STORE = "golf:courselookup";
 
-/* The embedded key ships with the app and needs no setup. A key saved on the
-   device is only a fallback, kept so the feature still works if the embedded
-   one is ever empty. */
-const embeddedKey = () => {
-  try { return (self.COURSE_LOOKUP_KEY || "").trim(); } catch { return ""; }
-};
-export const usingEmbeddedKey = () => !!embeddedKey();
+/* The key is stored once on the group document in Firestore and handed to this
+   module when the group loads. Everybody in the group gets it automatically —
+   nobody types it, and there is no file to keep in step. Only the owner can
+   change it, which the security rules enforce. */
+let sharedKey = "";
+export const setSharedKey = (key) => { sharedKey = String(key || "").trim(); };
+export const usingSharedKey = () => !!sharedKey;
 const ENDPOINT = "https://api.golfcourseapi.com/v1/search?search_query=";
 const AUTH = (key) => ({ Authorization: "Key " + key });
 
 const savedKey = () => { try { return localStorage.getItem(KEY_STORE) || ""; } catch { return ""; } };
-export const getKey = () => embeddedKey() || savedKey();
+export const getKey = () => sharedKey || savedKey();
 export const hasKey = () => !!getKey();
 export function setKey(k) {
   try { k && k.trim() ? localStorage.setItem(KEY_STORE, k.trim()) : localStorage.removeItem(KEY_STORE); } catch {}

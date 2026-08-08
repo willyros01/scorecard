@@ -1,9 +1,181 @@
 rules_version = '2';
+
+/* The Scorecard — version 2 security rules.
+ *
+ * These are the enforcement layer. There is no server tier in this app, so
+ * anything not enforced here is not enforced at all. App code runs on the
+ * user's own phone and can be edited by anyone who cares to.
+ *
+ * Three things are enforced that the interface also shows, and must not be
+ * trusted to the interface alone:
+ *
+ *   1. the join code           — checked here, never by app code
+ *   2. the 24-hour edit window — measured against the server's clock
+ *   3. the owner's permanence  — the owner cannot be demoted by anyone
+ */
+
 service cloud.firestore {
   match /databases/{database}/documents {
-    // A scorecard belongs to exactly one signed-in account. Nobody else can read or write it.
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function memberPath(assocId) {
+      return /databases/$(database)/documents/associations/$(assocId)/members/$(request.auth.uid);
+    }
+
+    function isMember(assocId) {
+      return signedIn() && exists(memberPath(assocId));
+    }
+
+    function role(assocId) {
+      return get(memberPath(assocId)).data.role;
+    }
+
+    function isAdmin(assocId) {
+      return isMember(assocId) && (role(assocId) == 'admin' || role(assocId) == 'owner');
+    }
+
+    function isOwner(assocId) {
+      return isMember(assocId) && role(assocId) == 'owner';
+    }
+
+    function association(assocId) {
+      return get(/databases/$(database)/documents/associations/$(assocId)).data;
+    }
+
+    /* The edit window runs from entry time, not the date played, and is
+       measured against request.time — the server's clock, not the device's. */
+    function withinEditWindow() {
+      return resource.data.enteredAt != null
+        && request.time < resource.data.enteredAt + duration.value(24, 'h');
+    }
+
+    /* ---------------- associations ---------------- */
+
+    match /associations/{assocId} {
+
+      allow read: if isMember(assocId);
+
+      allow create: if signedIn()
+        && request.resource.data.ownerUid == request.auth.uid;
+
+      /* The owner may rename the group or rotate the join code, but may not
+         hand ownership away by editing this document. */
+      allow update: if isOwner(assocId)
+        && request.resource.data.ownerUid == resource.data.ownerUid;
+
+      allow delete: if false;   /* deliberately impossible from the app */
+
+      /* ---------------- members ---------------- */
+
+      match /members/{memberUid} {
+
+        allow read: if isMember(assocId);
+
+        /* Joining. Note what this permits: a signed-in stranger may create
+           their OWN membership, and only if they present the correct code and
+           ask for the ordinary member role. The rules can read the association
+           document to compare codes even though that person cannot read it
+           themselves, so the code is never exposed. */
+        allow create: if signedIn()
+          && memberUid == request.auth.uid
+          && request.resource.data.role == 'member'
+          && request.resource.data.joinCode == association(assocId).joinCode;
+
+        /* Only the owner changes roles, and never the owner's own. */
+        allow update: if isOwner(assocId)
+          && memberUid != association(assocId).ownerUid;
+
+        /* People may leave; the owner may remove others; the owner cannot be
+           removed by anybody, including themselves. */
+        allow delete: if memberUid != association(assocId).ownerUid
+          && (memberUid == request.auth.uid || isOwner(assocId));
+      }
+
+      /* ---------------- golfers (the roster) ---------------- */
+
+      match /golfers/{golferId} {
+        allow read: if isMember(assocId);
+
+        /* Any member may add a golfer and may write index updates, because
+           posting a round for somebody moves that golfer's index. */
+        allow create, update: if isMember(assocId);
+
+        /* Deleting a golfer discards their history, so it is an admin act. */
+        allow delete: if isAdmin(assocId);
+      }
+
+      /* ---------------- rounds ---------------- */
+
+      match /rounds/{roundId} {
+        allow read: if isMember(assocId);
+
+        /* enteredBy cannot be forged, and enteredAt must be the server's
+           timestamp — otherwise a device could set it in the future and give
+           itself an indefinite edit window. */
+        allow create: if isMember(assocId)
+          && request.resource.data.enteredBy == request.auth.uid
+          && request.resource.data.enteredAt == request.time
+          && request.resource.data.assocId == assocId;
+
+        /* Any member may correct any round for 24 hours after it was entered.
+           This follows from "anyone can post for everybody" — the same people
+           who can enter a score can fix it. Admins are not time limited. */
+        allow update: if isAdmin(assocId)
+          || (isMember(assocId) && withinEditWindow()
+              && request.resource.data.enteredAt == resource.data.enteredAt
+              && request.resource.data.enteredBy == resource.data.enteredBy);
+
+        allow delete: if isAdmin(assocId)
+          || (isMember(assocId) && withinEditWindow());
+      }
+
+      /* ---------------- games ---------------- */
+
+      match /games/{gameId} {
+        allow read: if isMember(assocId);
+        allow create: if isMember(assocId)
+          && request.resource.data.createdBy == request.auth.uid;
+        allow update, delete: if isAdmin(assocId)
+          || (isMember(assocId) && resource.data.createdBy == request.auth.uid);
+      }
+    }
+
+    /* ---------------- version 1 data, kept readable ---------------- */
+
+    /* The version 1 single-document scorecard still lives here.
+     *
+     * Full read AND write, deliberately. Publishing these rules must not break
+     * version 1 — it keeps running, keeps saving, and stays your fallback until
+     * you have checked that version 2 holds everything correctly. The two apps
+     * write to different places and cannot disturb one another.
+     *
+     * Once you no longer need version 1, this block can be changed to read-only
+     * or removed. Not before. */
     match /users/{userId}/{document=**} {
       allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    /* ---------------- courses: shared across every group ---------------- */
+
+    match /courses/{courseId} {
+
+      /* Readable by anyone signed in. This is the point of the collection —
+         one entry for Royal Ontario, read by every group, entered once. */
+      allow read: if signedIn();
+
+      allow create: if signedIn()
+        && request.resource.data.createdBy == request.auth.uid;
+
+      /* Only whoever added a course may change it. A shared library invites
+         well-meaning edits that break other groups' data, so version 3 should
+         replace this with a curated review step. Until then, ratings that are
+         wrong get a new course entry rather than an edit war. */
+      allow update: if signedIn() && resource.data.createdBy == request.auth.uid;
+
+      allow delete: if false;   /* rounds reference courses; never orphan them */
     }
   }
 }
