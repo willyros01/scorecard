@@ -900,13 +900,14 @@ function askForBackupFile() {
 }
 
 function accountSection() {
+  const email = typeof db.currentEmail === "function" ? db.currentEmail() : "";
   return `<section class="panel">
     <div class="panel-head"><h2 class="panel-title">Account</h2></div>
     <div class="card padded">
       <div class="name">${esc(db.accountLabel())}</div>
       <div class="sub">${esc(sync.text)}${db.status().queued ? ` · ${db.status().queued} waiting to upload` : ""}</div>
       <div class="inline-actions stacked">
-        <button class="btn ghost" data-act="google">${db.currentEmail() ? "Signed in" : "Sign in with Google (optional)"}</button>
+        <button class="btn ghost" data-act="google">${email ? `Signed in as ${esc(email)}` : "Sign in with Google (optional)"}</button>
       </div>
       <p class="hint">Optional, and not needed for anything. It only ties this device to a Google account so your access survives clearing browser data.</p>
     </div>

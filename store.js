@@ -468,6 +468,13 @@ export async function signInWithGoogle() {
   }
 }
 
+/* The signed-in email, or empty for an anonymous device. Used only to show
+   whether Google sign-in has been used — it grants nothing on its own. */
+export const currentEmail = () => {
+  const user = fb && fb.auth && fb.auth.currentUser;
+  return user && !user.isAnonymous ? (user.email || "") : "";
+};
+
 export const accountLabel = () => {
   if (!configured) return "Local only";
   const user = fb && fb.auth.currentUser;
