@@ -1,5 +1,17 @@
 # The Scorecard — Version 2
 
+## Release procedure — follow this every time
+
+Anything that changes a screen or how the app behaves goes out as a version, not a patch:
+
+1. **Bump `self.APP_VERSION` in version.js.** Nothing else carries the version.
+2. **Run every test.** `node test/foundation.test.mjs`, `test/outbox.test.mjs`, `test/screens.test.mjs`, `test/join.test.mjs`. All four must pass before packaging.
+3. **Update the guides** if a screen, a role or a step changed — the quick start and the full guide.
+4. **Name the zip with the version**, e.g. scorecard-v2.3.0.zip.
+5. **Say in the release notes whether firestore.rules changed.** If it did, publishing them is step one for the user, before uploading anything.
+6. **Never ship a data-model change without a migration path** and a statement of what happens to existing data.
+
+
 Complete: data layer **and** screens. Nothing is deployed until you upload it.
 
 ## Setting it up — about 15 minutes

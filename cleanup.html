@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scorecard — Clean up</title>
+<link rel="stylesheet" href="./styles.css">
+<script src="./version.js"></script>
+<style>
+  body { padding: 24px 18px 60px; }
+  .box { max-width: 640px; margin: 0 auto; }
+  h1 { font-family: Georgia, serif; font-weight: 400; font-size: 30px; margin: 0 0 8px; }
+  .lead { color: var(--muted); margin: 0 0 22px; }
+  .grp { display: flex; gap: 12px; align-items: center; padding: 14px;
+         border-bottom: 1px solid var(--rule); }
+  .grp:last-child { border-bottom: 0; }
+  .grp .grow { flex: 1; min-width: 0; }
+  .tag { font-size: .8rem; font-weight: 700; padding: 3px 9px; border-radius: 999px; }
+  .tag.keep { background: rgba(31,86,65,.12); color: var(--pine); }
+  .tag.empty { background: rgba(180,64,47,.12); color: var(--pencil); }
+  #log { margin-top: 18px; }
+  #log div { padding: 5px 0; font-size: .95rem; }
+</style>
+</head>
+<body>
+<div class="box">
+  <h1>Clean up</h1>
+  <p class="lead">Removes groups that were created but never finished setting up. Your rounds, golfers and courses are not touched.</p>
+
+  <div class="note tip" style="margin-bottom:20px">
+    <b>Your version 1 scorecard is never touched by this page.</b> It lives somewhere else entirely and stays exactly as it is.
+  </div>
+
+  <div id="state" class="card padded">Connecting…</div>
+  <div id="list"></div>
+  <div id="actions"></div>
+  <div id="log"></div>
+
+  <p class="hint" style="margin-top:26px">
+    <a href="./">Back to the app</a>
+  </p>
+</div>
+
+<script type="module">
+/* A standalone page rather than a screen inside the app, so it still works
+   when the app itself will not open. Same Firebase project, same rules —
+   nothing here can do anything the rules would not already allow. */
+
+const stateEl = document.getElementById("state");
+const listEl = document.getElementById("list");
+const actionsEl = document.getElementById("actions");
+const logEl = document.getElementById("log");
+
+const say = (text, tone) => {
+  const line = document.createElement("div");
+  line.textContent = text;
+  if (tone === "bad") line.style.color = "var(--pencil)";
+  if (tone === "good") line.style.color = "var(--pine)";
+  logEl.appendChild(line);
+};
+
+const SDK = "https://www.gstatic.com/firebasejs/10.12.0";
+let db, mod, uid, groups = [];
+
+async function connect() {
+  const config = await import("./firebase-config.js");
+  if (!config.isConfigured) { stateEl.textContent = "No Firebase settings found in firebase-config.js."; return false; }
+
+  const [app, auth, store] = await Promise.all([
+    import(`${SDK}/firebase-app.js`),
+    import(`${SDK}/firebase-auth.js`),
+    import(`${SDK}/firebase-firestore.js`),
+  ]);
+  const instance = app.initializeApp(config.firebaseConfig);
+  const authority = auth.getAuth(instance);
+  db = store.getFirestore(instance);
+  mod = store;
+
+  uid = await new Promise((resolve) => {
+    auth.onAuthStateChanged(authority, async (user) => {
+      if (!user) { try { await auth.signInAnonymously(authority); } catch { resolve(null); } return; }
+      resolve(user.uid);
+    });
+  });
+  return !!uid;
+}
+
+/* Groups you created. A group with no members never finished setting up —
+   nobody can open it, and it will never appear in the app. */
+async function findGroups() {
+  const { collection, getDocs, query, where } = mod;
+  const found = await getDocs(query(collection(db, "associations"), where("ownerUid", "==", uid)));
+
+  const results = [];
+  for (const doc of found.docs) {
+    const data = doc.data();
+    let memberCount = 0;
+    try {
+      const members = await getDocs(collection(db, "associations", doc.id, "members"));
+      memberCount = members.size;
+    } catch { memberCount = -1; }
+    results.push({ id: doc.id, name: data.name || "Unnamed", memberCount });
+  }
+  return results;
+}
+
+function draw() {
+  const abandoned = groups.filter((g) => g.memberCount === 0);
+  const working = groups.filter((g) => g.memberCount !== 0);
+
+  stateEl.innerHTML = `<div class="name">${groups.length} group${groups.length === 1 ? "" : "s"} created by this account</div>
+    <div class="sub">${working.length} in use · ${abandoned.length} never finished setting up</div>`;
+
+  listEl.innerHTML = groups.length ? `<div class="card" style="margin-top:16px">
+    ${groups.map((g) => `<div class="grp">
+      <span class="grow"><span class="name">${g.name.replace(/[<>&]/g, "")}</span><br>
+        <span class="sub">${g.memberCount === 0 ? "no members — safe to remove" : `${g.memberCount} member${g.memberCount === 1 ? "" : "s"}`}</span></span>
+      <span class="tag ${g.memberCount === 0 ? "empty" : "keep"}">${g.memberCount === 0 ? "remove" : "keep"}</span>
+    </div>`).join("")}
+  </div>` : "";
+
+  actionsEl.innerHTML = abandoned.length
+    ? `<div class="inline-actions stacked" style="margin-top:18px">
+         <button class="btn" id="tidy">Remove the ${abandoned.length} unfinished group${abandoned.length === 1 ? "" : "s"}</button>
+       </div>
+       <p class="hint">Groups with members are left alone. Nothing else is deleted.</p>`
+    : `<p class="hint" style="margin-top:18px">Nothing to clean up.</p>`;
+
+  const button = document.getElementById("tidy");
+  if (button) button.onclick = () => tidy(abandoned);
+}
+
+async function tidy(abandoned) {
+  const button = document.getElementById("tidy");
+  button.disabled = true;
+  button.textContent = "Removing…";
+
+  const { doc, deleteDoc } = mod;
+  let removed = 0;
+  for (const group of abandoned) {
+    try {
+      await deleteDoc(doc(db, "associations", group.id));
+      removed++;
+      say(`Removed ${group.name}`, "good");
+    } catch (e) {
+      say(`Could not remove ${group.name} — ${(e && e.code) || "refused"}`, "bad");
+    }
+  }
+
+  say(`Done. ${removed} removed.`, "good");
+  if (removed < abandoned.length) {
+    say("If some were refused, publish the latest firestore.rules in the Firebase console and run this again.", "bad");
+  }
+  groups = await findGroups();
+  draw();
+}
+
+(async function run() {
+  try {
+    if (!(await connect())) { stateEl.textContent = "Could not sign in to Firebase."; return; }
+    groups = await findGroups();
+    draw();
+  } catch (e) {
+    stateEl.innerHTML = `<div class="name">Could not read your groups</div>
+      <div class="sub">${String((e && e.message) || e).replace(/[<>&]/g, "")}</div>`;
+    say("Most likely the rules in the Firebase console are older than this page. Publish the latest firestore.rules and reload.", "bad");
+  }
+})();
+</script>
+</body>
+</html>

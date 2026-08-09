@@ -21,6 +21,7 @@ let roster = [];        /* golfer ids playing in this group */
 let allGolfers = [];    /* every golfer, everywhere */
 let switching = false;
 let newGroupDraft = false;
+let skipImport = false;
 
 let tab = "enter";
 let sync = { text: "Starting", alert: false };
@@ -125,6 +126,21 @@ function screenJoin() {
     </div>`;
   }
 
+  /* If there is a version 1 scorecard waiting, importing it is the only thing
+     offered. Starting a fresh group first is how somebody ends up with an
+     empty group and their old data apparently missing — so that path is
+     closed until they have decided about the import. */
+  if (legacy && !skipImport) {
+    return `<div class="stack">
+      ${flashBar()}
+      ${migrationCard()}
+      <p class="hint" style="text-align:center">
+        <button class="linkbtn" data-act="skip-import">Start fresh instead, without my old data</button>
+      </p>
+      ${versionBlock()}
+    </div>`;
+  }
+
   return `<div class="stack">
     ${flashBar()}
     <div class="card padded">
@@ -176,7 +192,8 @@ async function importV1() {
   if (!name) { flashMsg("Type the name you play under"); return; }
 
   importing = true;
-  flashMsg("Importing. Do not close the app.");
+  flash = "Importing. This can take a moment — do not close the app.";
+  render();
   try {
     const result = await db.importLegacyV1({ v1: legacy.v1, assocName: groupName, displayName: name });
     importing = false;
@@ -189,7 +206,14 @@ async function importV1() {
       : `Imported ${result.check.rounds.found} of ${result.check.rounds.expected} rounds. Nothing was deleted — your version 1 scorecard still has everything. Tap Import again to finish.`);
   } catch (e) {
     importing = false;
-    flashMsg("The import did not finish. Nothing was lost — version 1 still has every round. See the message at the top.");
+    /* Say what actually went wrong. A silent failure here is what makes people
+       think their data has gone, when it is sitting untouched where it was. */
+    const code = String((e && (e.code || e.message)) || "");
+    const cause = code.includes("permission")
+      ? "Firebase refused the write, which means the rules in the console are older than this version. Publish the latest firestore.rules and tap Import again."
+      : code || "No detail was given.";
+    flashMsg(`The import did not finish. ${cause}`);
+    setTimeout(() => { flash = `Nothing was lost — your version 1 scorecard is untouched and version 1 still opens it.`; render(); }, 3400);
     render();
   }
 }
@@ -640,7 +664,16 @@ function screenAdmin() {
   if (!db.isOwner()) return empty("Not your area", "Only the group owner manages people and settings.");
 
   return `${flashBar()}
-  <section class="panel">
+  ${safe("People", peopleSection)}
+  ${safe("Group", groupSection)}
+  ${safe("Backup", backupSection)}
+  ${safe("Course lookup", lookupSection)}
+  ${safe("Account", accountSection)}
+  ${versionBlock()}`;
+}
+
+function peopleSection() {
+  return `<section class="panel">
     <div class="panel-head"><h2 class="panel-title">People</h2><span class="panel-count">${members.length || ""}</span></div>
     <div class="card">
       <div class="list">
@@ -662,9 +695,11 @@ function screenAdmin() {
       </div>
     </div>
     <p class="hint"><b>Guests</b> post their own rounds and see the results. <b>Admins</b> also add courses, manage the roster and post for anybody. <b>You</b> can do everything, and only you can change these.</p>
-  </section>
+  </section>`;
+}
 
-  <section class="panel">
+function groupSection() {
+  return `<section class="panel">
     <div class="panel-head"><h2 class="panel-title">Group</h2></div>
     <div class="card padded">
       <label class="lbl" style="margin-top:0">Group name</label>
@@ -673,13 +708,11 @@ function screenAdmin() {
         <button class="btn ghost" data-act="rename-group">Save the name</button>
       </div>
     </div>
-  </section>
-
-  ${backupSection()}
-  ${lookupSection()}
-  ${accountSection()}
-  ${versionBlock()}`;
+    <p class="hint"><a href="./cleanup.html">Clean up unused groups</a></p>
+  </section>`;
 }
+
+
 
 const roleLabel = (role) => (role === "owner" ? "owner" : role === "admin" ? "admin" : "guest");
 
@@ -921,6 +954,18 @@ function courseEditor() {
 
 function refreshScope() { golfers = sortedGolfers(); }
 
+/* Draws one section, and if it throws, says which one rather than taking the
+   whole screen down with it. A screen that is 90 per cent useful beats an
+   error card every time. */
+function safe(label, build) {
+  try { return build(); }
+  catch (e) {
+    return `<section class="panel"><div class="note warn">
+      <b>${esc(label)} could not be shown</b><br>${esc((e && e.message) || "Unknown error")}
+    </div></section>`;
+  }
+}
+
 function versionBlock() {
   return `<section class="version">
     <div><b>The Scorecard</b> <span class="mono">v${VERSION}</span></div>
@@ -1131,6 +1176,7 @@ view.addEventListener("click", async (e) => {
     case "begin": return begin();
     case "accept-invite": return acceptInvite();
     case "join-by-code": return joinByCode();
+    case "skip-import": skipImport = true; return render();
     case "show-code": showCodeEntry = true; return render();
     case "hide-code": showCodeEntry = false; return render();
     case "create-group": return createGroup();

@@ -56,7 +56,11 @@ service cloud.firestore {
 
     match /associations/{assocId} {
 
-      allow read: if isMember(assocId);
+      /* Members can read it. So can whoever created it, even if the
+         membership write never happened — that is what makes an abandoned
+         group findable and removable instead of stranded forever. */
+      allow read: if isMember(assocId)
+        || (signedIn() && resource.data.ownerUid == request.auth.uid);
 
       allow create: if signedIn()
         && request.resource.data.ownerUid == request.auth.uid;
@@ -66,13 +70,16 @@ service cloud.firestore {
       allow update: if isOwner(assocId)
         && request.resource.data.ownerUid == resource.data.ownerUid;
 
-      allow delete: if false;   /* deliberately impossible from the app */
+      /* Only whoever created it, and only ever their own. Needed so the
+         cleanup tool can remove groups that failed to set up properly. */
+      allow delete: if signedIn() && resource.data.ownerUid == request.auth.uid;
 
       /* ---------------- members ---------------- */
 
       match /members/{memberUid} {
 
-        allow read: if isMember(assocId);
+        allow read: if isMember(assocId)
+          || (signedIn() && association(assocId).ownerUid == request.auth.uid);
 
         /* Two ways a membership is created, and only ever for yourself.
          *
