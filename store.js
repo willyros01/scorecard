@@ -764,3 +764,13 @@ export async function createAnotherGroup({ name, displayName }) {
   await linkGolferForMember(displayName);
   return created;
 }
+
+
+/* Brings a version 1 scorecard into the group you are already in. */
+export async function importLegacyIntoCurrentGroup({ v1 }) {
+  const migrate = await import("./migrate.js");
+  const written = await migrate.runInto({ db: fb.db, mod: fb.mod.store, uid, v1, assocId });
+  const check = await migrate.verify({ db: fb.db, mod: fb.mod.store, assocId,
+    expected: { golfers: (v1.golfers || []).length, rounds: (v1.rounds || []).length } });
+  return { written, check };
+}

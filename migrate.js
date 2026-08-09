@@ -42,6 +42,17 @@ export function preview(v1) {
    run overwrites identical data instead of failing or duplicating.
  *
  * Returns a report of what was written. */
+/* Fills a group that already exists.
+ *
+ * Separate from run() because somebody who has already created a group can no
+ * longer reach the first-run import screen — and telling them to type
+ * seventeen names again is not an answer. */
+export async function runInto({ db, mod, uid, v1, assocId }) {
+  const { courses, golfers, rounds } =
+    model.migrateFromV1(v1, { assocId, assocName: "", ownerUid: uid, joinCode: "" });
+  return writeEverything({ db, mod, uid, assocId, courses, golfers, rounds });
+}
+
 export async function run({ db, mod, uid, v1, assocName, displayName }) {
   const assocId = `v1-${uid.slice(0, 10)}`;
   const joinCode = model.newJoinCode();
@@ -75,6 +86,33 @@ export async function run({ db, mod, uid, v1, assocName, displayName }) {
   );
   await head.commit();
 
+  const written2 = await writeEverything({ db, mod, uid, assocId, courses, golfers, rounds });
+
+  return {
+    assocId,
+    joinCode,
+    written: written2,
+    /* Left in place on purpose. */
+    v1Preserved: true,
+  };
+}
+
+/* The actual writing, shared by both entry points. */
+async function writeEverything({ db, mod, uid, assocId, courses, golfers, rounds }) {
+  const { doc, writeBatch, serverTimestamp } = mod;
+  const written = { courses: 0, golfers: 0, rounds: 0 };
+
+  const commitInChunks = async (items, pathFor, counterKey) => {
+    for (let i = 0; i < items.length; i += 400) {
+      const batch = writeBatch(db);
+      for (const item of items.slice(i, i + 400)) {
+        batch.set(doc(db, ...pathFor(item)), item, { merge: true });
+        written[counterKey]++;
+      }
+      await batch.commit();
+    }
+  };
+
   await commitInChunks(courses, (c) => ["courses", c.id], "courses");
 
   /* Golfers are people and live at the top level, so an imported player who
@@ -91,13 +129,7 @@ export async function run({ db, mod, uid, v1, assocName, displayName }) {
   const stamped = rounds.map((r) => ({ ...r, enteredAt: serverTimestamp(), enteredBy: uid }));
   await commitInChunks(stamped, (r) => ["associations", assocId, "rounds", r.id], "rounds");
 
-  return {
-    assocId,
-    joinCode,
-    written,
-    /* Left in place on purpose. */
-    v1Preserved: true,
-  };
+  return written;
 }
 
 /* Confirms afterwards that what is in Firestore matches what was imported,
