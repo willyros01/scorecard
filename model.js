@@ -206,7 +206,7 @@ export const buildMember = ({ uid, displayName, role = "member", joinCode }) => 
  * It is deterministic: the same input always produces the same ids, so running
  * the import twice writes the same documents instead of duplicating them.
  */
-export function migrateFromV1(v1, { assocId, assocName, ownerUid, joinCode }) {
+export function migrateFromV1(v1, { assocId, assocName, ownerUid, joinCode, existingByNameKey = {} }) {
   const stableId = (kind, key) =>
     `v1-${kind}-${String(key).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`;
 
@@ -227,9 +227,15 @@ export function migrateFromV1(v1, { assocId, assocName, ownerUid, joinCode }) {
   );
   const courseByOldId = new Map((v1.courses || []).map((c, i) => [c.id, courses[i]]));
 
-  const golfers = (v1.golfers || []).map((name) =>
-    buildGolfer({ id: stableId("golfer", name), name })
-  );   /* buildGolfer sets nameKey, which the uniqueness index needs */
+  /* If a golfer with this name already exists — because they were added by
+     hand, or play in another of your groups — reuse that record rather than
+     creating a second person with a second handicap. */
+  const golfers = (v1.golfers || []).map((name) => {
+    const key = nameKey(name);
+    const already = existingByNameKey[key];
+    if (already) return { ...already, name: String(name).trim(), nameKey: key };
+    return buildGolfer({ id: stableId("golfer", name), name });
+  });
   const golferByName = new Map(golfers.map((g) => [g.name, g]));
 
   /* Chronological, so each golfer's window ends up in the right order. */

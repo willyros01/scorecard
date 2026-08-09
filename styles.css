@@ -334,3 +334,17 @@ body { font-size: 1rem; }
 /* a value the person cannot change — shown, not editable */
 .field.locked { background: var(--tint); border-style: dashed; color: var(--ink); font-weight: 600; }
 .filters.two { grid-template-columns: 1fr 1fr; }
+
+/* the group code, big enough to read aloud */
+.codebox {
+  font-family: var(--mono); font-size: 2rem; font-weight: 700; letter-spacing: .18em;
+  text-align: center; padding: 1.1rem; margin: 0.8rem 0;
+  background: var(--paper); border: 2px dashed var(--sand); border-radius: 12px; color: var(--pine);
+}
+[data-theme="dark"] .codebox { color: #7EBEA0; }
+.btn.danger { background: var(--pencil); border-color: var(--pencil); color: #fff; }
+.btn.ghost.warn { color: var(--pencil); border-color: var(--pencil); }
+
+/* a plain checkbox with a readable label beside it */
+.checkline { display: flex; align-items: center; gap: 0.7rem; margin: 1rem 0 0.3rem; font-size: 1rem; }
+.checkline input { width: 22px; height: 22px; flex: 0 0 auto; accent-color: var(--pine); }

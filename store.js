@@ -300,15 +300,20 @@ export async function rebuildGolferIndex(golferId) {
     if (person.exists()) kept = model.windowFromOtherGroups(person.data().recentWindow, assocId);
   } catch { /* nothing kept; the fresh scan below still runs */ }
 
+  /* Deliberately no orderBy here. Combining a filter with a sort makes
+     Firestore demand a composite index, which failed for the user with
+     "The query requires an index". Sorting the handful of results in memory
+     costs nothing and needs no index at all. */
   const snapshot = await getDocs(
-    query(col("associations", assocId, "rounds"),
-      where("golferId", "==", golferId), orderBy("date", "desc"), limit(20))
+    query(col("associations", assocId, "rounds"), where("golferId", "==", golferId))
   );
   const fresh = [];
   snapshot.forEach((d) => {
     const r = d.data();
     fresh.push({ roundId: r.id, date: r.date, differential: r.differential, assocId });
   });
+  fresh.sort((a, b) => b.date.localeCompare(a.date));
+  fresh.length = Math.min(fresh.length, 20);
 
   const window = model.mergeWindow(kept, fresh);
   outbox.enqueue({ type: "update", path: ["golfers", golferId],
@@ -466,6 +471,98 @@ export async function signInWithGoogle() {
       await signInWithPopup(fb.auth, provider);
     } else { report(e); throw e; }
   }
+}
+
+/* Signing in with an email and a password.
+ *
+ * This is the fix for the problem that broke version 2: on iOS, Safari and an
+ * app opened from the home screen have completely separate storage. An
+ * anonymous account therefore differs between them, so the same person looked
+ * like two people, each with their own group, each opening on a different
+ * screen.
+ *
+ * Email and password is the only sign-in that works in both — it needs no
+ * pop-up and no trip to another site, so nothing Apple does can block it.
+ */
+export async function signInWithEmail({ email, password }) {
+  if (!fb) throw new Error("Firebase has not loaded yet.");
+  const { EmailAuthProvider, linkWithCredential, signInWithEmailAndPassword, createUserWithEmailAndPassword } = fb.mod.auth;
+  const address = String(email || "").trim();
+  const secret = String(password || "");
+  if (!address) throw new Error("auth/invalid-email");
+  if (secret.length < 6) throw new Error("auth/weak-password");
+
+  const current = fb.auth.currentUser;
+  const hasPassword = !!(current && current.providerData
+    && current.providerData.some((p) => p.providerId === "password"));
+
+  try {
+    if (current && current.isAnonymous) {
+      /* Upgrade this device's anonymous account so anything already on it
+         comes along rather than being stranded. */
+      await linkWithCredential(current, EmailAuthProvider.credential(address, secret));
+      uid = fb.auth.currentUser.uid;
+      clearError();
+      return { ok: true, outcome: "created" };
+    }
+
+    /* Already signed in with Google and no password yet.
+     *
+     * This matters more than it looks. Version 1 data belongs to the Google
+     * account that created it. Signing in with a fresh email would make a
+     * DIFFERENT account, and that data would be invisible — present in the
+     * database, unreachable by the app. So the password is attached to the
+     * account that already exists, keeping one identity and one set of data. */
+    if (current && !hasPassword) {
+      const owned = String(current.email || "").toLowerCase();
+      if (owned && owned !== address.toLowerCase()) {
+        throw new Error(`auth/wrong-email:${current.email}`);
+      }
+      await linkWithCredential(current, EmailAuthProvider.credential(current.email || address, secret));
+      uid = fb.auth.currentUser.uid;
+      clearError();
+      return { ok: true, outcome: "password-added", email: current.email };
+    }
+    await signInWithEmailAndPassword(fb.auth, address, secret);
+    uid = fb.auth.currentUser.uid;
+    clearError();
+    return { ok: true, outcome: "signed-in" };
+  } catch (e) {
+    const code = String((e && (e.code || e.message)) || "");
+    if (code.includes("email-already-in-use") || code.includes("credential-already-in-use")) {
+      await signInWithEmailAndPassword(fb.auth, address, secret);
+      uid = fb.auth.currentUser.uid;
+      clearError();
+      return { ok: true, outcome: "signed-in" };
+    }
+    if (code.includes("user-not-found")) {
+      await createUserWithEmailAndPassword(fb.auth, address, secret);
+      uid = fb.auth.currentUser.uid;
+      clearError();
+      return { ok: true, outcome: "created" };
+    }
+    report(e);
+    throw e;
+  }
+}
+
+export async function sendPasswordReset(email) {
+  if (!fb) throw new Error("Firebase has not loaded yet.");
+  await fb.mod.auth.sendPasswordResetEmail(fb.auth, String(email || "").trim());
+}
+
+export const isSignedIn = () => {
+  const user = fb && fb.auth && fb.auth.currentUser;
+  return !!(user && !user.isAnonymous);
+};
+
+export async function signOutEverywhere() {
+  if (!fb) return;
+  try { await fb.mod.auth.signOut(fb.auth); } catch {}
+  try { localStorage.removeItem(ASSOC_KEY); localStorage.removeItem(GROUPS_KEY); } catch {}
+  assocId = null;
+  myMember = null;
+  location.reload();
 }
 
 /* The signed-in email, or empty for an anonymous device. Used only to show
@@ -766,18 +863,66 @@ export function forgetGroup(id) {
 }
 
 /* Starting a second or third group, once you already belong to one. */
-export async function createAnotherGroup({ name, displayName }) {
+export async function createAnotherGroup({ name, displayName, addToRoster = true }) {
   const created = await createAssociation({ name, displayName });
-  await linkGolferForMember(displayName);
+  if (addToRoster) await linkGolferForMember(displayName);
   return created;
 }
 
 
 /* Brings a version 1 scorecard into the group you are already in. */
+/* Names already in use are reused rather than duplicated — this is what gave
+   the user two "Willy Rosales" and eighteen golfers instead of seventeen. */
 export async function importLegacyIntoCurrentGroup({ v1 }) {
   const migrate = await import("./migrate.js");
-  const written = await migrate.runInto({ db: fb.db, mod: fb.mod.store, uid, v1, assocId });
+
+  /* Look up who already exists before writing anything. */
+  const existingByNameKey = {};
+  try {
+    const { getDocs, collection } = fb.mod.store;
+    const snap = await getDocs(collection(fb.db, "golfers"));
+    snap.forEach((d) => { const g = d.data(); if (g.nameKey) existingByNameKey[g.nameKey] = g; });
+  } catch { /* none found; the import creates them */ }
+
+  const written = await migrate.runInto({ db: fb.db, mod: fb.mod.store, uid, v1, assocId, existingByNameKey });
   const check = await migrate.verify({ db: fb.db, mod: fb.mod.store, assocId,
     expected: { golfers: (v1.golfers || []).length, rounds: (v1.rounds || []).length } });
   return { written, check };
+}
+
+
+/* ---------------- deleting a group ---------------- */
+
+/* Removes a group and everything filed under it. Golfers are NOT deleted —
+   they are people who may play in your other groups, and their handicap is
+   built from rounds across all of them.
+ *
+ * Owner only, and the rules enforce it rather than the button being hidden. */
+export async function deleteGroup(targetId) {
+  const { collection, getDocs, doc, deleteDoc, writeBatch } = fb.mod.store;
+  const id = targetId || assocId;
+
+  const removeAll = async (name) => {
+    const snap = await getDocs(collection(fb.db, "associations", id, name));
+    for (let i = 0; i < snap.docs.length; i += 400) {
+      const batch = writeBatch(fb.db);
+      snap.docs.slice(i, i + 400).forEach((d) => batch.delete(d.ref));
+      await batch.commit();
+    }
+    return snap.size;
+  };
+
+  const counts = {};
+  for (const name of ["rounds", "games", "roster", "members"]) {
+    try { counts[name] = await removeAll(name); } catch { counts[name] = -1; }
+  }
+  await deleteDoc(doc(fb.db, "associations", id));
+
+  forgetGroup(id);
+  if (id === assocId) {
+    assocId = null;
+    myMember = null;
+    try { localStorage.removeItem(ASSOC_KEY); } catch {}
+  }
+  return counts;
 }

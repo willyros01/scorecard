@@ -22,11 +22,14 @@ let allGolfers = [];    /* every golfer, everywhere */
 let switching = false;
 let newGroupDraft = false;
 let skipImport = false;
+let confirmDeleteGroup = false;
+let confirmSignOut = false;
+let authForm = { email: "", password: "" };
 
 let tab = "enter";
 let sync = { text: "Starting", alert: false };
 let flash = null;
-let joinForm = { name: "", groupName: "", code: "" };
+let joinForm = { name: "", groupName: "", code: "", ownerPlays: true };
 let form = { date: today(), golferId: "", courseId: "", teeId: "", gross: "", adjusted: "", notes: "", gameId: "" };
 let filter = { golferId: "", year: "", month: "", courseId: "" };
 let drill = { year: null, month: null };
@@ -97,15 +100,37 @@ function flashMsg(msg) { flash = msg; render(); setTimeout(() => { flash = null;
 
 /* Shown until this device belongs to a group. Everything else is unreachable
    until then, which is what makes the rest of the app simpler. */
-/* The first screen. One box, one button.
+/* The first screen.
  *
- * Whether this ends up joining a group or starting one depends on how the
- * person arrived, not on a choice they have to understand. Somebody sent an
- * invitation link: they join it. Nobody did: they get their own group, which
- * can be renamed later. Either way the next thing they see is the Enter tab.
+ * Starting a group requires signing in with an email and a password. That is
+ * not bureaucracy — it is the fix for the bug that made version 2 unusable.
+ * On iOS, Safari and an app opened from the home screen keep separate storage,
+ * so an anonymous account differs between them: the same person appeared as
+ * two people, each quietly getting their own group. A real account is the same
+ * account in both.
+ *
+ * Joining by invitation still needs nothing at all. A guest taps a link and
+ * types a name.
  */
 function screenJoin() {
   const invite = db.readJoinLink();
+
+  if (invite) {
+    return `<div class="stack">
+      ${flashBar()}
+      <div class="card padded">
+        <h2 class="panel-title">You have been invited</h2>
+        <p class="hint">Type the name you play under and you are in. No account, no password.</p>
+        <label class="lbl">Your name</label>
+        <input class="field" name="join-name" value="${esc(joinForm.name)}" placeholder="e.g. Willy Rosales" autocomplete="name">
+        <div class="inline-actions stacked">
+          <button class="btn" data-act="accept-invite" ${joining ? "disabled" : ""}>${joining ? "Joining…" : "Join the group"}</button>
+        </div>
+        <p class="hint">Using more than one device? Tap this same link on each of them.</p>
+      </div>
+      ${versionBlock()}
+    </div>`;
+  }
 
   if (showCodeEntry) {
     return `<div class="stack">
@@ -126,38 +151,56 @@ function screenJoin() {
     </div>`;
   }
 
-  /* If there is a version 1 scorecard waiting, importing it is the only thing
-     offered. Starting a fresh group first is how somebody ends up with an
-     empty group and their old data apparently missing — so that path is
-     closed until they have decided about the import. */
-  if (legacy && !skipImport) {
-    return `<div class="stack">
-      ${flashBar()}
-      ${migrationCard()}
-      <p class="hint" style="text-align:center">
-        <button class="linkbtn" data-act="skip-import">Start fresh instead, without my old data</button>
-      </p>
-      ${versionBlock()}
-    </div>`;
-  }
+  const signedIn = db.isSignedIn();
 
   return `<div class="stack">
     ${flashBar()}
-    <div class="card padded">
-      <h2 class="panel-title">${invite ? "You have been invited" : "Welcome"}</h2>
-      <p class="hint">${invite
-        ? "Type the name you play under and you are in."
-        : "Type your name to begin. Everything else can wait."}</p>
-      <label class="lbl">Your name</label>
-      <input class="field" name="join-name" value="${esc(joinForm.name)}" placeholder="e.g. Willy Rosales" autocomplete="name">
-      <div class="inline-actions stacked">
-        <button class="btn" data-act="begin" ${joining ? "disabled" : ""}>${joining ? "One moment…" : "Start"}</button>
+
+    ${signedIn ? `
+      <div class="card padded">
+        <h2 class="panel-title">Start your group</h2>
+        <p class="hint">Signed in as <b>${esc(db.currentEmail())}</b>. This is the same account on every device, so your groups follow you.</p>
+        <label class="lbl">Your name</label>
+        <input class="field" name="join-name" value="${esc(joinForm.name)}" placeholder="e.g. Willy Rosales" autocomplete="name">
+        <label class="lbl">Group name</label>
+        <input class="field" name="group-name" value="${esc(joinForm.groupName)}" placeholder="Golfing Buddies">
+        <label class="checkline">
+          <input type="checkbox" name="owner-plays" ${joinForm.ownerPlays ? "checked" : ""}>
+          <span>Add me to the roster as a player</span>
+        </label>
+        <p class="hint" style="margin-top:0">Untick this if you organise but do not play. Either way you can add or remove anybody later, including yourself.</p>
+        <div class="inline-actions stacked">
+          <button class="btn" data-act="begin" ${joining ? "disabled" : ""}>${joining ? "One moment…" : "Create the group"}</button>
+        </div>
       </div>
-    </div>
-    ${invite ? "" : `${migrationCard()}
-    <p class="hint" style="text-align:center">
-      Joining someone else's group? <button class="linkbtn" data-act="show-code">I was given a code</button>
-    </p>`}
+      ${migrationCard()}
+    ` : `
+      <div class="card padded">
+        <h2 class="panel-title">Sign in</h2>
+        <p class="hint">Needed once, so this is the same account whether you open the app in Safari or from your home screen. Without it, each one becomes a separate person with a separate group — which is exactly what went wrong before.</p>
+        ${db.currentEmail() ? `<div class="note tip">This device is already known to Google as <b>${esc(db.currentEmail())}</b>. Use that email and choose a password for it — that keeps your existing data. A different email would start a separate, empty account.</div>` : ""}
+        <label class="lbl">Email</label>
+        <input class="field" name="email" type="email" value="${esc(authForm.email || db.currentEmail())}" placeholder="you@example.com" autocomplete="username" autocapitalize="none">
+        <label class="lbl">Password</label>
+        <input class="field" name="password" type="password" placeholder="At least 6 characters" autocomplete="current-password">
+        <div class="inline-actions stacked">
+          <button class="btn" data-act="sign-in" ${joining ? "disabled" : ""}>${joining ? "Signing in…" : "Sign in"}</button>
+        </div>
+        <p class="hint">New email? An account is made for you. <b>This is a password for this app only</b> — not your email password. Pick a different one.</p>
+        <div class="inline-actions stacked">
+          <button class="btn ghost" data-act="reset-password">Forgot the password</button>
+        </div>
+      </div>
+      <p class="hint" style="text-align:center">
+        Been sent an invitation? Tap that link instead — guests need no account.
+      </p>
+      <p class="hint" style="text-align:center">
+        Looking for the Google button? It only works in the Safari browser, never in an app opened from the home screen. Email and password works in both.
+      </p>
+      <p class="hint" style="text-align:center">
+        <button class="linkbtn" data-act="show-code">I was given a code</button>
+      </p>
+    `}
     ${versionBlock()}
   </div>`;
 }
@@ -313,6 +356,11 @@ function screenEnter() {
       ${diff != null ? `<span class="stamp">${diff.toFixed(1)}</span>` : ""}
     </div>` : ""}
 
+    ${ready2 ? "" : `<p class="hint">${[
+      golfer ? "" : "choose the golfer",
+      course ? (tee ? "" : "choose the tees") : "choose the course",
+      +form.gross > 0 ? "" : "type the score",
+    ].filter(Boolean).join(", ").replace(/^./, (c) => c.toUpperCase())} to enable Post.</p>`}
     <button class="btn" data-act="post" ${ready2 ? "" : "disabled"}>${editingRound ? "Save changes" : "Post round"}</button>
   </div>`;
 }
@@ -493,8 +541,9 @@ function gameEditor() {
       ${sortedCourses().map((c) => `<option value="${c.id}" ${c.id === d.courseId ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select>
     <label class="lbl">Name (optional)</label>
     <input class="field" name="g-name" value="${esc(d.name)}" placeholder="Saturday medal">
+    ${d.courseId ? "" : `<p class="hint">Pick the course to enable Save.</p>`}
     <div class="inline-actions stacked">
-      <button class="btn" data-act="save-game">Save game</button>
+      <button class="btn" data-act="save-game" ${d.courseId ? "" : "disabled"}>Save game</button>
       <button class="btn ghost" data-act="cancel-game">Cancel</button>
     </div>
   </div>`;
@@ -592,6 +641,10 @@ function screenManage() {
       <p class="hint">A separate set of rounds and games. Golfers you add to both keep one handicap across them.</p>
       <label class="lbl">Group name</label>
       <input class="field" name="new-group-name" placeholder="Tuesday Fourball">
+      <label class="checkline">
+        <input type="checkbox" name="new-owner-plays" checked>
+        <span>Add me to this group's roster too</span>
+      </label>
       <div class="inline-actions stacked">
         <button class="btn" data-act="save-new-group">Create it</button>
         <button class="btn ghost" data-act="cancel-new-group">Cancel</button>
@@ -746,6 +799,23 @@ function groupSection() {
       </div>
     </div>
     <p class="hint"><a href="./cleanup.html">Clean up unused groups</a></p>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head"><h2 class="panel-title">Delete this group</h2></div>
+    <div class="card padded">
+      <p class="hint" style="margin:0 0 0.7rem">Removes <b>${esc(association ? association.name : "")}</b> and every round and game in it. <b>Golfers are not deleted</b> — they are people, and they keep their handicap and their place in your other groups.</p>
+      ${confirmDeleteGroup ? `
+        <div class="note warn">This cannot be undone. ${rounds.length} round${rounds.length === 1 ? "" : "s"} will go.</div>
+        <div class="inline-actions stacked">
+          <button class="btn danger" data-act="really-delete-group">Yes, delete it</button>
+          <button class="btn ghost" data-act="cancel-delete-group">Keep it</button>
+        </div>
+      ` : `<div class="inline-actions stacked">
+          <button class="btn ghost warn" data-act="delete-group">Delete this group</button>
+        </div>`}
+      <p class="hint">Take a backup first if you are not certain.</p>
+    </div>
   </section>`;
 }
 
@@ -906,10 +976,19 @@ function accountSection() {
     <div class="card padded">
       <div class="name">${esc(db.accountLabel())}</div>
       <div class="sub">${esc(sync.text)}${db.status().queued ? ` · ${db.status().queued} waiting to upload` : ""}</div>
-      <div class="inline-actions stacked">
-        <button class="btn ghost" data-act="google">${email ? `Signed in as ${esc(email)}` : "Sign in with Google (optional)"}</button>
-      </div>
-      <p class="hint">Optional, and not needed for anything. It only ties this device to a Google account so your access survives clearing browser data.</p>
+      ${email ? `
+        <p class="hint" style="margin-top:0">Signed in as <b>${esc(email)}</b>. Use this same email and password on your other devices and you are one person everywhere.</p>
+        <div class="inline-actions stacked">
+          <button class="btn ghost" data-act="sign-out">Sign out of this device</button>
+        </div>
+        <p class="hint">Signing out does not delete anything. It returns this device to the first screen so you can sign in as somebody else — useful if you ever set the password on the wrong account.</p>
+      ` : `
+        <div class="inline-actions stacked">
+          <button class="btn ghost" data-act="google">Sign in with Google — Safari only</button>
+        </div>
+        <p class="hint"><b>This only works in the Safari browser.</b> It cannot work in an app opened from the home screen, because iOS blocks the window Google needs. That is Apple's rule, not a setting anybody can change.</p>
+        <p class="hint">You do not need it. Email and password works everywhere, including here.</p>
+      `}
     </div>
   </section>`;
 }
@@ -1108,9 +1187,11 @@ view.addEventListener("input", (e) => {
   if (n === "notes") { form.notes = e.target.value; return; }
   if (n === "finder-q") { finder.q = e.target.value; return; }
   if (n === "join-name" || n === "join-name-2") { joinForm.name = e.target.value; return; }
+  if (n === "email") { authForm.email = e.target.value; return; }
   if (n === "group-name" || n === "import-group") { joinForm.groupName = e.target.value; return; }
   if (n === "import-name") { joinForm.name = e.target.value; return; }
   if (n === "join-code") { joinForm.code = e.target.value; return; }
+  if (n === "owner-plays") { joinForm.ownerPlays = e.target.checked; return; }
   if (n === "g-name") { gameDraft.name = e.target.value; return; }
   if (e.target.dataset.teeField) {
     const [i, key] = e.target.dataset.teeField.split(":");
@@ -1212,6 +1293,14 @@ view.addEventListener("click", async (e) => {
     case "post": return postRound();
 
     case "begin": return begin();
+    case "sign-in": return signIn();
+    case "reset-password": {
+      const address = ((view.querySelector('[name="email"]') || {}).value || authForm.email).trim();
+      if (!address) { flashMsg("Type your email address first"); return; }
+      try { await db.sendPasswordReset(address); flashMsg(`Reset link sent to ${address}`); }
+      catch { flashMsg("Couldn't send the reset link."); }
+      return;
+    }
     case "accept-invite": return acceptInvite();
     case "join-by-code": return joinByCode();
     case "skip-import": skipImport = true; return render();
@@ -1229,7 +1318,11 @@ view.addEventListener("click", async (e) => {
       flashMsg("Creating…");
       try {
         const me = members.find((m) => m.uid === db.status().uid);
-        const created = await db.createAnotherGroup({ name, displayName: me ? me.displayName : "Me" });
+        const box = view.querySelector('[name="new-owner-plays"]');
+        const created = await db.createAnotherGroup({
+          name, displayName: me ? me.displayName : "Me",
+          addToRoster: box ? box.checked : true,
+        });
         await start(created.id);
         flashMsg(`${name} created. You are its owner.`);
       } catch { flashMsg("Couldn't create it — the red bar above says why."); render(); }
@@ -1259,8 +1352,38 @@ view.addEventListener("click", async (e) => {
 
     case "share-invite": return openShare(
       `Join our golf scorecard:\n${db.joinLink(association)}\n\nOne tap, enter your name, done.`, "Invitation");
-    case "show-code": return flashMsg(`Group code: ${association.joinCode}`);
+    case "show-code": {
+      if (!association) return;
+      sheetEl.hidden = false;
+      sheetEl.innerHTML = `<div class="sheet-body">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <h2>Group code</h2><button class="rowbtn" data-close="1">Close</button></div>
+        <p class="hint">For somebody who cannot receive a link. Read it out — it is six characters.</p>
+        <div class="codebox">${esc(association.joinCode)}</div>
+        <p class="hint">The invitation link is easier and carries this code inside it.</p>
+      </div>`;
+      return;
+    }
 
+    case "sign-out": {
+      if (!confirmSignOut) { confirmSignOut = true; flashMsg("Tap Sign out again to confirm. Nothing is deleted."); return render(); }
+      confirmSignOut = false;
+      await db.signOutEverywhere();
+      return;
+    }
+    case "delete-group": confirmDeleteGroup = true; return render();
+    case "cancel-delete-group": confirmDeleteGroup = false; return render();
+    case "really-delete-group": {
+      confirmDeleteGroup = false;
+      flashMsg("Deleting…");
+      try {
+        await db.deleteGroup();
+        const others = db.knownGroups();
+        if (others.length) { await start(others[0].id); flashMsg("Deleted. Switched to your other group."); }
+        else { association = null; golfers = []; rounds = []; courses = []; games = []; members = []; roster = []; tab = "enter"; flashMsg("Deleted."); }
+      } catch { flashMsg("Couldn't delete it — the red bar above says why."); }
+      return render();
+    }
     case "import-here": return importHere();
     case "rename-group": {
       const field = view.querySelector('[name="assoc-name"]');
@@ -1335,7 +1458,32 @@ async function begin() {
   joinForm.name = name;
   const invite = db.readJoinLink();
   if (invite) return acceptInvite();
-  return createGroup(name);
+
+  const groupName = ((view.querySelector('[name="group-name"]') || {}).value || joinForm.groupName).trim();
+  return createGroup(name, groupName || `${name}'s group`);
+}
+
+async function signIn() {
+  const email = ((view.querySelector('[name="email"]') || {}).value || authForm.email).trim();
+  const password = (view.querySelector('[name="password"]') || {}).value || "";
+  if (!email) { flashMsg("Type your email address"); return; }
+  if (password.length < 6) { flashMsg("The password needs at least six characters"); return; }
+  authForm = { email, password: "" };
+  joining = true;
+  flashMsg("Signing in…");
+  try {
+    const result = await db.signInWithEmail({ email, password });
+    joining = false;
+    flashMsg(
+      result.outcome === "password-added"
+        ? `Password added to ${result.email}. That is now your one account — use this email and password on every device.`
+        : result.outcome === "created" ? "Account created. Now name your group."
+        : "Signed in.");
+  } catch {
+    joining = false;
+    flashMsg("Sign-in didn't complete — the red bar above says why.");
+  }
+  render();
 }
 
 async function acceptInvite() {
@@ -1377,16 +1525,22 @@ async function joinByCode() {
   } else { joining = false; render(); }
 }
 
-async function createGroup(name) {
+async function createGroup(name, groupName) {
+  const box = view.querySelector('[name="owner-plays"]');
+  const playing = box ? box.checked : joinForm.ownerPlays;
   joining = true;
   flashMsg("Setting up…");
   try {
-    /* Named after them for now. Renaming it lives in Admin, for later. */
-    const created = await db.createAssociation({ name: `${name}'s group`, displayName: name });
-    await db.linkGolferForMember(name);
+    const created = await db.createAssociation({ name: groupName, displayName: name });
+    /* Only if they said they play. An organiser who does not play should not
+       appear on the roster, and should certainly not get a handicap record
+       created for them without being asked. */
+    if (playing) await db.linkGolferForMember(name);
     await start(created.id);
     joining = false;
-    flashMsg("Ready. Post a round, or invite the others from the Admin tab.");
+    flashMsg(playing
+      ? "Ready. Add the rest of your golfers under Manage, or invite them from Admin."
+      : "Ready. Add your golfers under Manage — you are organising, not on the roster.");
   } catch {
     joining = false;
     flashMsg("Couldn't set up the group — the red bar above says why.");

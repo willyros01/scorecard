@@ -47,9 +47,9 @@ export function preview(v1) {
  * Separate from run() because somebody who has already created a group can no
  * longer reach the first-run import screen — and telling them to type
  * seventeen names again is not an answer. */
-export async function runInto({ db, mod, uid, v1, assocId }) {
+export async function runInto({ db, mod, uid, v1, assocId, existingByNameKey = {} }) {
   const { courses, golfers, rounds } =
-    model.migrateFromV1(v1, { assocId, assocName: "", ownerUid: uid, joinCode: "" });
+    model.migrateFromV1(v1, { assocId, assocName: "", ownerUid: uid, joinCode: "", existingByNameKey });
   return writeEverything({ db, mod, uid, assocId, courses, golfers, rounds });
 }
 
