@@ -978,12 +978,25 @@ function accountSection() {
   const hasGroup = !!db.currentAssociation();
 
   if (email) {
+    const settled = typeof db.hasPassword === "function" ? db.hasPassword() : true;
     return `<section class="panel">
       <div class="panel-head"><h2 class="panel-title">Account</h2></div>
       <div class="card padded">
         <div class="name">${esc(email)}</div>
-        <div class="sub">${esc(sync.text)}</div>
-        <p class="hint">Use this email and password on your other devices and you are one person everywhere.</p>
+        <div class="sub">${esc(sync.text)}${settled ? "" : " · no password yet"}</div>
+
+        ${settled ? `
+          <p class="hint">Use this email and password on your other devices and you are one person everywhere.</p>
+        ` : `
+          <div class="note"><b>One step left.</b> You are signed in through Google, which only works here in Safari. Set a password so you can reach this same account from the home-screen app, where Google cannot work.</div>
+          <label class="lbl">Password for this app</label>
+          <input class="field" name="password" type="password" placeholder="Invent one, at least 6 characters" autocomplete="new-password">
+          <div class="inline-actions stacked">
+            <button class="btn" data-act="set-password" ${joining ? "disabled" : ""}>${joining ? "Setting…" : "Set the password"}</button>
+          </div>
+          <p class="hint"><b>Not your Gmail password.</b> A new one, for this app only. Write it down — you will type it on every other device, with the email above.</p>
+        `}
+
         <div class="inline-actions stacked">
           <button class="btn ghost" data-act="sign-out">Sign out of this device</button>
         </div>
@@ -1316,6 +1329,23 @@ view.addEventListener("click", async (e) => {
 
     case "begin": return begin();
     case "sign-in": return signIn();
+    case "set-password": {
+      const field = view.querySelector('[name="password"]');
+      const secret = field ? field.value : "";
+      if ((secret || "").length < 6) { flashMsg("The password needs at least six characters"); return; }
+      joining = true;
+      flashMsg("Setting the password…");
+      render();
+      try {
+        const result = await db.signInWithEmail({ email: db.currentEmail(), password: secret });
+        joining = false;
+        flashMsg(`Password set on ${db.currentEmail()}. Use that email and this password on your other devices.`);
+      } catch {
+        joining = false;
+        flashMsg("Couldn't set the password — the red bar above says why.");
+      }
+      return render();
+    }
     case "reset-password": {
       const address = ((view.querySelector('[name="email"]') || {}).value || authForm.email).trim();
       if (!address) { flashMsg("Type your email address first"); return; }

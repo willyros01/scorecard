@@ -551,6 +551,15 @@ export async function sendPasswordReset(email) {
   await fb.mod.auth.sendPasswordResetEmail(fb.auth, String(email || "").trim());
 }
 
+/* Whether this account can already be signed into with a password. A Google
+   account cannot, until one is added — which is the whole point of the panel
+   that uses this. */
+export const hasPassword = () => {
+  const user = fb && fb.auth && fb.auth.currentUser;
+  return !!(user && user.providerData
+    && user.providerData.some((p) => p.providerId === "password"));
+};
+
 export const isSignedIn = () => {
   const user = fb && fb.auth && fb.auth.currentUser;
   return !!(user && !user.isAnonymous);
