@@ -26,6 +26,7 @@
 <div class="box">
   <h1>Resetting The Scorecard</h1>
   <p>This clears the saved copy of the app on this device so the newest version loads. Your rounds are safe — they live in Firebase, not here.</p>
+  <div id="ver" class="done" style="background:#1F5641;margin-bottom:20px">Checking which version is on the server…</div>
   <div id="log"></div>
   <div id="finish"></div>
 </div>
@@ -36,6 +37,22 @@
    to a fresh copy of the app. */
 (async function () {
   const log = document.getElementById("log");
+
+  /* Reads version.js straight from the server, bypassing anything cached, so
+     you can confirm the upload landed before opening the app at all. */
+  (async function showVersion() {
+    const box = document.getElementById("ver");
+    try {
+      const res = await fetch("./version.js?t=" + Date.now(), { cache: "no-store" });
+      const text = await res.text();
+      const found = text.match(/APP_VERSION\s*=\s*"([^"]+)"/);
+      box.textContent = found
+        ? "Version on the server: " + found[1]
+        : "Could not read the version from the server.";
+    } catch {
+      box.textContent = "Could not reach the server to check the version.";
+    }
+  })();
   const say = (text) => {
     const line = document.createElement("div");
     line.className = "ok";

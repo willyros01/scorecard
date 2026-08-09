@@ -969,33 +969,55 @@ function askForBackupFile() {
   picker.click();
 }
 
+/* Signing in has to be reachable from inside the app, not only on the very
+   first screen. Somebody who already belongs to a group never sees that screen
+   again — which left them anonymous, and therefore a different person in
+   Safari and in the home-screen app, with no way to fix it. */
 function accountSection() {
   const email = typeof db.currentEmail === "function" ? db.currentEmail() : "";
-  return `<section class="panel">
-    <div class="panel-head"><h2 class="panel-title">Account</h2></div>
-    <div class="card padded">
-      <div class="name">${esc(db.accountLabel())}</div>
-      <div class="sub">${esc(sync.text)}${db.status().queued ? ` · ${db.status().queued} waiting to upload` : ""}</div>
-      ${email ? `
-        <p class="hint" style="margin-top:0">Signed in as <b>${esc(email)}</b>. Use this same email and password on your other devices and you are one person everywhere.</p>
+  const hasGroup = !!db.currentAssociation();
+
+  if (email) {
+    return `<section class="panel">
+      <div class="panel-head"><h2 class="panel-title">Account</h2></div>
+      <div class="card padded">
+        <div class="name">${esc(email)}</div>
+        <div class="sub">${esc(sync.text)}</div>
+        <p class="hint">Use this email and password on your other devices and you are one person everywhere.</p>
         <div class="inline-actions stacked">
           <button class="btn ghost" data-act="sign-out">Sign out of this device</button>
         </div>
-        <p class="hint">Signing out does not delete anything. It returns this device to the first screen so you can sign in as somebody else — useful if you ever set the password on the wrong account.</p>
-      ` : `
-        <div class="inline-actions stacked">
-          <button class="btn ghost" data-act="google">Sign in with Google — Safari only</button>
-        </div>
-        <p class="hint"><b>This only works in the Safari browser.</b> It cannot work in an app opened from the home screen, because iOS blocks the window Google needs. That is Apple's rule, not a setting anybody can change.</p>
-        <p class="hint">You do not need it. Email and password works everywhere, including here.</p>
-      `}
+        <p class="hint">Signing out deletes nothing. It returns this device to the first screen.</p>
+      </div>
+    </section>`;
+  }
+
+  return `<section class="panel">
+    <div class="panel-head"><h2 class="panel-title">Account</h2></div>
+    <div class="card padded">
+      <div class="name">This device only</div>
+      <p class="hint">Right now this device is not tied to any account. That means Safari and the home-screen app count as two different people, each with their own groups. Signing in fixes that.</p>
+
+      <div class="note tip"><b>If you have version 1 data, do this in order.</b> Tap the Google button first — it can only work here in Safari — then come back and set a password. Setting a password without that step would create a separate, empty account.</div>
+
+      <div class="inline-actions stacked">
+        <button class="btn ghost" data-act="google">Sign in with Google — Safari only</button>
+      </div>
+      <p class="hint">Never works in an app opened from the home screen; iOS blocks the window Google needs.</p>
+
+      <label class="lbl">Email</label>
+      <input class="field" name="email" type="email" value="${esc(authForm.email)}" placeholder="you@example.com" autocomplete="username" autocapitalize="none">
+      <label class="lbl">Password for this app</label>
+      <input class="field" name="password" type="password" placeholder="Invent one, at least 6 characters" autocomplete="new-password">
+      <div class="inline-actions stacked">
+        <button class="btn" data-act="sign-in" ${joining ? "disabled" : ""}>${joining ? "Signing in…" : "Set the password"}</button>
+      </div>
+      <p class="hint"><b>Not your email password.</b> A new one, for this app only. You will type it on your other devices.</p>
+      ${hasGroup ? `<p class="hint">Your groups and rounds stay exactly as they are — signing in attaches this device to an account, it does not move anything.</p>` : ""}
     </div>
   </section>`;
 }
 
-/* Only the owner sees this, and only the owner can change it — the rules
-   reject the write from anybody else. Everyone else in the group simply finds
-   that course search works. */
 function lookupSection() {
   if (!db.isOwner()) return "";
   const set = lookup.usingSharedKey();
@@ -1476,8 +1498,8 @@ async function signIn() {
     joining = false;
     flashMsg(
       result.outcome === "password-added"
-        ? `Password added to ${result.email}. That is now your one account — use this email and password on every device.`
-        : result.outcome === "created" ? "Account created. Now name your group."
+        ? `Password set on ${result.email}. That is now your one account — use this email and password on every device.`
+        : result.outcome === "created" ? "Account created. Use this email and password on your other devices."
         : "Signed in.");
   } catch {
     joining = false;
