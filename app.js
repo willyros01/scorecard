@@ -1396,6 +1396,7 @@ view.addEventListener("click", async (e) => {
       try {
         const result = await db.signInWithEmail({ email: db.currentEmail(), password: secret });
         joining = false;
+        await settleGroup(db.currentAssociation());
         flashMsg(`Password set on ${db.currentEmail()}. Use that email and this password on your other devices.`);
       } catch (err) {
         joining = false;
@@ -1593,6 +1594,7 @@ async function signIn() {
   try {
     const result = await db.signInWithEmail({ email, password });
     joining = false;
+    await settleGroup(db.currentAssociation());
     flashMsg(
       result.outcome === "password-added"
         ? `Password set on ${result.email}. That is now your one account — use this email and password on every device.`
@@ -1797,6 +1799,32 @@ async function start(assocId) {
   render();
 }
 
+/* Works out which group this account should actually be looking at.
+ *
+ * A device can be left pointing at a group created by an older identity — the
+ * anonymous account it had before signing in. That group refuses every write,
+ * which looks like a broken app. So: check membership, and if it is not ours,
+ * move to one that is. */
+async function settleGroup(preferred) {
+  const mine = await db.loadMyGroups();
+
+  if (preferred && await db.amMemberOf(preferred)) {
+    await start(preferred);
+    return;
+  }
+
+  for (const group of mine) {
+    if (await db.amMemberOf(group.id)) {
+      await start(group.id);
+      if (preferred && preferred !== group.id) {
+        flashMsg(`Switched to ${group.name}. The group this device was showing belonged to an older sign-in on it.`);
+      }
+      return;
+    }
+  }
+  /* Nothing belongs to this account: the first screen handles it. */
+}
+
 db.onChange((s) => { sync = s; render(); });
 
 (async function boot() {
@@ -1806,10 +1834,7 @@ db.onChange((s) => { sync = s; render(); });
   const invite = db.readJoinLink();
   const remembered = db.recallAssociation();
 
-  if (remembered) {
-    const member = await db.loadMembership(remembered);
-    if (member) await start(remembered);
-  }
+  await settleGroup(remembered);
 
   /* Look for a version 1 scorecard whether or not there is already a group.
      Somebody who created one first still needs a way to bring their data in. */

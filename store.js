@@ -197,6 +197,7 @@ export async function createAssociation({ name, displayName }) {
   assocId = association.id;
   rememberAssociation(association.id);
   rememberGroup(association.id, association.name);
+  await rememberGroupForAccount(association.id, association.name);
   return association;
 }
 
@@ -226,6 +227,7 @@ export async function joinAssociation({ associationId, code, displayName }) {
     rememberAssociation(associationId);
     const group = await loadAssociation(associationId);
     rememberGroup(associationId, group ? group.name : "Group");
+    await rememberGroupForAccount(associationId, group ? group.name : "Group");
     clearError();
     return { ok: true };
   } catch (e) {
@@ -856,6 +858,43 @@ export const myGolferId = (golfers) => {
    happens. It is a convenience list, not a source of truth — the rules still
    decide what can actually be read. */
 const GROUPS_KEY = "golf:v2:groups";
+
+/* Also filed against the account, so signing in on a second device finds your
+   groups. Remembering them only on the device was why the icon app could not
+   see a group created in Safari. */
+async function rememberGroupForAccount(id, name) {
+  if (!fb || !uid) return;
+  try {
+    const { setDoc } = fb.mod.store;
+    await setDoc(ref("userGroups", uid, "groups", id), { assocId: id, name, at: Date.now() });
+  } catch { /* offline; the local list still works */ }
+}
+
+/* Every group this account belongs to, read from Firebase. */
+export async function loadMyGroups() {
+  if (!fb || !uid) return knownGroups();
+  try {
+    const { getDocs } = fb.mod.store;
+    const snap = await getDocs(col("userGroups", uid, "groups"));
+    const found = snap.docs.map((d) => ({ id: d.id, name: (d.data() || {}).name || "Group" }));
+    if (found.length) {
+      try { localStorage.setItem(GROUPS_KEY, JSON.stringify(found)); } catch {}
+      return found;
+    }
+  } catch { /* fall back to whatever this device remembers */ }
+  return knownGroups();
+}
+
+/* Whether this account is actually a member of a group — used to detect a
+   device still pointing at a group left behind by an old identity. */
+export async function amMemberOf(id) {
+  if (!fb || !uid) return false;
+  try {
+    const { getDoc } = fb.mod.store;
+    const snap = await getDoc(ref("associations", id, "members", uid));
+    return snap.exists();
+  } catch { return false; }
+}
 
 export function rememberGroup(id, name) {
   try {

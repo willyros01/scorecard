@@ -197,6 +197,16 @@ service cloud.firestore {
       allow create, update, delete: if signedIn();
     }
 
+    /* ---------------- which groups an account belongs to ---------------- */
+
+    /* A list kept per account rather than per device. Without it, signing in on
+       a second device finds nothing, because the device's own list is empty —
+       which is exactly what happened between Safari and the home-screen app.
+       Yours only, readable and writable by nobody else. */
+    match /userGroups/{userId}/groups/{assocId} {
+      allow read, write: if signedIn() && userId == request.auth.uid;
+    }
+
     /* ---------------- join codes ---------------- */
 
     /* A tiny index: code -> group. Without it, somebody given only a code has
