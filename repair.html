@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scorecard — Repair</title>
+<link rel="stylesheet" href="./styles.css">
+<script src="./version.js"></script>
+<style>
+  body { padding: 24px 18px 60px; font-size: 20px; }
+  .box { max-width: 640px; margin: 0 auto; }
+  h1 { font-family: Georgia, serif; font-weight: 400; font-size: 32px; margin: 0 0 10px; }
+  .lead { color: var(--muted); margin: 0 0 22px; }
+  #log div { padding: 6px 0; font-size: 1rem; }
+  .ok::before { content: "✓ "; color: var(--pine); font-weight: 700; }
+  .bad { color: var(--pencil); }
+  .grp { padding: 12px 14px; border-bottom: 1px solid var(--rule); }
+  .grp:last-child { border-bottom: 0; }
+</style>
+</head>
+<body>
+<div class="box">
+  <h1>Repair your group list</h1>
+  <p class="lead">Writes the groups you own onto your account, so every device signed in as you can find them. Nothing is created, changed or deleted.</p>
+
+  <div id="state" class="card padded">Connecting…</div>
+  <div id="list"></div>
+  <div id="actions"></div>
+  <div id="log"></div>
+
+  <p class="hint" style="margin-top:26px"><a href="./">Back to the app</a></p>
+</div>
+
+<script type="module">
+/* A standalone page, because the app itself only wrote this list when a group
+   was created or joined — so a group made days ago never got recorded, and a
+   second device could not find it. This fills the gap in one tap. */
+
+const stateEl = document.getElementById("state");
+const listEl = document.getElementById("list");
+const actionsEl = document.getElementById("actions");
+const logEl = document.getElementById("log");
+
+const say = (text, bad) => {
+  const line = document.createElement("div");
+  line.className = bad ? "bad" : "ok";
+  line.textContent = text;
+  logEl.appendChild(line);
+};
+
+const SDK = "https://www.gstatic.com/firebasejs/10.12.0";
+let db, mod, uid, email = "", groups = [];
+
+async function connect() {
+  const config = await import("./firebase-config.js");
+  if (!config.isConfigured) { stateEl.textContent = "No Firebase settings found."; return false; }
+
+  const [app, auth, store] = await Promise.all([
+    import(`${SDK}/firebase-app.js`),
+    import(`${SDK}/firebase-auth.js`),
+    import(`${SDK}/firebase-firestore.js`),
+  ]);
+  const instance = app.initializeApp(config.firebaseConfig);
+  const authority = auth.getAuth(instance);
+  db = store.getFirestore(instance);
+  mod = store;
+
+  return new Promise((resolve) => {
+    auth.onAuthStateChanged(authority, async (user) => {
+      if (!user) { try { await auth.signInAnonymously(authority); } catch { resolve(false); } return; }
+      uid = user.uid;
+      email = user.email || "";
+      resolve(true);
+    });
+  });
+}
+
+async function findGroups() {
+  const { collection, getDocs, query, where } = mod;
+  const found = await getDocs(query(collection(db, "associations"), where("ownerUid", "==", uid)));
+  const results = [];
+  for (const doc of found.docs) {
+    const data = doc.data();
+    let members = 0;
+    try { members = (await getDocs(collection(db, "associations", doc.id, "members"))).size; } catch {}
+    results.push({ id: doc.id, name: data.name || "Unnamed", members });
+  }
+  /* Only groups with somebody in them are worth listing. */
+  return results.filter((g) => g.members > 0);
+}
+
+function draw() {
+  stateEl.innerHTML = `<div class="name">${email || "this device"}</div>
+    <div class="sub">${groups.length} group${groups.length === 1 ? "" : "s"} found on this account</div>`;
+
+  listEl.innerHTML = groups.length ? `<div class="card" style="margin-top:16px">
+    ${groups.map((g) => `<div class="grp"><span class="name">${g.name.replace(/[<>&]/g, "")}</span><br>
+      <span class="sub">${g.members} member${g.members === 1 ? "" : "s"}</span></div>`).join("")}
+  </div>` : `<div class="card padded" style="margin-top:16px">
+      <p class="hint" style="margin:0">No groups found. If you expected some, make sure you are signed in with the same email you use in the app.</p>
+    </div>`;
+
+  actionsEl.innerHTML = groups.length
+    ? `<div class="inline-actions stacked" style="margin-top:18px">
+         <button class="btn" id="fix">Save these to my account</button>
+       </div>`
+    : "";
+
+  const button = document.getElementById("fix");
+  if (button) button.onclick = repair;
+}
+
+async function repair() {
+  const button = document.getElementById("fix");
+  button.disabled = true;
+  button.textContent = "Saving…";
+
+  const { doc, setDoc } = mod;
+  let done = 0;
+  for (const group of groups) {
+    try {
+      await setDoc(doc(db, "userGroups", uid, "groups", group.id),
+        { assocId: group.id, name: group.name, at: Date.now() });
+      done++;
+      say(`Saved ${group.name}`);
+    } catch (e) {
+      say(`Could not save ${group.name} — ${(e && e.code) || "refused"}`, true);
+    }
+  }
+
+  say(`Done. ${done} saved.`);
+  if (done < groups.length) {
+    say("If some were refused, publish the latest firestore.rules and run this again.", true);
+  } else {
+    say("Now close the app on every device and reopen it.");
+  }
+  button.textContent = "Saved";
+}
+
+(async function run() {
+  try {
+    if (!(await connect())) { stateEl.textContent = "Could not sign in to Firebase."; return; }
+    groups = await findGroups();
+    draw();
+  } catch (e) {
+    stateEl.innerHTML = `<div class="name">Could not read your groups</div>
+      <div class="sub">${String((e && e.message) || e).replace(/[<>&]/g, "")}</div>`;
+    say("Most likely the rules in the console are older than this page. Publish the latest firestore.rules and reload.", true);
+  }
+})();
+</script>
+</body>
+</html>

@@ -611,7 +611,16 @@ export async function loadMembership(id) {
   try {
     const snap = await getDoc(ref("associations", id, "members", uid));
     myMember = snap.exists() ? snap.data() : null;
-    if (myMember) { assocId = id; rememberAssociation(id); }
+    if (myMember) {
+      assocId = id;
+      rememberAssociation(id);
+      /* Record it against the account every time, not only when the group was
+         first created. A group made before this existed would otherwise stay
+         invisible to a second device forever. */
+      const group = await loadAssociation(id);
+      rememberGroup(id, group ? group.name : "Group");
+      rememberGroupForAccount(id, group ? group.name : "Group");
+    }
     return myMember;
   } catch (e) { report(e); return null; }
 }

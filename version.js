@@ -1,3 +1,3 @@
 /* Single source of truth for the version. */
-self.APP_VERSION = "2.5.1";
+self.APP_VERSION = "2.5.2";
 self.APP_BUILD = "2026-08-08";
