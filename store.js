@@ -519,8 +519,13 @@ export async function signInWithEmail({ email, password }) {
         throw new Error(`auth/wrong-email:${current.email}`);
       }
       await linkWithCredential(current, EmailAuthProvider.credential(current.email || address, secret));
+      /* providerData is a snapshot. Without this reload the app still believes
+         there is no password and shows the same panel again, which looks like
+         the button did nothing. */
+      try { await fb.auth.currentUser.reload(); } catch {}
       uid = fb.auth.currentUser.uid;
       clearError();
+      emit();
       return { ok: true, outcome: "password-added", email: current.email };
     }
     await signInWithEmailAndPassword(fb.auth, address, secret);

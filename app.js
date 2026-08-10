@@ -1126,6 +1126,63 @@ function versionBlock() {
   </section>`;
 }
 
+/* ================= problems ================= */
+
+/* One dialog for anything that goes wrong, so a failure is never silent and
+   never leaves somebody guessing what to do next.
+ *
+ * Fatal means the app cannot carry on. Everything else offers Continue. */
+const SUPPORT_EMAIL = "willyros01@gmail.com";
+
+function openProblem({ title, detail, advice, fatal = false }) {
+  const report = [
+    `${fatal ? "FATAL" : "BUG"}: ${title}`,
+    "",
+    `What happened: ${detail || "no detail given"}`,
+    `Version: ${VERSION}`,
+    `Screen: ${tab}`,
+    `Group: ${association ? association.name : "none"}`,
+    `Account: ${db.currentEmail() || "this device only"}`,
+    `Sync: ${sync.text}`,
+    `When: ${new Date().toISOString()}`,
+    `Device: ${navigator.userAgent}`,
+  ].join("\n");
+
+  sheetEl.hidden = false;
+  sheetEl.dataset.report = report;
+  sheetEl.dataset.subject = `${fatal ? "FATAL" : "BUG"} — The Scorecard ${VERSION} — ${title}`;
+  sheetEl.innerHTML = `<div class="sheet-body">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <h2>${fatal ? "Something has gone wrong" : "That did not work"}</h2>
+      ${fatal ? "" : `<button class="rowbtn" data-close="1">Close</button>`}
+    </div>
+    <div class="note ${fatal ? "" : "tip"}"><b>${esc(title)}</b><br>${esc(detail || "")}</div>
+    ${advice ? `<p class="hint"><b>What to try:</b> ${esc(advice)}</p>` : ""}
+    <div class="inline-actions stacked">
+      ${fatal ? "" : `<button class="btn" data-problem="continue">Carry on</button>`}
+      <button class="btn ghost" data-problem="email">Email this to support</button>
+      <button class="btn ghost warn" data-problem="reset">Reset and start again</button>
+    </div>
+    <p class="hint">Reset discards anything half-typed on screen and reopens the app. Nothing already saved is affected.</p>
+  </div>`;
+}
+
+sheetEl.addEventListener("click", (e) => {
+  const action = e.target.closest("[data-problem]");
+  if (!action) return;
+  const what = action.dataset.problem;
+  if (what === "continue") { sheetEl.hidden = true; return; }
+  if (what === "email") {
+    location.href = `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(sheetEl.dataset.subject || "BUG")}&body=${encodeURIComponent(sheetEl.dataset.report || "")}`;
+    return;
+  }
+  if (what === "reset") { location.reload(); return; }
+});
+
+/* Anything thrown after the app is running comes here rather than to a banner
+   nobody reads. */
+window.showBanner = (title, detail) => openProblem({ title, detail, fatal: false });
+
 /* ================= render ================= */
 
 /* Tabs are the whole permission model as far as anybody using the app is
@@ -1340,9 +1397,19 @@ view.addEventListener("click", async (e) => {
         const result = await db.signInWithEmail({ email: db.currentEmail(), password: secret });
         joining = false;
         flashMsg(`Password set on ${db.currentEmail()}. Use that email and this password on your other devices.`);
-      } catch {
+      } catch (err) {
         joining = false;
-        flashMsg("Couldn't set the password — the red bar above says why.");
+        const code = String((err && (err.code || err.message)) || "");
+        const stale = code.includes("requires-recent-login");
+        openProblem({
+          title: stale ? "Google needs to confirm you again" : "The password could not be set",
+          detail: stale
+            ? "Firebase will not attach a password to an account that signed in days ago."
+            : code || "No detail was given.",
+          advice: stale
+            ? "Tap Sign in with Google just above this panel, pick your account, then set the password straight away."
+            : "Try again. If it keeps failing, email this to support.",
+        });
       }
       return render();
     }
