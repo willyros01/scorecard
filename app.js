@@ -24,6 +24,7 @@ let newGroupDraft = false;
 let skipImport = false;
 let confirmDeleteGroup = false;
 let confirmSignOut = false;
+let shareGameNet = true;
 let authForm = { email: "", password: "" };
 
 let tab = "enter";
@@ -608,17 +609,29 @@ function gameDetail(gameId) {
 
 /* ================= sharing ================= */
 
-function gameShareText(gameId) {
+/* withNet defaults to false when anybody in the game has no index — a result
+   listing half the field with a blank net column looks broken, and reads as
+   though those golfers did badly rather than simply not having a handicap yet. */
+function gameShareText(gameId, withNet) {
   const game = games.find((g) => g.id === gameId);
   const board = model.gameLeaderboard(rounds.filter((r) => r.gameId === gameId), golfers);
+  const everyoneHasNet = board.length > 0 && board.every((r) => r.net != null);
+  const includeNet = withNet == null ? everyoneHasNet : withNet;
+
   const lines = [
-    `${game.name || courseName(game.courseId)} — ${game.date}`,
+    `${game.name || courseName(game.courseId)} — ${game.date}${game.endDate && game.endDate !== game.date ? ` to ${game.endDate}` : ""}`,
     courseName(game.courseId),
-    "",
-    "Net:",
-    ...board.filter((r) => r.net != null).sort((a, b) => a.netPlace - b.netPlace)
-      .map((r) => `${r.netPlace}. ${r.name} ${r.net} (gross ${r.gross})`),
   ];
+
+  if (includeNet) {
+    const withScores = board.filter((r) => r.net != null).sort((a, b) => a.netPlace - b.netPlace);
+    lines.push("", "Net:", ...withScores.map((r) => `${r.netPlace}. ${r.name} ${r.net} (gross ${r.gross})`));
+    const missing = board.filter((r) => r.net == null);
+    if (missing.length) {
+      lines.push("", `No handicap yet: ${missing.map((r) => r.name).join(", ")}`);
+    }
+  }
+
   const grossOrder = [...board].sort((a, b) => a.grossPlace - b.grossPlace);
   lines.push("", "Gross:", ...grossOrder.map((r) => `${r.grossPlace}. ${r.name} ${r.gross}`));
   lines.push("", `Posted with The Scorecard`);
@@ -663,11 +676,16 @@ function rankingShareText() {
   return lines.join("\n");
 }
 
-function openShare(text, title) {
+function openShare(text, title, options = {}) {
+  const toggle = options.toggle;
   sheetEl.hidden = false;
   sheetEl.innerHTML = `<div class="sheet-body">
     <div style="display:flex;justify-content:space-between;align-items:center"><h2>${esc(title)}</h2>
       <button class="rowbtn" data-close="1">Close</button></div>
+    ${toggle ? `<label class="checkline">
+      <input type="checkbox" data-share-toggle="1" ${toggle.on ? "checked" : ""}>
+      <span>${esc(toggle.label)}</span>
+    </label>${toggle.hint ? `<p class="hint" style="margin-top:0">${esc(toggle.hint)}</p>` : ""}` : ""}
     <pre class="msg">${esc(text)}</pre>
     <div class="share-grid" style="margin-top:1rem">
       <button class="btn" data-send="whatsapp">WhatsApp</button>
@@ -1033,7 +1051,7 @@ function accountSection() {
           <div class="inline-actions stacked">
             <button class="btn" data-act="set-password" ${joining ? "disabled" : ""}>${joining ? "Setting…" : "Set the password"}</button>
           </div>
-          <p class="hint"><b>Not your Gmail password.</b> A new one, for this app only. Write it down — you will type it on every other device, with the email above.</p>
+          <p class="hint"><b>Not the password for your email account.</b> This is a new one, for this app only. Write it down — you will type it on every other device, with the email above.</p>
         `}
 
         <div class="inline-actions stacked">
@@ -1150,6 +1168,8 @@ function refreshScope() { golfers = sortedGolfers(); }
    game stayed grey after picking a course, and why the date wheel kept
    bouncing back to the main screen. */
 function updateEnterHints() {
+  /* Reads and patches only the Post button and its hint. It must never write to
+     the date input or redraw it — see the note in the change handler. */
   const course = courseById(form.courseId);
   const tee = course && course.tees.find((t) => t.id === form.teeId);
   const ok = form.golferId && tee && +form.gross > 0;
@@ -1441,9 +1461,14 @@ view.addEventListener("input", (e) => {
 
 view.addEventListener("change", (e) => {
   const n = e.target.name, v = e.target.value;
-  /* No render() here. Redrawing the screen closes an open date picker, which is
-     why changing the month and then the year needed two trips into it. */
-  if (n === "date") { form.date = v; updateEnterHints(); }
+  /* Nothing here may touch the input itself.
+   *
+   * iOS fires a change event on every movement of the month and year wheels,
+   * not only when a day is finally chosen. Anything that rewrites or redraws
+   * this element mid-interaction tears the picker down — which is why the day
+   * grid vanished after changing the month, and why the panel used to close.
+   * Read the value, update state, update the hint text. Nothing else. */
+  if (n === "date") { form.date = v; updateEnterHints(); return; }
   if (n === "golferId") { form.golferId = v; render(); }
   if (n === "gameId") { form.gameId = v; }
   if (n === "courseId") {
@@ -1456,8 +1481,8 @@ view.addEventListener("change", (e) => {
   if (n === "f-course") { filter.courseId = v; render(); }
   if (n === "rank-year") { rankPeriod.year = v; render(); }
   if (n === "rank-month") { rankPeriod.month = v; render(); }
-  if (n === "g-date") { gameDraft.date = v; updateGameHints(); }
-  if (n === "g-end-date") { gameDraft.endDate = v; }
+  if (n === "g-date") { gameDraft.date = v; updateGameHints(); return; }
+  if (n === "g-end-date") { gameDraft.endDate = v; return; }
   if (n === "g-course") { gameDraft.courseId = v; updateGameHints(); }
 });
 
@@ -1516,7 +1541,7 @@ view.addEventListener("click", async (e) => {
       else db.deleteRound(d.confirmDel);
       flashMsg("Round deleted");
     } catch { flashMsg("Couldn't delete it — the message above says why."); }
-    idle();
+    finally { idle(); }
     return render();
   }
   if (d.pick) {
@@ -1623,7 +1648,18 @@ view.addEventListener("click", async (e) => {
     case "save-game": return saveGame();
     case "close-game": openGame = null; return render();
     case "delete-game": db.deleteGame(openGame); openGame = null; flashMsg("Game deleted"); return render();
-    case "share-game": return openShare(gameShareText(openGame), "Game result");
+    case "share-game": {
+      const board = model.gameLeaderboard(rounds.filter((r) => r.gameId === openGame), golfers);
+      const everyoneHasNet = board.length > 0 && board.every((r) => r.net != null);
+      shareGameNet = everyoneHasNet;
+      return openShare(gameShareText(openGame, shareGameNet), "Game result", {
+        toggle: {
+          on: shareGameNet,
+          label: "Include net scores",
+          hint: everyoneHasNet ? "" : "Some players have no handicap yet, so their net score would be blank.",
+        },
+      });
+    }
     case "share-ranking": return openShare(rankingShareText(), "Rankings");
     case "share-indexes": return openShare(indexShareText(), "Handicap indexes");
 
@@ -1694,6 +1730,23 @@ view.addEventListener("click", async (e) => {
 sheetEl.addEventListener("click", async (e) => {
   if (e.target === sheetEl || e.target.closest("[data-close]")) { sheetEl.hidden = true; return; }
 
+  const toggling = e.target.closest("[data-share-toggle]");
+  if (toggling) {
+    /* Redraw the preview in place so the effect of the choice is visible before
+       anything is sent. */
+    shareGameNet = toggling.checked;
+    const board = model.gameLeaderboard(rounds.filter((r) => r.gameId === openGame), golfers);
+    const everyoneHasNet = board.length > 0 && board.every((r) => r.net != null);
+    openShare(gameShareText(openGame, shareGameNet), "Game result", {
+      toggle: {
+        on: shareGameNet,
+        label: "Include net scores",
+        hint: everyoneHasNet ? "" : "Some players have no handicap yet, so their net score would be blank.",
+      },
+    });
+    return;
+  }
+
   const resetting = e.target.closest("[data-reset-password]");
   if (resetting) {
     const address = resetting.dataset.resetPassword;
@@ -1761,7 +1814,7 @@ sheetEl.addEventListener("click", async (e) => {
       await start(created.id);
       flashMsg(`${name} created. You are its owner.`);
     } catch { flashMsg("Couldn't create it — the message above says why."); }
-    idle();
+    finally { idle(); }
     render();
     return;
   }
@@ -1799,24 +1852,36 @@ async function signIn() {
   if (password.length < 6) { flashMsg("The password needs at least six characters"); return; }
   authForm = { email, password: "" };
   joining = true;
-  busy("Signing in");
   render();
+  /* busy() AFTER render(). The bar is part of the page, so drawing the screen
+     first and starting the spinner second is the only order that leaves it
+     visible — the other way round it was wiped out immediately, and the
+     matching idle() then had nothing to clear, so it looked stuck forever. */
+  busy("Signing in");
+
   try {
     const result = await db.signInWithEmail({ email, password });
     joining = false;
-    idle();
     await settleGroup(db.currentAssociation());
+
+    /* Land on Enter. Signing in used to leave people on whichever tab they
+       happened to be on — usually Admin, which is not where anybody wants to
+       start. */
+    tab = "enter";
+
     flashMsg(
       result.outcome === "password-added"
         ? `Password set on ${result.email}. That is now your one account — use this email and password on every device.`
         : result.outcome === "created" ? "Account created. Use this email and password on your other devices."
-        : "Signed in.");
+        : `Signed in as ${email}.`);
   } catch (err) {
     joining = false;
-    idle();
     openSignInProblem(err, email);
+  } finally {
+    /* Always. A spinner that never stops is worse than no spinner at all. */
+    idle();
+    render();
   }
-  render();
 }
 
 /* A failed sign-in has to say which of the several possible things went wrong,
@@ -1860,7 +1925,7 @@ function openSignInProblem(error, email) {
       <button class="btn ghost" data-close="1">Try again</button>
       ${offerReset ? `<button class="btn" data-reset-password="${esc(email)}">Reset my password</button>` : ""}
     </div>
-    ${offerReset ? `<p class="hint">A link goes to ${esc(email)}. Open it and choose a new password for this app. Your Gmail password is not affected.</p>` : ""}
+    ${offerReset ? `<p class="hint">A link goes to ${esc(email)}. Open it and choose a new password for this app. The password for your email account itself is not affected.</p>` : ""}
   </div>`;
 }
 
