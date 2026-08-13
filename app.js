@@ -26,6 +26,7 @@ let confirmDeleteGroup = false;
 let confirmSignOut = false;
 let shareGameNet = true;
 let settling = false;
+let bootMessage = "Opening your scorecard…";
 let authForm = { email: "", password: "" };
 
 let tab = "enter";
@@ -1400,7 +1401,7 @@ function renderTabs() {
 function render() {
   try {
     if (!ready || settling) {
-      view.innerHTML = `<div class="boot">Opening your scorecard…</div>`;
+      view.innerHTML = `<div class="boot">${esc(bootMessage)}</div>`;
     } else if (!db.currentAssociation()) {
       tabsEl.innerHTML = "";
       view.innerHTML = screenJoin();
@@ -1803,6 +1804,11 @@ sheetEl.addEventListener("click", async (e) => {
     if (what === "backup") { sheetEl.hidden = true; return openBackupSheet(); }
     if (what === "signout") {
       sheetEl.hidden = true;
+      /* Say what is actually happening. The page reloads on sign-out, and the
+         boot screen used to announce "Opening your scorecard" — the opposite of
+         what somebody just asked for. */
+      bootMessage = "Signing out…";
+      ready = false;
       busy("Signing out");
       render();
       try { await db.signOutEverywhere(); }
@@ -1851,11 +1857,20 @@ sheetEl.addEventListener("click", async (e) => {
     sheetEl.hidden = true;
     const id = goto.dataset.gotoGroup;
     if (id === db.currentAssociation()) return;
-    switching = true; render();
+    switching = true;
+    busy("Switching group");
+    render();
     const member = await db.loadMembership(id);
     switching = false;
+    idleAll();
     if (member) { await start(id); flashMsg("Switched"); }
-    else flashMsg("You are no longer a member of that group.");
+    else {
+      /* Not a member any more — usually a group that was deleted. Take it off
+         the list rather than leaving it there to be tapped again. */
+      db.forgetGroup(id);
+      flashMsg("That group is gone, so it has been taken off your list.");
+      render();
+    }
     return;
   }
 

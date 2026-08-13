@@ -25,7 +25,7 @@
 <body>
 <div class="box">
   <h1>Clean up</h1>
-  <p class="lead">Removes groups that were created but never finished setting up. Your rounds, golfers and courses are not touched.</p>
+  <p class="lead">Lists every group you own and lets you remove any of them. Golfers and courses are never deleted — they belong to you, not to a group.</p>
 
   <div class="note tip" style="margin-bottom:20px">
     <b>Your version 1 scorecard is never touched by this page.</b> It lives somewhere else entirely and stays exactly as it is.
@@ -115,7 +115,7 @@ function draw() {
     ${groups.map((g) => `<div class="grp">
       <span class="grow"><span class="name">${g.name.replace(/[<>&]/g, "")}</span><br>
         <span class="sub">${g.memberCount === 0 ? "no members — safe to remove" : `${g.memberCount} member${g.memberCount === 1 ? "" : "s"}`}</span></span>
-      <span class="tag ${g.memberCount === 0 ? "empty" : "keep"}">${g.memberCount === 0 ? "remove" : "keep"}</span>
+      <button class="rowbtn warn" data-kill="${g.id}" data-name="${g.name.replace(/[<>&"]/g, "")}">Delete</button>
     </div>`).join("")}
   </div>` : "";
 
@@ -128,6 +128,70 @@ function draw() {
 
   const button = document.getElementById("tidy");
   if (button) button.onclick = () => tidy(abandoned);
+
+  /* Delete any group, one at a time, with the contents cleared first.
+   *
+   * This lives here rather than in the app because it is a one-time job, and
+   * because the app's own delete kept being refused partway through — leaving a
+   * group half removed and still listed. Here it can report exactly which part
+   * failed instead of failing silently. */
+  listEl.querySelectorAll("[data-kill]").forEach((b) => {
+    b.onclick = async () => {
+      const id = b.dataset.kill;
+      const name = b.dataset.name;
+      if (b.dataset.armed !== "1") {
+        b.dataset.armed = "1";
+        b.textContent = "Tap again to delete";
+        return;
+      }
+      b.disabled = true;
+      b.textContent = "Deleting…";
+      await killGroup(id, name);
+      groups = await findGroups();
+      draw();
+    };
+  });
+}
+
+async function killGroup(id, name) {
+  const { collection, getDocs, doc, deleteDoc, writeBatch } = mod;
+
+  /* The pointer on your account goes first, so the group stops appearing in the
+     switcher even if something below is refused. */
+  try {
+    await deleteDoc(doc(db, "userGroups", uid, "groups", id));
+    say(`${name}: removed from your group list`);
+  } catch (e) { say(`${name}: could not remove from your list — ${(e && e.code) || "refused"}`, true); }
+
+  /* Members LAST — deleting your own membership first would strip the very
+     permission needed to clear everything else. */
+  for (const part of ["rounds", "games", "roster", "members"]) {
+    try {
+      const snap = await getDocs(collection(db, "associations", id, part));
+      for (let i = 0; i < snap.docs.length; i += 400) {
+        const batch = writeBatch(db);
+        snap.docs.slice(i, i + 400).forEach((d) => batch.delete(d.ref));
+        await batch.commit();
+      }
+      if (snap.size) say(`${name}: cleared ${snap.size} ${part}`);
+    } catch (e) {
+      say(`${name}: could not clear ${part} — ${(e && e.code) || "refused"}`, true);
+    }
+  }
+
+  try {
+    await deleteDoc(doc(db, "associations", id));
+    say(`${name}: deleted`);
+  } catch (e) {
+    say(`${name}: the group itself could not be deleted — ${(e && e.code) || "refused"}`, true);
+    say("It is off your list, so it will not appear in the app again.", false);
+  }
+
+  /* Whatever this device still remembers. */
+  try {
+    const kept = JSON.parse(localStorage.getItem("golf:v2:groups") || "[]");
+    localStorage.setItem("golf:v2:groups", JSON.stringify(kept.filter((g) => g.id !== id)));
+  } catch {}
 }
 
 async function tidy(abandoned) {
