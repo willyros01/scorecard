@@ -348,3 +348,19 @@ body { font-size: 1rem; }
 /* a plain checkbox with a readable label beside it */
 .checkline { display: flex; align-items: center; gap: 0.7rem; margin: 1rem 0 0.3rem; font-size: 1rem; }
 .checkline input { width: 22px; height: 22px; flex: 0 0 auto; accent-color: var(--pine); }
+
+/* ---- busy indicator ---- */
+.busy {
+  position: sticky; top: 0; z-index: 15;
+  display: flex; align-items: center; gap: 0.7rem;
+  max-width: 620px; margin: 0 auto; padding: 0.7rem 1rem;
+  background: var(--pine); color: #fff; font-size: 0.95rem; font-weight: 600;
+}
+[data-theme="dark"] .busy { background: #1E5943; color: #EAF3EE; }
+.spinner {
+  width: 18px; height: 18px; flex: 0 0 auto; border-radius: 50%;
+  border: 3px solid rgba(255,255,255,.35); border-top-color: #fff;
+  animation: spin .8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2s; } }

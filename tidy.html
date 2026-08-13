@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scorecard — Tidy up</title>
+<link rel="stylesheet" href="./styles.css">
+<script src="./version.js"></script>
+<style>
+  body { padding: 24px 18px 60px; font-size: 20px; }
+  .box { max-width: 700px; margin: 0 auto; }
+  h1 { font-family: Georgia, serif; font-weight: 400; font-size: 32px; margin: 0 0 10px; }
+  .lead { color: var(--muted); margin: 0 0 22px; }
+  .find { padding: 14px 16px; border-bottom: 1px solid var(--rule); }
+  .find:last-child { border-bottom: 0; }
+  .find b { display: block; }
+  .tag { display: inline-block; font-size: .8rem; font-weight: 700; padding: 3px 10px;
+         border-radius: 999px; margin-bottom: 6px; }
+  .tag.bad { background: rgba(180,64,47,.14); color: var(--pencil); }
+  .tag.ok { background: rgba(31,86,65,.14); color: var(--pine); }
+  #log div { padding: 5px 0; font-size: 1rem; }
+  #log .done::before { content: "✓ "; color: var(--pine); font-weight: 700; }
+  #log .fail { color: var(--pencil); }
+</style>
+</head>
+<body>
+<div class="box">
+  <h1>Tidy up</h1>
+  <p class="lead">Looks for data left behind by earlier versions — wrong round counts, handicaps
+  calculated from rounds that no longer exist, duplicate golfers, groups nobody can reach. It shows
+  you everything it finds before changing anything.</p>
+
+  <div class="note tip" style="margin-bottom:20px">
+    <b>Nothing is deleted without showing you first.</b> Rounds, golfers and courses are never
+    removed — only counts and handicaps are corrected, and only records that point at things which
+    no longer exist are cleared.
+  </div>
+
+  <div id="state" class="card padded">Connecting…</div>
+  <div id="findings"></div>
+  <div id="actions"></div>
+  <div id="log"></div>
+
+  <p class="hint" style="margin-top:26px"><a href="./">Back to the app</a></p>
+</div>
+
+<script type="module">
+/* A standalone page, run once, then ignored.
+ *
+ * Everything here is a one-time correction, which is exactly the kind of work
+ * that should never become an app feature: it would add screens nobody needs
+ * after the first run, and cost a release every time something else turns up.
+ */
+
+const stateEl = document.getElementById("state");
+const findingsEl = document.getElementById("findings");
+const actionsEl = document.getElementById("actions");
+const logEl = document.getElementById("log");
+
+const say = (text, bad) => {
+  const line = document.createElement("div");
+  line.className = bad ? "fail" : "done";
+  line.textContent = text;
+  logEl.appendChild(line);
+};
+const clean = (s) => String(s == null ? "" : s).replace(/[<>&]/g, "");
+
+const SDK = "https://www.gstatic.com/firebasejs/10.12.0";
+let db, mod, uid, email = "";
+let findings = [];
+let plan = null;
+
+/* ---------- the same handicap maths the app uses ---------- */
+const round1 = (n) => Math.round(n * 10) / 10;
+const SCALE = { 3:[1,-2], 4:[1,-1], 5:[1,0], 6:[2,-1], 7:[2,0], 8:[2,0], 9:[3,0], 10:[3,0],
+  11:[3,0], 12:[4,0], 13:[4,0], 14:[4,0], 15:[5,0], 16:[5,0], 17:[6,0], 18:[6,0], 19:[7,0], 20:[8,0] };
+
+function indexFrom(window) {
+  const recent = [...window].sort((a, b) => a.date.localeCompare(b.date)).slice(-20);
+  if (recent.length < 3) return null;
+  const [count, adjust] = SCALE[Math.min(recent.length, 20)];
+  const lowest = [...recent].map((e) => e.differential).sort((a, b) => a - b).slice(0, count);
+  const value = round1(lowest.reduce((a, b) => a + b, 0) / count + adjust);
+  return Math.max(0, Math.min(54, value));
+}
+
+async function connect() {
+  const config = await import("./firebase-config.js");
+  if (!config.isConfigured) { stateEl.textContent = "No Firebase settings found."; return false; }
+
+  const [app, auth, store] = await Promise.all([
+    import(`${SDK}/firebase-app.js`),
+    import(`${SDK}/firebase-auth.js`),
+    import(`${SDK}/firebase-firestore.js`),
+  ]);
+  const instance = app.initializeApp(config.firebaseConfig);
+  const authority = auth.getAuth(instance);
+  db = store.getFirestore(instance);
+  mod = store;
+
+  return new Promise((resolve) => {
+    auth.onAuthStateChanged(authority, async (user) => {
+      if (!user) { try { await auth.signInAnonymously(authority); } catch { resolve(false); } return; }
+      uid = user.uid;
+      email = user.email || "";
+      resolve(true);
+    });
+  });
+}
+
+/* ---------- look, but change nothing ---------- */
+async function inspect() {
+  const { collection, getDocs, query, where } = mod;
+  findings = [];
+
+  /* Every group this account can actually reach. */
+  const owned = await getDocs(query(collection(db, "associations"), where("ownerUid", "==", uid)));
+  const groups = [];
+  for (const doc of owned.docs) {
+    const data = doc.data();
+    let members = 0;
+    try { members = (await getDocs(collection(db, "associations", doc.id, "members"))).size; } catch {}
+    groups.push({ id: doc.id, name: data.name || "Unnamed", members });
+  }
+  const reachable = new Set(groups.map((g) => g.id));
+
+  /* Every round in every reachable group, and the golfers they belong to. */
+  const roundsByGolfer = new Map();
+  const roundIds = new Set();
+  const rosterIds = new Set();
+  let totalRounds = 0;
+
+  for (const group of groups) {
+    let snap;
+    try { snap = await getDocs(collection(db, "associations", group.id, "rounds")); } catch { continue; }
+    snap.forEach((d) => {
+      const r = d.data();
+      if (!r || !r.golferId) return;
+      totalRounds++;
+      roundIds.add(r.id || d.id);
+      if (!roundsByGolfer.has(r.golferId)) roundsByGolfer.set(r.golferId, []);
+      roundsByGolfer.get(r.golferId).push({
+        roundId: r.id || d.id, date: r.date, differential: Number(r.differential), assocId: group.id,
+      });
+    });
+    try {
+      (await getDocs(collection(db, "associations", group.id, "roster"))).forEach((d) => rosterIds.add(d.id));
+    } catch {}
+  }
+
+  /* Golfers: check the stored count, the window and the index against reality. */
+  const golfers = [];
+  try {
+    (await getDocs(collection(db, "golfers"))).forEach((d) => golfers.push({ ...d.data(), id: d.id }));
+  } catch {}
+
+  const golferFixes = [];
+  const seenNames = new Map();
+
+  for (const golfer of golfers) {
+    if (!rosterIds.has(golfer.id)) continue;   /* not in any group we can see */
+
+    const real = roundsByGolfer.get(golfer.id) || [];
+    const window = [...real].sort(
+      (a, b) => b.date.localeCompare(a.date) || String(b.roundId).localeCompare(String(a.roundId))
+    ).slice(0, 20);
+    const correctIndex = indexFrom(window);
+    const storedIndex = golfer.handicapIndex == null ? null : Number(golfer.handicapIndex);
+    const storedCount = Number(golfer.roundCount || 0);
+
+    const stale = (golfer.recentWindow || []).filter((e) => !e || !e.roundId || !roundIds.has(e.roundId));
+    const countWrong = storedCount !== real.length;
+    const indexWrong = (storedIndex == null) !== (correctIndex == null)
+      || (storedIndex != null && correctIndex != null && Math.abs(storedIndex - correctIndex) > 0.05);
+
+    if (stale.length || countWrong || indexWrong) {
+      golferFixes.push({
+        id: golfer.id, name: golfer.name || "Unnamed",
+        realCount: real.length, storedCount,
+        correctIndex, storedIndex, staleEntries: stale.length,
+        window,
+      });
+    }
+
+    const key = golfer.nameKey || String(golfer.name || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-");
+    if (key) {
+      if (!seenNames.has(key)) seenNames.set(key, []);
+      seenNames.get(key).push(golfer);
+    }
+  }
+
+  const duplicates = [...seenNames.values()].filter((list) => list.length > 1);
+  const emptyGroups = groups.filter((g) => g.members === 0);
+
+  /* Assemble what we found, in plain words. */
+  if (golferFixes.length) {
+    findings.push({
+      kind: "golfers", bad: true,
+      title: `${golferFixes.length} golfer${golferFixes.length === 1 ? "" : "s"} with wrong figures`,
+      detail: golferFixes.map((g) => {
+        const bits = [];
+        if (g.storedCount !== g.realCount) bits.push(`count says ${g.storedCount}, really ${g.realCount}`);
+        if (g.staleEntries) bits.push(`${g.staleEntries} entr${g.staleEntries === 1 ? "y" : "ies"} for deleted rounds`);
+        const shown = g.storedIndex == null ? "none" : g.storedIndex.toFixed(1);
+        const right = g.correctIndex == null ? "none" : g.correctIndex.toFixed(1);
+        if (shown !== right) bits.push(`index shows ${shown}, should be ${right}`);
+        return `${g.name} — ${bits.join("; ")}`;
+      }).join("\n"),
+    });
+  }
+
+  if (duplicates.length) {
+    findings.push({
+      kind: "duplicates", bad: true,
+      title: `${duplicates.length} duplicate name${duplicates.length === 1 ? "" : "s"}`,
+      detail: duplicates.map((list) =>
+        `${list[0].name} appears ${list.length} times — ${list.map((g) => `${g.roundCount || 0} rounds`).join(", ")}`
+      ).join("\n") + "\n\nNot removed automatically: which one to keep depends on where the rounds are. Remove the empty one from Manage.",
+    });
+  }
+
+  if (emptyGroups.length) {
+    findings.push({
+      kind: "groups", bad: true,
+      title: `${emptyGroups.length} group${emptyGroups.length === 1 ? "" : "s"} with nobody in them`,
+      detail: emptyGroups.map((g) => g.name).join("\n") + "\n\nThese never finished setting up. Nobody can open them.",
+    });
+  }
+
+  if (!findings.length) {
+    findings.push({ kind: "clean", bad: false, title: "Nothing needs fixing", detail: `Checked ${golfers.length} golfers and ${totalRounds} rounds across ${groups.length} group${groups.length === 1 ? "" : "s"}.` });
+  }
+
+  plan = { golferFixes, emptyGroups, groups, totalRounds };
+  return findings;
+}
+
+function draw() {
+  stateEl.innerHTML = `<div class="name">${clean(email || "this device")}</div>
+    <div class="sub">${plan.groups.length} group${plan.groups.length === 1 ? "" : "s"} · ${plan.totalRounds} round${plan.totalRounds === 1 ? "" : "s"} checked</div>`;
+
+  findingsEl.innerHTML = `<div class="card" style="margin-top:16px">
+    ${findings.map((f) => `<div class="find">
+      <span class="tag ${f.bad ? "bad" : "ok"}">${f.bad ? "needs fixing" : "all well"}</span>
+      <b>${clean(f.title)}</b>
+      <div class="sub" style="white-space:pre-wrap;margin-top:4px">${clean(f.detail)}</div>
+    </div>`).join("")}
+  </div>`;
+
+  const fixable = plan.golferFixes.length + plan.emptyGroups.length;
+  actionsEl.innerHTML = fixable
+    ? `<div class="inline-actions stacked" style="margin-top:18px">
+         <button class="btn" id="fix">Fix these ${fixable} thing${fixable === 1 ? "" : "s"}</button>
+       </div>
+       <p class="hint">Round counts and handicaps are corrected from the rounds that actually exist. Empty groups are removed. Nothing else is touched.</p>`
+    : `<p class="hint" style="margin-top:18px">Nothing to do.</p>`;
+
+  const button = document.getElementById("fix");
+  if (button) button.onclick = repair;
+}
+
+async function repair() {
+  const button = document.getElementById("fix");
+  button.disabled = true;
+  button.textContent = "Fixing…";
+
+  const { doc, setDoc, deleteDoc } = mod;
+  let fixed = 0;
+
+  for (const g of plan.golferFixes) {
+    try {
+      await setDoc(doc(db, "golfers", g.id), {
+        recentWindow: g.window,
+        handicapIndex: g.correctIndex,
+        roundCount: g.realCount,
+      }, { merge: true });
+      fixed++;
+      say(`${g.name}: ${g.realCount} round${g.realCount === 1 ? "" : "s"}, index ${g.correctIndex == null ? "not established" : g.correctIndex.toFixed(1)}`);
+    } catch (e) {
+      say(`Could not fix ${g.name} — ${(e && e.code) || "refused"}`, true);
+    }
+  }
+
+  for (const group of plan.emptyGroups) {
+    try {
+      await deleteDoc(doc(db, "associations", group.id));
+      fixed++;
+      say(`Removed the empty group ${group.name}`);
+    } catch (e) {
+      say(`Could not remove ${group.name} — ${(e && e.code) || "refused"}`, true);
+    }
+  }
+
+  say(`Done. ${fixed} fixed.`);
+  say("Close the app on every device and reopen it to see the corrected figures.");
+  button.textContent = "Finished";
+
+  findings = await inspect();
+  draw();
+  document.getElementById("fix") && (document.getElementById("fix").textContent = "Check again");
+}
+
+(async function run() {
+  try {
+    if (!(await connect())) { stateEl.textContent = "Could not sign in to Firebase."; return; }
+    stateEl.textContent = "Checking your data…";
+    findings = await inspect();
+    draw();
+  } catch (e) {
+    stateEl.innerHTML = `<div class="name">Could not read your data</div>
+      <div class="sub">${clean((e && e.message) || e)}</div>`;
+    say("Most likely the rules in the console are older than this page. Publish the latest firestore.rules and reload.", true);
+  }
+})();
+</script>
+</body>
+</html>

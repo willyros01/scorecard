@@ -47,12 +47,29 @@ const view = document.getElementById("view");
 const sheetEl = document.getElementById("sheet");
 const tabsEl = document.getElementById("tabs");
 
-const sortedCourses = () => [...courses].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+/* Sorting has to survive a record written by an older version with a field
+   missing. A single undefined name used to take down the whole screen. */
+const byName = (a, b) =>
+  String((a && a.name) || "").localeCompare(String((b && b.name) || ""), undefined, { sensitivity: "base" });
+
+const sortedCourses = () => [...courses].sort(byName);
 /* The people on this group's roster, resolved from the global golfer list. */
 const sortedGolfers = () => allGolfers
-  .filter((g) => roster.includes(g.id))
-  .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+  .filter((g) => g && g.id && roster.includes(g.id))
+  .sort(byName);
 const golferById = (id) => allGolfers.find((g) => g.id === id);
+
+/* The index to show. Never below zero, never from fewer than three rounds —
+   a stored value can be stale, so it is checked rather than trusted. */
+function shownIndex(golfer) {
+  if (!golfer) return null;
+  const fromWindow = model.displayIndex(golfer.recentWindow);
+  if (fromWindow != null) return fromWindow;
+  const stored = golfer.handicapIndex;
+  if (stored == null || !Number.isFinite(+stored) || +stored < 0) return null;
+  if ((golfer.recentWindow || []).length < 3) return null;
+  return +stored;
+}
 const courseById = (id) => courses.find((c) => c.id === id);
 
 /* ================= appearance ================= */
@@ -198,7 +215,7 @@ function screenJoin() {
         Looking for the Google button? It only works in the Safari browser, never in an app opened from the home screen. Email and password works in both.
       </p>
       <p class="hint" style="text-align:center">
-        <button class="linkbtn" data-act="show-code">I was given a code</button>
+        <button class="linkbtn" data-act="enter-code">I was given a code</button>
       </p>
     `}
     ${versionBlock()}
@@ -293,10 +310,16 @@ function screenEnter() {
   const golfer = golferById(form.golferId);
   const ags = +(form.adjusted || form.gross);
   const diff = tee && form.gross ? model.differential(ags, tee.rating, tee.slope) : null;
-  const ch = golfer && golfer.handicapIndex != null && tee
-    ? model.courseHandicap(golfer.handicapIndex, tee.slope, tee.rating, tee.par) : null;
+  /* The course handicap frozen onto a round must come from the same guarded
+     value the screens show, or a stale index would be baked in permanently. */
+  const golferIndex = shownIndex(golfer);
+  const ch = golferIndex != null && tee
+    ? model.courseHandicap(golferIndex, tee.slope, tee.rating, tee.par) : null;
   const ready2 = golfer && tee && +form.gross > 0;
-  const todayGames = games.filter((g) => g.date === form.date);
+  /* Every game is offered, newest first, with its date shown. Matching only on
+     an exact date meant the choice vanished whenever the dates did not line up,
+     and rounds silently ended up in no game — or the wrong one. */
+  const pickableGames = [...games].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
 
   return `<div class="stack">
     ${flashBar()}
@@ -330,11 +353,12 @@ function screenEnter() {
       </div>
     </div>` : ""}
 
-    ${todayGames.length ? `<div>
+    ${pickableGames.length ? `<div>
       <div class="eyebrow">Part of a game</div>
       <select class="field" name="gameId"><option value="">Not part of a game</option>
-        ${todayGames.map((g) => `<option value="${g.id}" ${g.id === form.gameId ? "selected" : ""}>${esc(g.name || courseName(g.courseId))}</option>`).join("")}
+        ${pickableGames.map((g) => `<option value="${g.id}" ${g.id === form.gameId ? "selected" : ""}>${esc(g.name || courseName(g.courseId))} · ${g.date}${g.endDate && g.endDate !== g.date ? ` to ${g.endDate}` : ""}</option>`).join("")}
       </select>
+      <p class="hint">A round joins a game only when you choose one here.</p>
     </div>` : ""}
 
     <div class="row">
@@ -356,11 +380,11 @@ function screenEnter() {
       ${diff != null ? `<span class="stamp">${diff.toFixed(1)}</span>` : ""}
     </div>` : ""}
 
-    ${ready2 ? "" : `<p class="hint">${[
+    <p class="hint" id="post-hint">${ready2 ? "" : [
       golfer ? "" : "choose the golfer",
       course ? (tee ? "" : "choose the tees") : "choose the course",
       +form.gross > 0 ? "" : "type the score",
-    ].filter(Boolean).join(", ").replace(/^./, (c) => c.toUpperCase())} to enable Post.</p>`}
+    ].filter(Boolean).join(", ").replace(/^./, (c) => c.toUpperCase()) + " to enable Post."}</p>
     <button class="btn" data-act="post" ${ready2 ? "" : "disabled"}>${editingRound ? "Save changes" : "Post round"}</button>
   </div>`;
 }
@@ -405,6 +429,7 @@ function screenHistory() {
           <div><span class="sub">${r.date}</span> <span class="name">${esc((golferById(r.golferId) || {}).name || "Unknown")}</span></div>
           <div class="small truncate">${esc(r.courseName)} · ${esc(r.teeName)}</div>
           <div class="sub">${r.gross}${r.adjusted !== r.gross ? ` (adj ${r.adjusted})` : ""}${r.courseHandicap != null ? ` · net ${model.netScore(r)}` : ""} · ${(+r.rating).toFixed(1)}/${r.slope}</div>
+          ${r.gameId ? `<div class="sub">in game: ${esc((games.find((g) => g.id === r.gameId) || {}).name || courseName((games.find((g) => g.id === r.gameId) || {}).courseId))}</div>` : ""}
           ${r.notes ? `<div class="small muted" style="font-style:italic">${esc(r.notes)}</div>` : ""}
         </div>
         <div style="text-align:right">
@@ -441,13 +466,14 @@ function screenSummary() {
 
   return `${flashBar()}
   <section class="panel">
-    <div class="panel-head"><h2 class="panel-title">Handicap Index</h2></div>
+    <div class="panel-head"><h2 class="panel-title">Handicap Index</h2>
+      <button class="linkbtn" data-act="share-indexes">Share</button></div>
     <div class="indexes">${sortedGolfers().filter((g) => rounds.some((r) => r.golferId === g.id)).map((g) => {
       const n = rounds.filter((r) => r.golferId === g.id).length;
       return `<button class="idx" data-golfer-index="${g.id}">
         <div class="name truncate">${esc(g.name)}</div>
-        <div class="big ${g.handicapIndex == null ? "none" : ""}">${g.handicapIndex == null ? "—" : (+g.handicapIndex).toFixed(1)}</div>
-        <div class="small muted">${g.handicapIndex == null ? `${Math.max(0, 3 - n)} more round${3 - n === 1 ? "" : "s"} needed` : `from ${n} round${n === 1 ? "" : "s"}`}</div>
+        <div class="big ${shownIndex(g) == null ? "none" : ""}">${shownIndex(g) == null ? "—" : shownIndex(g).toFixed(1)}</div>
+        <div class="small muted">${shownIndex(g) == null ? `${Math.max(0, 3 - n)} more round${3 - n === 1 ? "" : "s"} needed` : `from ${n} round${n === 1 ? "" : "s"}`}</div>
       </button>`;
     }).join("")}</div>
   </section>
@@ -541,7 +567,7 @@ function gameEditor() {
       ${sortedCourses().map((c) => `<option value="${c.id}" ${c.id === d.courseId ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select>
     <label class="lbl">Name (optional)</label>
     <input class="field" name="g-name" value="${esc(d.name)}" placeholder="Saturday medal">
-    ${d.courseId ? "" : `<p class="hint">Pick the course to enable Save.</p>`}
+    <p class="hint" id="game-hint">${d.courseId ? "" : "Pick the course to enable Save."}</p>
     <div class="inline-actions stacked">
       <button class="btn" data-act="save-game" ${d.courseId ? "" : "disabled"}>Save game</button>
       <button class="btn ghost" data-act="cancel-game">Cancel</button>
@@ -599,6 +625,32 @@ function gameShareText(gameId) {
   return lines.join("\n");
 }
 
+/* Every golfer's current index, for sending to the group. */
+function indexShareText() {
+  const lines = [`${association ? association.name : "Group"} — handicap indexes`, new Date().toISOString().slice(0, 10), ""];
+  const listed = sortedGolfers();
+
+  const established = listed.filter((g) => shownIndex(g) != null)
+    .sort((a, b) => shownIndex(a) - shownIndex(b));
+  const waiting = listed.filter((g) => shownIndex(g) == null);
+
+  established.forEach((g) => {
+    const n = rounds.filter((r) => r.golferId === g.id).length;
+    lines.push(`${shownIndex(g).toFixed(1)}  ${g.name}  (${n} round${n === 1 ? "" : "s"})`);
+  });
+
+  if (waiting.length) {
+    lines.push("", "Not established yet — three rounds are needed:");
+    waiting.forEach((g) => {
+      const n = rounds.filter((r) => r.golferId === g.id).length;
+      lines.push(`   ${g.name} (${n} of 3)`);
+    });
+  }
+
+  lines.push("", "World Handicap System — average of the best 8 differentials from the last 20 rounds.", "Posted with The Scorecard");
+  return lines.join("\n");
+}
+
 function rankingShareText() {
   const period = rankPeriod;
   const label = period.month ? `${MONTHS[+period.month - 1]} ${period.year}` : period.year;
@@ -623,10 +675,14 @@ function openShare(text, title) {
       <button class="btn ghost" data-send="sms">Text message</button>
       <button class="btn ghost" data-send="copy">Copy</button>
     </div>
-    ${navigator.share ? `<div class="inline-actions stacked"><button class="btn ghost" data-send="native">More apps…</button></div>` : ""}
+    <div class="inline-actions stacked">
+      <button class="btn ghost" data-send="save">Save as a file</button>
+      ${navigator.share ? `<button class="btn ghost" data-send="native">More apps…</button>` : ""}
+    </div>
   </div>`;
   sheetEl.dataset.text = text;
   sheetEl.dataset.title = title;
+  sheetEl.dataset.filename = `${title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${today()}.txt`;
 }
 
 /* ================= manage ================= */
@@ -635,23 +691,6 @@ function screenManage() {
   if (!db.canManage()) return empty("Manage is for organisers", "Your group's organiser looks after the roster and courses. You can post rounds on the Enter tab.");
 
   return `${flashBar()}
-  ${newGroupDraft ? `<section class="panel">
-    <div class="card editor">
-      <div class="editor-title">Start another group</div>
-      <p class="hint">A separate set of rounds and games. Golfers you add to both keep one handicap across them.</p>
-      <label class="lbl">Group name</label>
-      <input class="field" name="new-group-name" placeholder="Tuesday Fourball">
-      <label class="checkline">
-        <input type="checkbox" name="new-owner-plays" checked>
-        <span>Add me to this group's roster too</span>
-      </label>
-      <div class="inline-actions stacked">
-        <button class="btn" data-act="save-new-group">Create it</button>
-        <button class="btn ghost" data-act="cancel-new-group">Cancel</button>
-      </div>
-    </div>
-  </section>` : ""}
-
   <section class="panel">
     <div class="panel-head"><h2 class="panel-title">Golfers in this group</h2><span class="panel-count">${golfers.length || ""}</span></div>
     <div class="card">
@@ -798,7 +837,7 @@ function groupSection() {
         <button class="btn ghost" data-act="rename-group">Save the name</button>
       </div>
     </div>
-    <p class="hint"><a href="./cleanup.html">Clean up unused groups</a></p>
+    <p class="hint"><a href="./tidy.html">Check and tidy the data</a> · <a href="./cleanup.html">Clean up unused groups</a></p>
   </section>
 
   <section class="panel">
@@ -1106,6 +1145,36 @@ function courseEditor() {
 
 function refreshScope() { golfers = sortedGolfers(); }
 
+/* Enable or disable a button in place, rather than redrawing the screen.
+   Redrawing closed open pickers and lost half-typed text — which is why Save
+   game stayed grey after picking a course, and why the date wheel kept
+   bouncing back to the main screen. */
+function updateEnterHints() {
+  const course = courseById(form.courseId);
+  const tee = course && course.tees.find((t) => t.id === form.teeId);
+  const ok = form.golferId && tee && +form.gross > 0;
+  const button = view.querySelector('[data-act="post"]');
+  if (button) button.disabled = !ok;
+  const hint = view.querySelector("#post-hint");
+  if (hint) {
+    const missing = [
+      form.golferId ? "" : "choose the golfer",
+      course ? (tee ? "" : "choose the tees") : "choose the course",
+      +form.gross > 0 ? "" : "type the score",
+    ].filter(Boolean);
+    hint.textContent = missing.length
+      ? missing.join(", ").replace(/^./, (c) => c.toUpperCase()) + " to enable Post."
+      : "";
+  }
+}
+
+function updateGameHints() {
+  const button = view.querySelector('[data-act="save-game"]');
+  if (button) button.disabled = !(gameDraft && gameDraft.courseId);
+  const hint = view.querySelector("#game-hint");
+  if (hint) hint.textContent = gameDraft && gameDraft.courseId ? "" : "Pick the course to enable Save.";
+}
+
 /* Draws one section, and if it throws, says which one rather than taking the
    whole screen down with it. A screen that is 90 per cent useful beats an
    error card every time. */
@@ -1126,6 +1195,26 @@ function versionBlock() {
   </section>`;
 }
 
+/* ================= busy ================= */
+
+/* Shown whenever the app is doing something that takes a moment. Without it a
+   slow save looks like a frozen app, and people tap again — which is how
+   duplicates get made. */
+let busyDepth = 0;
+function busy(what) {
+  busyDepth++;
+  const bar = document.getElementById("busy");
+  if (!bar) return;
+  bar.hidden = false;
+  bar.innerHTML = `<span class="spinner"></span> ${esc(what || "Working")}…`;
+}
+function idle() {
+  busyDepth = Math.max(0, busyDepth - 1);
+  if (busyDepth > 0) return;
+  const bar = document.getElementById("busy");
+  if (bar) bar.hidden = true;
+}
+
 /* ================= problems ================= */
 
 /* One dialog for anything that goes wrong, so a failure is never silent and
@@ -1133,8 +1222,19 @@ function versionBlock() {
  *
  * Fatal means the app cannot carry on. Everything else offers Continue. */
 const SUPPORT_EMAIL = "willyros01@gmail.com";
+const REPORT_ENDPOINT = "https://formspree.io/f/xnpapknv";
+
+/* The last few things that happened, so a report says what led to the failure
+   rather than only what broke. Kept small and in memory — never stored, never
+   sent anywhere except in a report the person chooses to send. */
+const trail = [];
+function note(what) {
+  trail.push(`${new Date().toISOString().slice(11, 19)}  ${what}`);
+  if (trail.length > 25) trail.shift();
+}
 
 function openProblem({ title, detail, advice, fatal = false }) {
+  note(`problem: ${title}`);
   const report = [
     `${fatal ? "FATAL" : "BUG"}: ${title}`,
     "",
@@ -1146,6 +1246,9 @@ function openProblem({ title, detail, advice, fatal = false }) {
     `Sync: ${sync.text}`,
     `When: ${new Date().toISOString()}`,
     `Device: ${navigator.userAgent}`,
+    "",
+    "What happened just before:",
+    ...(trail.length ? trail.slice(-15) : ["nothing recorded"]),
   ].join("\n");
 
   sheetEl.hidden = false;
@@ -1158,24 +1261,62 @@ function openProblem({ title, detail, advice, fatal = false }) {
     </div>
     <div class="note ${fatal ? "" : "tip"}"><b>${esc(title)}</b><br>${esc(detail || "")}</div>
     ${advice ? `<p class="hint"><b>What to try:</b> ${esc(advice)}</p>` : ""}
+
+    <label class="lbl">What were you doing? (optional, but it helps a lot)</label>
+    <input class="field" name="what-happened" placeholder="e.g. renaming a golfer on the Manage tab" autocomplete="off">
+
     <div class="inline-actions stacked">
       ${fatal ? "" : `<button class="btn" data-problem="continue">Carry on</button>`}
-      <button class="btn ghost" data-problem="email">Email this to support</button>
+      <button class="btn" data-problem="send">Send this report</button>
+      <button class="btn ghost" data-problem="email">Email it instead</button>
       <button class="btn ghost warn" data-problem="reset">Reset and start again</button>
     </div>
-    <p class="hint">Reset discards anything half-typed on screen and reopens the app. Nothing already saved is affected.</p>
+    <p class="hint">Send goes straight through with no mail app. Reset discards anything half-typed and reopens the app; nothing already saved is affected.</p>
   </div>`;
 }
 
-sheetEl.addEventListener("click", (e) => {
+sheetEl.addEventListener("click", async (e) => {
   const action = e.target.closest("[data-problem]");
   if (!action) return;
   const what = action.dataset.problem;
+
+  const context = () => {
+    const field = sheetEl.querySelector('[name="what-happened"]');
+    const said = field && field.value.trim();
+    return said
+      ? `${sheetEl.dataset.report}\n\nThey said: ${said}`
+      : sheetEl.dataset.report || "";
+  };
+
   if (what === "continue") { sheetEl.hidden = true; return; }
-  if (what === "email") {
-    location.href = `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(sheetEl.dataset.subject || "BUG")}&body=${encodeURIComponent(sheetEl.dataset.report || "")}`;
+
+  if (what === "send") {
+    action.disabled = true;
+    action.textContent = "Sending…";
+    try {
+      const response = await fetch(REPORT_ENDPOINT, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ subject: sheetEl.dataset.subject || "BUG", message: context() }),
+      });
+      if (!response.ok) throw new Error(String(response.status));
+      sheetEl.hidden = true;
+      flashMsg("Report sent. Thank you — that genuinely helps.");
+    } catch {
+      /* Never leave somebody with a dead Send. Hand it to the mail app instead. */
+      action.disabled = false;
+      action.textContent = "Send this report";
+      flashMsg("Couldn't send it directly. Opening your mail app instead.");
+      location.href = `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(sheetEl.dataset.subject || "BUG")}&body=${encodeURIComponent(context())}`;
+    }
     return;
   }
+
+  if (what === "email") {
+    location.href = `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(sheetEl.dataset.subject || "BUG")}&body=${encodeURIComponent(context())}`;
+    return;
+  }
+
   if (what === "reset") { location.reload(); return; }
 });
 
@@ -1260,6 +1401,7 @@ tabsEl.addEventListener("click", (e) => {
   const b = e.target.closest("button[data-tab]");
   if (!b) return;
   tab = b.dataset.tab;
+  note(`opened ${tab}`);
   if (tab === "enter") editingRound = null;
   if (tab !== "games") openGame = null;
   render();
@@ -1275,7 +1417,11 @@ document.getElementById("brandSub").onclick = () => {
 
 view.addEventListener("input", (e) => {
   const n = e.target.name;
-  if (n === "gross" || n === "adjusted") { form[n] = e.target.value.replace(/\D/g, ""); e.target.value = form[n]; return; }
+  if (n === "gross" || n === "adjusted") {
+    form[n] = e.target.value.replace(/\D/g, "");
+    e.target.value = form[n];
+    return updateEnterHints();
+  }
   if (n === "notes") { form.notes = e.target.value; return; }
   if (n === "finder-q") { finder.q = e.target.value; return; }
   if (n === "join-name" || n === "join-name-2") { joinForm.name = e.target.value; return; }
@@ -1295,7 +1441,9 @@ view.addEventListener("input", (e) => {
 
 view.addEventListener("change", (e) => {
   const n = e.target.name, v = e.target.value;
-  if (n === "date") { form.date = v; render(); }
+  /* No render() here. Redrawing the screen closes an open date picker, which is
+     why changing the month and then the year needed two trips into it. */
+  if (n === "date") { form.date = v; updateEnterHints(); }
   if (n === "golferId") { form.golferId = v; render(); }
   if (n === "gameId") { form.gameId = v; }
   if (n === "courseId") {
@@ -1308,8 +1456,9 @@ view.addEventListener("change", (e) => {
   if (n === "f-course") { filter.courseId = v; render(); }
   if (n === "rank-year") { rankPeriod.year = v; render(); }
   if (n === "rank-month") { rankPeriod.month = v; render(); }
-  if (n === "g-date") { gameDraft.date = v; }
-  if (n === "g-course") { gameDraft.courseId = v; }
+  if (n === "g-date") { gameDraft.date = v; updateGameHints(); }
+  if (n === "g-end-date") { gameDraft.endDate = v; }
+  if (n === "g-course") { gameDraft.courseId = v; updateGameHints(); }
 });
 
 view.addEventListener("keydown", (e) => {
@@ -1360,11 +1509,15 @@ view.addEventListener("click", async (e) => {
   if (d.del) { confirmId = d.del; return render(); }
   if (d.confirmDel) {
     const r = rounds.find((x) => x.id === d.confirmDel);
-    db.deleteRound(d.confirmDel);
-    if (r) await db.rebuildGolferIndex(r.golferId);
     confirmId = null;
-    flashMsg("Round deleted");
-    return;
+    busy("Deleting the round");
+    try {
+      if (r) await db.deleteRoundAndRebuild(r);
+      else db.deleteRound(d.confirmDel);
+      flashMsg("Round deleted");
+    } catch { flashMsg("Couldn't delete it — the message above says why."); }
+    idle();
+    return render();
   }
   if (d.pick) {
     const c = finder.results[+d.pick];
@@ -1424,7 +1577,10 @@ view.addEventListener("click", async (e) => {
     case "accept-invite": return acceptInvite();
     case "join-by-code": return joinByCode();
     case "skip-import": skipImport = true; return render();
-    case "show-code": showCodeEntry = true; return render();
+    /* Named apart from the Admin tab's "show-code" on purpose: both lived in
+       this one switch, so the first case matched and the Show the code button
+       silently did nothing at all. */
+    case "enter-code": showCodeEntry = true; return render();
     case "hide-code": showCodeEntry = false; return render();
     case "create-group": return createGroup();
     case "import-v1": return importV1();
@@ -1469,6 +1625,7 @@ view.addEventListener("click", async (e) => {
     case "delete-game": db.deleteGame(openGame); openGame = null; flashMsg("Game deleted"); return render();
     case "share-game": return openShare(gameShareText(openGame), "Game result");
     case "share-ranking": return openShare(rankingShareText(), "Rankings");
+    case "share-indexes": return openShare(indexShareText(), "Handicap indexes");
 
     case "share-invite": return openShare(
       `Join our golf scorecard:\n${db.joinLink(association)}\n\nOne tap, enter your name, done.`, "Invitation");
@@ -1537,6 +1694,23 @@ view.addEventListener("click", async (e) => {
 sheetEl.addEventListener("click", async (e) => {
   if (e.target === sheetEl || e.target.closest("[data-close]")) { sheetEl.hidden = true; return; }
 
+  const resetting = e.target.closest("[data-reset-password]");
+  if (resetting) {
+    const address = resetting.dataset.resetPassword;
+    resetting.disabled = true;
+    resetting.textContent = "Sending…";
+    try {
+      await db.sendPasswordReset(address);
+      sheetEl.hidden = true;
+      flashMsg(`Reset link sent to ${address}. Open it, choose a new password, then sign in with it.`);
+    } catch {
+      resetting.disabled = false;
+      resetting.textContent = "Reset my password";
+      flashMsg("Couldn't send the reset link. Check the email address.");
+    }
+    return;
+  }
+
   const goto = e.target.closest("[data-goto-group]");
   if (goto) {
     sheetEl.hidden = true;
@@ -1551,8 +1725,43 @@ sheetEl.addEventListener("click", async (e) => {
   }
 
   if (e.target.closest('[data-act="new-group"]')) {
+    /* Drawn in the sheet itself. It used to set a flag that only screenManage
+       knew how to draw, so tapping this from any other tab did nothing at all. */
+    sheetEl.innerHTML = `<div class="sheet-body">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <h2>Start another group</h2><button class="rowbtn" data-close="1">Close</button></div>
+      <p class="hint">A separate set of rounds and games. Golfers in both groups keep one handicap across them.</p>
+      <label class="lbl">Group name</label>
+      <input class="field" name="new-group-name" placeholder="September Tournament" autocomplete="off">
+      <label class="checkline">
+        <input type="checkbox" name="new-owner-plays" checked>
+        <span>Add me to this group's roster too</span>
+      </label>
+      <div class="inline-actions stacked">
+        <button class="btn" data-newgroup="create">Create it</button>
+        <button class="btn ghost" data-close="1">Cancel</button>
+      </div>
+    </div>`;
+    return;
+  }
+
+  if (e.target.closest("[data-newgroup]")) {
+    const field = sheetEl.querySelector('[name="new-group-name"]');
+    const name = (field ? field.value : "").trim();
+    if (!name) { flashMsg("Give the group a name"); return; }
+    const box = sheetEl.querySelector('[name="new-owner-plays"]');
+    const playing = box ? box.checked : true;
     sheetEl.hidden = true;
-    newGroupDraft = true;
+    busy("Creating the group");
+    try {
+      const me = members.find((m) => m.uid === db.status().uid);
+      const created = await db.createAnotherGroup({
+        name, displayName: me ? me.displayName : "Me", addToRoster: playing,
+      });
+      await start(created.id);
+      flashMsg(`${name} created. You are its owner.`);
+    } catch { flashMsg("Couldn't create it — the message above says why."); }
+    idle();
     render();
     return;
   }
@@ -1590,21 +1799,69 @@ async function signIn() {
   if (password.length < 6) { flashMsg("The password needs at least six characters"); return; }
   authForm = { email, password: "" };
   joining = true;
-  flashMsg("Signing in…");
+  busy("Signing in");
+  render();
   try {
     const result = await db.signInWithEmail({ email, password });
     joining = false;
+    idle();
     await settleGroup(db.currentAssociation());
     flashMsg(
       result.outcome === "password-added"
         ? `Password set on ${result.email}. That is now your one account — use this email and password on every device.`
         : result.outcome === "created" ? "Account created. Use this email and password on your other devices."
         : "Signed in.");
-  } catch {
+  } catch (err) {
     joining = false;
-    flashMsg("Sign-in didn't complete — the red bar above says why.");
+    idle();
+    openSignInProblem(err, email);
   }
   render();
+}
+
+/* A failed sign-in has to say which of the several possible things went wrong,
+   and offer the way out in the same breath. Sending somebody off to hunt for a
+   Forgot the password link at the moment they are already stuck is no help. */
+function openSignInProblem(error, email) {
+  const code = String((error && (error.code || error.message)) || "").toLowerCase();
+
+  let title = "Sign-in did not work";
+  let detail = code || "No detail was given.";
+  let offerReset = false;
+
+  if (code.includes("wrong-password") || code.includes("invalid-credential") || code.includes("invalid-login")) {
+    title = "That password was not right";
+    detail = `The email ${email} exists, but the password does not match it.`;
+    offerReset = true;
+  } else if (code.includes("user-not-found")) {
+    title = "No account for that email";
+    detail = `Nothing is registered to ${email}. Check for a typo — or if this is a new address, an account will be made for you when the password is at least six characters.`;
+  } else if (code.includes("invalid-email")) {
+    title = "That email does not look right";
+    detail = "Check it for a typo.";
+  } else if (code.includes("too-many-requests")) {
+    title = "Too many attempts";
+    detail = "Firebase has paused sign-in for this device for a few minutes. Nothing is wrong with your account.";
+    offerReset = true;
+  } else if (code.includes("network") || code.includes("failed to fetch")) {
+    title = "Could not reach Firebase";
+    detail = "Check your connection and try again.";
+  } else if (code.includes("weak-password")) {
+    title = "Password too short";
+    detail = "It needs at least six characters.";
+  }
+
+  sheetEl.hidden = false;
+  sheetEl.innerHTML = `<div class="sheet-body">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <h2>Sign-in problem</h2><button class="rowbtn" data-close="1">Close</button></div>
+    <div class="note"><b>${esc(title)}</b><br>${esc(detail)}</div>
+    <div class="inline-actions stacked">
+      <button class="btn ghost" data-close="1">Try again</button>
+      ${offerReset ? `<button class="btn" data-reset-password="${esc(email)}">Reset my password</button>` : ""}
+    </div>
+    ${offerReset ? `<p class="hint">A link goes to ${esc(email)}. Open it and choose a new password for this app. Your Gmail password is not affected.</p>` : ""}
+  </div>`;
 }
 
 async function acceptInvite() {
@@ -1710,8 +1967,21 @@ async function saveRename() {
   const next = (input ? input.value : "").trim();
   if (!next) { flashMsg("Type a name first"); return; }
   const id = editingGolfer;
+  note("renaming a golfer");
   editingGolfer = null;
-  const result = await db.renameGolfer(id, next);
+  busy("Renaming");
+  let result;
+  try { result = await db.renameGolfer(id, next); }
+  catch (e) {
+    idle();
+    openProblem({
+      title: "The rename did not go through",
+      detail: String((e && (e.code || e.message)) || e),
+      advice: "Nothing was changed. Try again, and send this report if it keeps happening.",
+    });
+    return render();
+  }
+  idle();
   if (result.ok) flashMsg(`Renamed to ${next}. That is their name in every group.`);
   else if (result.reason === "TAKEN") flashMsg(`Another golfer is already called ${next}. Names have to be unique — try adding an initial.`);
   else flashMsg("Couldn't rename them.");
@@ -1722,6 +1992,7 @@ function saveCourse() {
   const c = { ...courseDraft, name: courseDraft.name.trim(),
     tees: courseDraft.tees.filter((t) => t.name.trim() && t.rating && t.slope && t.par) };
   if (!c.name || !c.tees.length) { flashMsg("A course needs a name and at least one complete tee"); return; }
+  note(`adding course ${c.name}`);
   db.addCourse(c);
   courseDraft = null;
   finder = { q: "", results: [], busy: false, msg: "" };
@@ -1730,6 +2001,7 @@ function saveCourse() {
 
 function saveGame() {
   if (!gameDraft.courseId) { flashMsg("Pick the course"); return; }
+  note("creating a game");
   db.addGame({ date: gameDraft.date, courseId: gameDraft.courseId, name: gameDraft.name });
   gameDraft = null;
   flashMsg("Game created. Post rounds to it from the Enter tab.");
@@ -1755,6 +2027,8 @@ function postRound() {
 
   if (editingRound) {
     const ags = +(form.adjusted || form.gross);
+    /* gameId is written every time, including as null — so a round can be taken
+       out of a game as well as moved between them. */
     db.updateRound(editingRound, {
       date: form.date, gross: +form.gross, adjusted: ags,
       differential: model.differential(ags, tee.rating, tee.slope),
@@ -1767,12 +2041,16 @@ function postRound() {
     return;
   }
 
+  note("posting a round");
   const { round } = db.postRound({
     golfer, course, tee, date: form.date,
     gross: form.gross, adjusted: form.adjusted, notes: form.notes,
     gameId: form.gameId || null,
   });
-  form = { ...form, gross: "", adjusted: "", notes: "", date: today() };
+  /* Keep the date — several rounds from one outing are entered together — but
+     clear the golfer, so the next one is never posted against the last person
+     by accident. */
+  form = { ...form, golferId: "", gross: "", adjusted: "", notes: "" };
   flashMsg(`Round posted — differential ${round.differential.toFixed(1)}`);
 }
 

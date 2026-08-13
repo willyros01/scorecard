@@ -16,7 +16,7 @@
  */
 
 const CACHE = "scorecard-shell";
-const SHELL = ["./", "./index.html", "./cleanup.html", "./repair.html", "./styles.css", "./app.js", "./db.js",
+const SHELL = ["./", "./index.html", "./cleanup.html", "./repair.html", "./tidy.html", "./styles.css", "./app.js", "./db.js",
   "./courses-api.js", "./version.js", "./firebase-config.js",
   "./model.js", "./store.js", "./outbox.js", "./migrate.js",
   "./manifest.webmanifest", "./icon.svg"];
@@ -84,7 +84,7 @@ self.addEventListener("fetch", (e) => {
   /* The reset page must never be served from cache — it is the escape hatch
      when a previous worker is stuck. */
   if (url.pathname.endsWith("/reset.html") || url.pathname.endsWith("/cleanup.html")
-    || url.pathname.endsWith("/repair.html")) return;
+    || url.pathname.endsWith("/repair.html") || url.pathname.endsWith("/tidy.html")) return;
 
   if (url.origin === location.origin) e.respondWith(networkFirst(e.request));
 });

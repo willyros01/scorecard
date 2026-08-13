@@ -91,6 +91,34 @@ export const windowToChronological = (window) =>
 
 export const indexFromWindow = (window) => handicapIndex(windowToChronological(window));
 
+/* Guards against a window holding entries whose rounds no longer exist.
+ *
+ * This produced negative indexes: rounds deleted from a group that later became
+ * unreachable left their differentials in the window forever, and the fewer-
+ * than-20 adjustment (minus 2.0 at three rounds) was then applied to a handful
+ * of stale numbers. An index can also never be negative in the World Handicap
+ * System — the scale runs from +54 downward to 0 for a scratch player, and
+ * better than scratch is written as a plus handicap, which this app does not
+ * model. So anything below zero is a bug, not a very good golfer. */
+export function sanitizeWindow(window, knownRoundIds) {
+  const known = knownRoundIds instanceof Set ? knownRoundIds : new Set(knownRoundIds || []);
+  return (window || []).filter((e) =>
+    e && e.roundId && known.has(e.roundId)
+    && Number.isFinite(Number(e.differential))
+    && typeof e.date === "string" && e.date.length >= 10
+  );
+}
+
+/* The number shown to people. Null until three rounds exist, and never below
+   zero. Use this rather than indexFromWindow anywhere it reaches a screen. */
+export function displayIndex(window) {
+  const list = window || [];
+  if (list.length < 3) return null;
+  const value = indexFromWindow(list);
+  if (value == null) return null;
+  return value < 0 ? 0 : value;
+}
+
 /* A round older than every entry in a full window cannot affect the index —
    worth knowing, because it means a backdated round is often a no-op. */
 export function affectsWindow(window, date, limit = 20) {
@@ -160,10 +188,15 @@ export const buildGolfer = ({ name, linkedUid = null, id = newId() }) => ({
 
 /* Names are matched on this, so "Willy  Rosales" and "willy rosales" are the
    same person. It is also the key of the uniqueness index. */
-export const nameKey = (name) =>
-  String(name || "").trim().toLowerCase()
+export const nameKey = (name) => {
+  /* Deliberately tolerant. It is handed values from documents written by older
+     versions, where the field may be missing entirely — passing null or a
+     number here used to throw "null is not an object" and break renaming. */
+  if (name == null) return "";
+  return String(name).trim().toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
+};
 
 export const buildCourse = ({ name, club = "", location = "", country = "", tees, createdBy, id = newId() }) => ({
   id,

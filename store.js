@@ -253,10 +253,14 @@ export const currentAssociation = () => assocId;
  * query. No round history is read to post a round.
  */
 export function postRound({ golfer, course, tee, date, gross, adjusted, notes, gameId = null }) {
+  /* Guarded rather than taken as read: a stored index can be stale or, before
+     this release, negative — and it gets frozen onto the round permanently. */
+  const indexNow = model.displayIndex(golfer.recentWindow);
+
   const round = model.buildRound({
     assocId, golferId: golfer.id, gameId, date, course, tee,
     gross, adjusted, notes, enteredBy: uid,
-    handicapIndexAtEntry: golfer.handicapIndex,
+    handicapIndexAtEntry: indexNow,
   });
 
   const window = model.insertIntoWindow(golfer.recentWindow, {
@@ -275,7 +279,7 @@ export function postRound({ golfer, course, tee, date, gross, adjusted, notes, g
     path: ["golfers", golfer.id],
     data: {
       recentWindow: window,
-      handicapIndex: model.indexFromWindow(window),
+      handicapIndex: model.displayIndex(window),
       roundCount: (golfer.roundCount || 0) + 1,
     },
     opId: `golfer-index-${golfer.id}-${round.id}`,
@@ -302,6 +306,16 @@ export async function rebuildGolferIndex(golferId) {
     if (person.exists()) kept = model.windowFromOtherGroups(person.data().recentWindow, assocId);
   } catch { /* nothing kept; the fresh scan below still runs */ }
 
+  /* Entries from other groups are kept — a golfer's handicap spans all of them.
+     But an entry whose group no longer exists can never be rescanned, so a
+     deleted round's differential would sit there feeding the index forever.
+     That is what produced the negative numbers. Drop anything unreachable. */
+  if (kept.length) {
+    const reachable = new Set(knownGroups().map((g) => g.id));
+    reachable.add(assocId);
+    kept = kept.filter((e) => e.assocId && reachable.has(e.assocId));
+  }
+
   /* Deliberately no orderBy here. Combining a filter with a sort makes
      Firestore demand a composite index, which failed for the user with
      "The query requires an index". Sorting the handful of results in memory
@@ -319,7 +333,12 @@ export async function rebuildGolferIndex(golferId) {
 
   const window = model.mergeWindow(kept, fresh);
   outbox.enqueue({ type: "update", path: ["golfers", golferId],
-    data: { recentWindow: window, handicapIndex: model.indexFromWindow(window) },
+    data: {
+      recentWindow: window,
+      handicapIndex: model.displayIndex(window),
+      /* Recounted here too, so deleting a round finally brings the number down. */
+      roundCount: fresh.length + kept.length,
+    },
     opId: `golfer-rebuild-${golferId}-${Date.now()}` });
   flush();
   return window;
@@ -332,6 +351,14 @@ export function deleteRound(roundId) {
     opId: `round-delete-${roundId}`,
   });
   flush();
+}
+
+/* Deleting and rebuilding in one call, so a caller cannot do half of it and
+   leave the golfer's index quietly wrong. */
+export async function deleteRoundAndRebuild(round) {
+  deleteRound(round.id);
+  await flush();
+  if (round.golferId) await rebuildGolferIndex(round.golferId);
 }
 
 /* ---------------- roster, courses, games ---------------- */
@@ -725,8 +752,14 @@ export async function renameGolfer(golferId, name) {
 
   const existing = await getDoc(ref("golfers", golferId));
   if (!existing.exists()) return { ok: false, reason: "MISSING" };
-  const before = existing.data();
-  if (before.nameKey === key) {
+  const before = existing.data() || {};
+
+  /* Golfers imported from version 1, or written before nameKey existed, have no
+     key at all. Work it out from the name they do have rather than trusting the
+     field to be there — this is what crashed the rename. */
+  const beforeKey = before.nameKey || model.nameKey(before.name);
+
+  if (beforeKey === key) {
     await setDoc(ref("golfers", golferId), { name: tidy }, { merge: true });
     return { ok: true };
   }
@@ -738,7 +771,7 @@ export async function renameGolfer(golferId, name) {
 
   await setDoc(ref("golfers", golferId), { name: tidy, nameKey: key }, { merge: true });
   await setDoc(ref("golferNames", key), { golferId, name: tidy });
-  if (before.nameKey) { try { await deleteDoc(ref("golferNames", before.nameKey)); } catch {} }
+  if (beforeKey) { try { await deleteDoc(ref("golferNames", beforeKey)); } catch {} }
   return { ok: true };
 }
 
