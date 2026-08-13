@@ -33,13 +33,17 @@ export const pending = () => read();
 export const count = () => read().length;
 export const isEmpty = () => read().length === 0;
 
-/* type: 'set' | 'update' | 'delete'
-   path: array of path segments, e.g. ['associations', a, 'rounds', id] */
-export function enqueue({ type, path, data = null, opId = null }) {
+/* type: 'set' | 'update' | 'delete' | 'batch'
+ *
+ * A single-document operation carries path and data. A 'batch' carries writes:
+ * an array of { op, path, data } that must all land together or not at all.
+ * The batch is one queue entry on purpose — replayed as one commit, it can
+ * never half-apply, which is what was corrupting data. */
+export function enqueue({ type, path = null, data = null, writes = null, opId = null }) {
   const ops = read();
   const op = {
     opId: opId || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
-    type, path, data,
+    type, path, data, writes,
     queuedAt: Date.now(),
     attempts: 0,
   };
@@ -52,9 +56,13 @@ export function enqueue({ type, path, data = null, opId = null }) {
    corrections to one round replay as one write rather than ten. Creates are
    never collapsed away — only later updates fold into an earlier one. */
 export function enqueueOrMerge(operation) {
+  /* Batches are never merged. Collapsing them would break the very guarantee
+     they exist to provide. */
+  if (operation.type === "batch") return enqueue(operation);
+
   const ops = read();
   const key = operation.path.join("/");
-  const existing = [...ops].reverse().find((o) => o.path.join("/") === key);
+  const existing = [...ops].reverse().find((o) => o.path && o.path.join("/") === key);
 
   if (existing && operation.type === "update" && (existing.type === "set" || existing.type === "update")) {
     existing.data = { ...(existing.data || {}), ...(operation.data || {}) };

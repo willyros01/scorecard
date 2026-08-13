@@ -129,6 +129,11 @@ function hydrate(value) {
 }
 
 async function writeOperation(op) {
+  /* A batch is several documents that must land together. Queued as one item,
+     so an offline device replays it as one all-or-nothing write rather than
+     as pieces that could half succeed. */
+  if (op.type === "batch") return commitTogether(op.writes, op.opId);
+
   const { setDoc, updateDoc, deleteDoc } = fb.mod.store;
   const target = ref(...op.path);
   if (op.type === "delete") return deleteDoc(target);
@@ -168,30 +173,38 @@ export async function createAssociation({ name, displayName }) {
 
      The group has to exist before the membership, because the rule that
      authorises an owner membership reads ownerUid off the group document. */
-  await setDoc(ref("associations", association.id), { ...association, createdAt: serverTimestamp() });
-
+  /* The group, the owner's membership and the code index are one act.
+   *
+   * Written separately, a failure on the second left a group nobody could open
+   * — which is exactly what produced the orphaned groups still cluttering the
+   * database. A batch cannot half-apply, so that state is now impossible. */
+  const { serverTimestamp: stamp } = fb.mod.store;
   try {
-    await setDoc(ref("associations", association.id, "members", uid), {
-      ...model.buildMember({ uid, displayName, role: "owner", joinCode: association.joinCode }),
-      joinedAt: serverTimestamp(),
-    });
+    await commitTogether([
+      {
+        op: "set",
+        path: ["associations", association.id],
+        data: { ...association, createdAt: { __serverTimestamp: true } },
+      },
+      {
+        op: "set",
+        path: ["associations", association.id, "members", uid],
+        data: {
+          ...model.buildMember({ uid, displayName, role: "owner", joinCode: association.joinCode }),
+          joinedAt: { __serverTimestamp: true },
+        },
+      },
+      {
+        op: "set",
+        path: ["joinCodes", association.joinCode],
+        data: { assocId: association.id },
+      },
+    ], "create group");
   } catch (e) {
-    /* Almost always out-of-date rules in the console. Naming that saves an
-       afternoon of guessing, and stops repeated taps piling up empty groups. */
-    setError("The rules in Firebase are out of date",
-      "Creating a group needs the latest firestore.rules published in the Firebase console. Publish them, then tap Start again.");
+    /* Nothing was written, so there is nothing to clean up. */
+    setError("The group could not be created",
+      "Firebase refused the write, usually because the rules in the console are older than this version. Nothing was saved — publish the latest firestore.rules and try again.");
     throw e;
-  }
-
-  /* The code index, so somebody handed only a code can find this group.
-     Deliberately not fatal: if the rules in the console predate this index,
-     creating the group must still succeed. Invitation links work regardless —
-     only typing a code by hand needs the index. */
-  try {
-    await setDoc(ref("joinCodes", association.joinCode), { assocId: association.id });
-  } catch {
-    setError("Codes typed by hand will not work yet",
-      "Publish the latest rules from firestore.rules to enable them. Invitation links work either way, and nothing else is affected.");
   }
 
   assocId = association.id;
@@ -222,12 +235,28 @@ export async function joinAssociation({ associationId, code, displayName }) {
     uid, displayName, role: "member", joinCode: model.normalizeJoinCode(code),
   });
   try {
-    await setDoc(ref("associations", associationId, "members", uid), { ...member, joinedAt: serverTimestamp() });
+    /* Membership and the pointer on your account go together. Written apart,
+       a failure on the second left somebody a member of a group their other
+       devices could never find. */
+    const group = await loadAssociation(associationId);
+    const name = group ? group.name : "Group";
+
+    await commitTogether([
+      {
+        op: "set",
+        path: ["associations", associationId, "members", uid],
+        data: { ...member, joinedAt: { __serverTimestamp: true } },
+      },
+      {
+        op: "set",
+        path: ["userGroups", uid, "groups", associationId],
+        data: { assocId: associationId, name, at: Date.now() },
+      },
+    ], "join group");
+
     assocId = associationId;
     rememberAssociation(associationId);
-    const group = await loadAssociation(associationId);
-    rememberGroup(associationId, group ? group.name : "Group");
-    await rememberGroupForAccount(associationId, group ? group.name : "Group");
+    rememberGroup(associationId, name);
     clearError();
     return { ok: true };
   } catch (e) {
@@ -267,22 +296,29 @@ export function postRound({ golfer, course, tee, date, gross, adjusted, notes, g
     roundId: round.id, date: round.date, differential: round.differential, assocId,
   });
 
+  /* One queued item holding both documents. The round and the golfer's index
+     describe the same event, so they are written together or not at all —
+     previously a failure between them left an index counting a round that was
+     never saved. */
   outbox.enqueue({
-    type: "set",
-    path: ["associations", assocId, "rounds", round.id],
-    data: { ...round, enteredAt: { __serverTimestamp: true } },
+    type: "batch",
+    writes: [
+      {
+        op: "set",
+        path: ["associations", assocId, "rounds", round.id],
+        data: { ...round, enteredAt: { __serverTimestamp: true } },
+      },
+      {
+        op: "update",
+        path: ["golfers", golfer.id],
+        data: {
+          recentWindow: window,
+          handicapIndex: model.displayIndex(window),
+          roundCount: (golfer.roundCount || 0) + 1,
+        },
+      },
+    ],
     opId: `round-create-${round.id}`,
-  });
-
-  outbox.enqueue({
-    type: "update",
-    path: ["golfers", golfer.id],
-    data: {
-      recentWindow: window,
-      handicapIndex: model.displayIndex(window),
-      roundCount: (golfer.roundCount || 0) + 1,
-    },
-    opId: `golfer-index-${golfer.id}-${round.id}`,
   });
 
   flush();
@@ -388,21 +424,31 @@ export async function addGolfer({ name }) {
     }
   } catch { /* offline: fall through and create, the index will reconcile */ }
 
+  /* The person, the claim on their name, and their place on this roster are
+     three documents describing one act. Written together, so a failure can
+     never leave a golfer with no name claim — which is what allowed duplicates
+     — or a name claimed by a golfer who does not exist. */
+  const writes = [];
   if (!golfer) {
     golfer = model.buildGolfer({ name });
-    await setDoc(ref("golfers", golfer.id), golfer);
-    await setDoc(ref("golferNames", key), { golferId: golfer.id, name: golfer.name });
+    writes.push({ op: "set", path: ["golfers", golfer.id], data: golfer });
+    writes.push({ op: "set", path: ["golferNames", key], data: { golferId: golfer.id, name: golfer.name } });
   }
+  writes.push({
+    op: "set",
+    path: ["associations", assocId, "roster", golfer.id],
+    data: { golferId: golfer.id, addedAt: Date.now() },
+  });
 
-  /* The roster says this person plays in this group. */
-  outbox.enqueue({ type: "set", path: ["associations", assocId, "roster", golfer.id],
-    data: { golferId: golfer.id, addedAt: Date.now() }, opId: `roster-${assocId}-${golfer.id}` });
-  flush();
+  await commitTogether(writes, "add golfer");
   return { golfer, reused };
 }
 
 /* Takes them off this group's roster. The person and their rounds elsewhere
    are untouched — they simply no longer play here. */
+/* One document only, so no batch is needed. The golfer, their rounds and their
+   handicap are deliberately untouched — taking somebody off a roster must never
+   reach beyond that group. */
 export function removeFromRoster(golferId) {
   outbox.enqueue({ type: "delete", path: ["associations", assocId, "roster", golferId],
     opId: `roster-remove-${assocId}-${golferId}-${Date.now()}` });
@@ -738,6 +784,15 @@ export function updateRound(roundId, data) {
   flush();
 }
 
+/* Editing a round changes the golfer's index too, so both move together.
+   Use this rather than updateRound followed by a rebuild — that pairing could
+   leave a corrected score with an index still reflecting the old one. */
+export async function updateRoundAndRebuild(roundId, data, golferId) {
+  updateRound(roundId, data);
+  await flush();
+  if (golferId) await rebuildGolferIndex(golferId);
+}
+
 /* Whether this person may still change a round. The rules decide for real;
    this is only so the interface does not offer a button that will fail. */
 export function canEditRound(round) {
@@ -777,9 +832,16 @@ export async function renameGolfer(golferId, name) {
     return { ok: false, reason: "TAKEN" };
   }
 
-  await setDoc(ref("golfers", golferId), { name: tidy, nameKey: key }, { merge: true });
-  await setDoc(ref("golferNames", key), { golferId, name: tidy });
-  if (beforeKey) { try { await deleteDoc(ref("golferNames", beforeKey)); } catch {} }
+  /* Rename, claim the new name, release the old one — together. Separately, a
+     failure in the middle left a name claimed by nobody, so it could never be
+     used again. */
+  const writes = [
+    { op: "set", path: ["golfers", golferId], data: { name: tidy, nameKey: key } },
+    { op: "set", path: ["golferNames", key], data: { golferId, name: tidy } },
+  ];
+  if (beforeKey) writes.push({ op: "delete", path: ["golferNames", beforeKey] });
+
+  await commitTogether(writes, "rename golfer");
   return { ok: true };
 }
 
@@ -841,65 +903,33 @@ export function updateAssociation(data) {
  * require the entering account to be the one writing. Original scores, dates
  * and differentials are untouched — only the "entered by" attribution changes.
  */
-export function restoreBackup({ golfers = [], courses = [], rounds = [] }) {
-  let queued = 0;
+/* Restoring is all-or-nothing per batch, and the order is chosen so that a
+   failure part-way leaves readable data rather than orphans: courses and
+   golfers first, then the roster, then the rounds that reference them. */
+export async function restoreBackup({ golfers = [], courses = [], rounds = [] }) {
+  const writes = [];
 
   for (const course of courses) {
-    outbox.enqueue({ type: "set", path: ["courses", course.id],
-      data: { ...course, createdBy: course.createdBy || uid },
-      opId: `restore-course-${course.id}` });
-    queued++;
+    writes.push({ op: "set", path: ["courses", course.id],
+      data: { ...course, createdBy: course.createdBy || uid } });
   }
   for (const golfer of golfers) {
-    outbox.enqueue({ type: "set", path: ["associations", assocId, "golfers", golfer.id],
-      data: golfer, opId: `restore-golfer-${golfer.id}` });
-    queued++;
+    writes.push({ op: "set", path: ["golfers", golfer.id], data: golfer });
+    if (golfer.nameKey) {
+      writes.push({ op: "set", path: ["golferNames", golfer.nameKey],
+        data: { golferId: golfer.id, name: golfer.name } });
+    }
+    writes.push({ op: "set", path: ["associations", assocId, "roster", golfer.id],
+      data: { golferId: golfer.id, addedAt: Date.now() } });
   }
   for (const round of rounds) {
-    outbox.enqueue({ type: "set", path: ["associations", assocId, "rounds", round.id],
-      data: { ...round, assocId, enteredBy: uid, enteredAt: { __serverTimestamp: true } },
-      opId: `restore-round-${round.id}` });
-    queued++;
+    writes.push({ op: "set", path: ["associations", assocId, "rounds", round.id],
+      data: { ...round, assocId, enteredBy: uid, enteredAt: { __serverTimestamp: true } } });
   }
 
-  flush();
-  return { queued };
+  await commitTogether(writes, "restore backup");
+  return { queued: writes.length };
 }
-
-/* ---------------- linking a person to their place on the roster ---------------- */
-
-/* When somebody joins, they should not have to find themselves in a dropdown.
- * This ties their account to a golfer record: matching one already on the
- * roster if the name fits, creating one if not.
- *
- * Matching by name is deliberate. The organiser usually adds all sixteen names
- * before anybody joins, and a second "Willy Rosales" appearing on the roster
- * because he typed his own name is exactly the sort of mess that makes an app
- * feel broken.
- */
-export async function linkGolferForMember(displayName) {
-  const name = String(displayName || "").trim();
-  if (!name) return null;
-
-  /* addGolfer already reuses an existing person if the name matches, so a
-     member joining a second group lands on the same record and keeps their
-     handicap rather than starting again. */
-  const { golfer } = await addGolfer({ name });
-
-  if (!golfer.linkedUid) {
-    outbox.enqueue({ type: "update", path: ["golfers", golfer.id],
-      data: { linkedUid: uid }, opId: `golfer-link-${golfer.id}` });
-    flush();
-  }
-  return golfer;
-}
-
-/* The golfer record belonging to whoever is using the app right now. */
-export const myGolferId = (golfers) => {
-  const mine = (golfers || []).find((g) => g.linkedUid === uid);
-  return mine ? mine.id : "";
-};
-
 
 /* ---------------- the groups this person belongs to ---------------- */
 
@@ -924,27 +954,40 @@ async function rememberGroupForAccount(id, name) {
 export async function loadMyGroups() {
   if (!fb || !uid) return knownGroups();
   try {
-    const { getDocs, getDoc, deleteDoc, doc } = fb.mod.store;
+    const { getDocs, getDoc } = fb.mod.store;
     const snap = await getDocs(col("userGroups", uid, "groups"));
     const listed = snap.docs.map((d) => ({ id: d.id, name: (d.data() || {}).name || "Group" }));
 
-    /* Check each one still exists. A group deleted while another device was
-       offline, or a delete that only half succeeded, would otherwise sit in the
-       switcher forever — visible, unopenable, and refusing every read. Prune
-       them here rather than making somebody clean up by hand. */
+    /* NOTHING IS DELETED HERE.
+     *
+     * An earlier version removed a pointer whenever it could not confirm the
+     * group existed — and a dropped connection was enough to trigger it, which
+     * is how a live group vanished from an account. Cannot confirm is not the
+     * same as gone. Groups that no longer exist are simply left out of what is
+     * returned; the pointer stays until something with certainty removes it. */
     const alive = [];
+    const missing = [];
     for (const group of listed) {
       try {
         const exists = await getDoc(ref("associations", group.id));
-        if (exists.exists()) { alive.push(group); continue; }
-      } catch { alive.push(group); continue; }   /* unreadable ≠ gone; keep it */
-      try { await deleteDoc(doc(fb.db, "userGroups", uid, "groups", group.id)); } catch {}
+        if (exists.exists()) alive.push(group);
+        else missing.push(group);
+      } catch {
+        alive.push(group);   /* unreadable — assume it is fine */
+      }
     }
 
-    try { localStorage.setItem(GROUPS_KEY, JSON.stringify(alive)); } catch {}
-    return alive;
-  } catch { /* fall back to whatever this device remembers */ }
-  return knownGroups();
+    /* Only cache when the answer looks trustworthy. If everything came back
+       missing, that is far more likely to be a bad connection than every group
+       being deleted at once, so the old list is kept. */
+    if (alive.length || !listed.length) {
+      try { localStorage.setItem(GROUPS_KEY, JSON.stringify(alive)); } catch {}
+      return alive;
+    }
+    return knownGroups();
+  } catch {
+    return knownGroups();
+  }
 }
 
 /* Whether this account is actually a member of a group — used to detect a
@@ -1006,6 +1049,38 @@ export async function importLegacyIntoCurrentGroup({ v1 }) {
 }
 
 
+/* ---------------- writing several documents as one ---------------- */
+
+/* Firestore batches: every write lands, or none of them do.
+ *
+ * This exists because writing related documents one at a time is what has been
+ * corrupting data. A round and the golfer's index are two documents describing
+ * one event — write them separately and any failure in between leaves a round
+ * with no index, or an index counting a round that was never saved. Deleting a
+ * group was worse still: members went first, which removed the very permission
+ * needed to finish, so the group survived while its contents did not.
+ *
+ * Nothing that touches more than one document may be written any other way.
+ */
+async function commitTogether(writes, what) {
+  const { writeBatch, doc } = fb.mod.store;
+
+  /* 500 is Firestore's hard limit per batch. Splitting is unavoidable above
+     that, so the caller is told, and the order is chosen so that a failure
+     between chunks leaves something readable rather than something broken. */
+  for (let i = 0; i < writes.length; i += 400) {
+    const batch = writeBatch(fb.db);
+    for (const write of writes.slice(i, i + 400)) {
+      const target = doc(fb.db, ...write.path);
+      if (write.op === "delete") batch.delete(target);
+      else if (write.op === "update") batch.update(target, hydrate(write.data));
+      else batch.set(target, hydrate(write.data), { merge: write.merge !== false });
+    }
+    await batch.commit();
+  }
+  return { ok: true, count: writes.length, what };
+}
+
 /* ---------------- deleting a group ---------------- */
 
 /* Removes a group and everything filed under it. Golfers are NOT deleted —
@@ -1014,41 +1089,40 @@ export async function importLegacyIntoCurrentGroup({ v1 }) {
  *
  * Owner only, and the rules enforce it rather than the button being hidden. */
 export async function deleteGroup(targetId) {
-  const { collection, getDocs, doc, deleteDoc, writeBatch } = fb.mod.store;
+  const { collection, getDocs } = fb.mod.store;
   const id = targetId || assocId;
 
-  /* Off the account's list FIRST.
-   *
-   * Order matters here. Deleting the members collection removes your own
-   * membership, and anything after that can be refused — which used to leave
-   * the group deleted but still listed, so it kept appearing in the switcher
-   * and every attempt to open it was rejected. Removing the pointer first
-   * means the worst case is a group nobody can see, rather than one nobody can
-   * get rid of. */
-  forgetGroup(id);
-  if (fb && uid) {
-    try { await deleteDoc(doc(fb.db, "userGroups", uid, "groups", id)); } catch {}
-  }
-
-  /* And stop listening before the documents disappear underneath us. */
+  /* Stop listening first, or live connections keep reading documents as they
+     disappear — which is what blanked the roster after a delete. */
   if (id === assocId) stopWatching();
 
-  const removeAll = async (name) => {
-    const snap = await getDocs(collection(fb.db, "associations", id, name));
-    for (let i = 0; i < snap.docs.length; i += 400) {
-      const batch = writeBatch(fb.db);
-      snap.docs.slice(i, i + 400).forEach((d) => batch.delete(d.ref));
-      await batch.commit();
-    }
-    return snap.size;
-  };
-
   const counts = {};
-  for (const name of ["rounds", "games", "roster", "members"]) {
-    try { counts[name] = await removeAll(name); } catch { counts[name] = -1; }
-  }
-  try { await deleteDoc(doc(fb.db, "associations", id)); } catch { counts.association = -1; }
 
+  /* Contents first, MEMBERS LAST.
+   *
+   * Deleting your own membership removes the very permission needed to clear
+   * everything else, so doing it first left the group deleted, its contents
+   * stranded, and the pointer behind. Each collection is a batch: within one,
+   * all of it goes or none of it does. */
+  for (const part of ["rounds", "games", "roster", "members"]) {
+    try {
+      const snap = await getDocs(collection(fb.db, "associations", id, part));
+      const writes = snap.docs.map((d) => ({ op: "delete", path: ["associations", id, part, d.id] }));
+      if (writes.length) await commitTogether(writes, `clear ${part}`);
+      counts[part] = writes.length;
+    } catch { counts[part] = -1; }
+  }
+
+  /* The group document and the pointer on the account, together. */
+  try {
+    await commitTogether([
+      { op: "delete", path: ["associations", id] },
+      { op: "delete", path: ["userGroups", uid, "groups", id] },
+    ], "delete group");
+    counts.group = 1;
+  } catch { counts.group = -1; }
+
+  forgetGroup(id);
   if (id === assocId) {
     assocId = null;
     myMember = null;
