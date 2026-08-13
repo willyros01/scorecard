@@ -1221,19 +1221,49 @@ function versionBlock() {
    slow save looks like a frozen app, and people tap again — which is how
    duplicates get made. */
 let busyDepth = 0;
-function busy(what) {
-  busyDepth++;
+let busyWhat = "";
+
+/* Held as state and repainted by render(), rather than poked into the page once.
+ *
+ * Poking it directly never worked: flashMsg() and render() both redraw, and any
+ * redraw between busy() and idle() wiped the bar or, worse, left it showing with
+ * nothing able to clear it. A spinner that never stops is the most alarming
+ * thing an app can do, so this is now driven from one variable that render()
+ * reads — it cannot fall out of step with what is on screen.
+ *
+ * paintBusy() is also called directly so the bar appears immediately, without
+ * waiting for the next redraw. */
+let busyStarted = 0;
+
+function paintBusy() {
   const bar = document.getElementById("busy");
   if (!bar) return;
-  bar.hidden = false;
-  bar.innerHTML = `<span class="spinner"></span> ${esc(what || "Working")}…`;
+  if (busyDepth > 0) {
+    bar.hidden = false;
+    bar.innerHTML = `<span class="spinner"></span> ${esc(busyWhat || "Working")}…`;
+  } else {
+    bar.hidden = true;
+    bar.innerHTML = "";
+  }
 }
+
+function busy(what) {
+  if (busyDepth === 0) busyStarted = Date.now();
+  busyDepth++;
+  busyWhat = what || "Working";
+  paintBusy();
+}
+
 function idle() {
   busyDepth = Math.max(0, busyDepth - 1);
-  if (busyDepth > 0) return;
-  const bar = document.getElementById("busy");
-  if (bar) bar.hidden = true;
+  if (busyDepth === 0) busyWhat = "";
+  paintBusy();
 }
+
+/* Belt and braces: nothing may leave a spinner running for more than half a
+   minute. If it ever does, that is a bug — but the person is not left stuck. */
+function idleAll() { busyDepth = 0; busyWhat = ""; paintBusy(); }
+setInterval(() => { if (busyDepth > 0 && Date.now() - busyStarted > 30000) idleAll(); }, 5000);
 
 /* ================= problems ================= */
 
@@ -1396,6 +1426,7 @@ function render() {
   const btn = document.getElementById("statusBtn");
   btn.textContent = sync.text;
   btn.classList.toggle("alert", !!sync.alert);
+  paintBusy();
   paintAlert();
   if (window.__scorecardBooted) window.__scorecardBooted();
 }
@@ -1427,7 +1458,27 @@ tabsEl.addEventListener("click", (e) => {
   render();
 });
 
-document.getElementById("statusBtn").onclick = () => openBackupSheet();
+/* The status pill is on every screen, so it carries the things somebody might
+   need from anywhere: which account they are signed in as, sign out, and the
+   backup. Sign out used to live only on the Admin tab, which a guest never
+   sees at all. */
+document.getElementById("statusBtn").onclick = () => {
+  const email = typeof db.currentEmail === "function" ? db.currentEmail() : "";
+  sheetEl.hidden = false;
+  sheetEl.innerHTML = `<div class="sheet-body">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <h2>This device</h2><button class="rowbtn" data-close="1">Close</button></div>
+    <div class="card padded">
+      <div class="name">${esc(email || "Not signed in")}</div>
+      <div class="sub">${esc(sync.text)}${association ? ` · ${esc(association.name)}` : ""}</div>
+    </div>
+    <div class="inline-actions stacked">
+      <button class="btn ghost" data-quick="backup">Back up my data</button>
+      ${email ? `<button class="btn ghost warn" data-quick="signout">Sign out of this device</button>` : ""}
+    </div>
+    <p class="hint">Signing out deletes nothing. It returns this device to the first screen.</p>
+  </div>`;
+};
 
 document.getElementById("brandSub").onclick = () => {
   if (!db.currentAssociation()) return;
@@ -1569,12 +1620,13 @@ view.addEventListener("click", async (e) => {
       const secret = field ? field.value : "";
       if ((secret || "").length < 6) { flashMsg("The password needs at least six characters"); return; }
       joining = true;
-      flashMsg("Setting the password…");
+      busy("Setting the password");
       render();
       try {
         const result = await db.signInWithEmail({ email: db.currentEmail(), password: secret });
         joining = false;
         await settleGroup(db.currentAssociation());
+        tab = "enter";
         flashMsg(`Password set on ${db.currentEmail()}. Use that email and this password on your other devices.`);
       } catch (err) {
         joining = false;
@@ -1589,7 +1641,7 @@ view.addEventListener("click", async (e) => {
             ? "Tap Sign in with Google just above this panel, pick your account, then set the password straight away."
             : "Try again. If it keeps failing, email this to support.",
         });
-      }
+      } finally { idle(); }
       return render();
     }
     case "reset-password": {
@@ -1681,21 +1733,35 @@ view.addEventListener("click", async (e) => {
     case "sign-out": {
       if (!confirmSignOut) { confirmSignOut = true; flashMsg("Tap Sign out again to confirm. Nothing is deleted."); return render(); }
       confirmSignOut = false;
-      await db.signOutEverywhere();
-      return;
+      busy("Signing out");
+      busy("Signing out");
+      render();
+      try { await db.signOutEverywhere(); }
+      catch { idle(); flashMsg("Couldn't sign out. Try again."); return render(); }
+      return;   /* signOutEverywhere reloads the page; the spinner goes with it */
     }
     case "delete-group": confirmDeleteGroup = true; return render();
     case "cancel-delete-group": confirmDeleteGroup = false; return render();
     case "really-delete-group": {
       confirmDeleteGroup = false;
-      flashMsg("Deleting…");
+      busy("Deleting the group");
+      render();
       try {
         await db.deleteGroup();
-        const others = db.knownGroups();
-        if (others.length) { await start(others[0].id); flashMsg("Deleted. Switched to your other group."); }
-        else { association = null; golfers = []; rounds = []; courses = []; games = []; members = []; roster = []; tab = "enter"; flashMsg("Deleted."); }
-      } catch { flashMsg("Couldn't delete it — the red bar above says why."); }
-      return render();
+        /* Start again from a clean slate rather than trying to unpick what is
+           left in memory. Deleting a group leaves listeners pointing at
+           collections that no longer exist, which is why the roster vanished
+           from the screen afterwards and only came back after signing out. A
+           reload is instant and cannot be half-right. */
+        idle();
+        flashMsg("Group deleted. Reloading…");
+        setTimeout(() => location.reload(), 900);
+        return;
+      } catch {
+        idle();
+        flashMsg("Couldn't delete it — the message above says why.");
+        return render();
+      }
     }
     case "import-here": return importHere();
     case "rename-group": {
@@ -1729,6 +1795,21 @@ view.addEventListener("click", async (e) => {
 
 sheetEl.addEventListener("click", async (e) => {
   if (e.target === sheetEl || e.target.closest("[data-close]")) { sheetEl.hidden = true; return; }
+
+  const quick = e.target.closest("[data-quick]");
+  if (quick) {
+    const what = quick.dataset.quick;
+    if (what === "backup") { sheetEl.hidden = true; return openBackupSheet(); }
+    if (what === "signout") {
+      sheetEl.hidden = true;
+      busy("Signing out");
+      render();
+      try { await db.signOutEverywhere(); }
+      catch { idleAll(); flashMsg("Couldn't sign out. Try again."); render(); }
+      return;   /* signOutEverywhere reloads the page, taking the spinner with it */
+    }
+    return;
+  }
 
   const toggling = e.target.closest("[data-share-toggle]");
   if (toggling) {
@@ -1852,12 +1933,8 @@ async function signIn() {
   if (password.length < 6) { flashMsg("The password needs at least six characters"); return; }
   authForm = { email, password: "" };
   joining = true;
-  render();
-  /* busy() AFTER render(). The bar is part of the page, so drawing the screen
-     first and starting the spinner second is the only order that leaves it
-     visible — the other way round it was wiped out immediately, and the
-     matching idle() then had nothing to clear, so it looked stuck forever. */
   busy("Signing in");
+  render();
 
   try {
     const result = await db.signInWithEmail({ email, password });

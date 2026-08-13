@@ -600,11 +600,19 @@ export const isSignedIn = () => {
 };
 
 export async function signOutEverywhere() {
-  if (!fb) return;
-  try { await fb.mod.auth.signOut(fb.auth); } catch {}
-  try { localStorage.removeItem(ASSOC_KEY); localStorage.removeItem(GROUPS_KEY); } catch {}
+  /* Live listeners must go first. Left running, they keep firing against
+     collections this account can no longer read, which produces permission
+     errors on the way out and a half-empty screen on the way back in. */
+  stopWatching();
+
+  if (fb) { try { await fb.mod.auth.signOut(fb.auth); } catch {} }
+  try {
+    localStorage.removeItem(ASSOC_KEY);
+    localStorage.removeItem(GROUPS_KEY);
+  } catch {}
   assocId = null;
   myMember = null;
+  uid = null;
   location.reload();
 }
 
@@ -1014,7 +1022,16 @@ export async function deleteGroup(targetId) {
   await deleteDoc(doc(fb.db, "associations", id));
 
   forgetGroup(id);
+
+  /* Also drop it from the account's own list, or every device will keep
+     offering a group that no longer exists. */
+  if (fb && uid) {
+    try { await deleteDoc(doc(fb.db, "userGroups", uid, "groups", id)); } catch {}
+  }
+
   if (id === assocId) {
+    /* Stop listening before the documents vanish underneath us. */
+    stopWatching();
     assocId = null;
     myMember = null;
     try { localStorage.removeItem(ASSOC_KEY); } catch {}
