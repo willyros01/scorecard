@@ -924,13 +924,25 @@ async function rememberGroupForAccount(id, name) {
 export async function loadMyGroups() {
   if (!fb || !uid) return knownGroups();
   try {
-    const { getDocs } = fb.mod.store;
+    const { getDocs, getDoc, deleteDoc, doc } = fb.mod.store;
     const snap = await getDocs(col("userGroups", uid, "groups"));
-    const found = snap.docs.map((d) => ({ id: d.id, name: (d.data() || {}).name || "Group" }));
-    if (found.length) {
-      try { localStorage.setItem(GROUPS_KEY, JSON.stringify(found)); } catch {}
-      return found;
+    const listed = snap.docs.map((d) => ({ id: d.id, name: (d.data() || {}).name || "Group" }));
+
+    /* Check each one still exists. A group deleted while another device was
+       offline, or a delete that only half succeeded, would otherwise sit in the
+       switcher forever — visible, unopenable, and refusing every read. Prune
+       them here rather than making somebody clean up by hand. */
+    const alive = [];
+    for (const group of listed) {
+      try {
+        const exists = await getDoc(ref("associations", group.id));
+        if (exists.exists()) { alive.push(group); continue; }
+      } catch { alive.push(group); continue; }   /* unreadable ≠ gone; keep it */
+      try { await deleteDoc(doc(fb.db, "userGroups", uid, "groups", group.id)); } catch {}
     }
+
+    try { localStorage.setItem(GROUPS_KEY, JSON.stringify(alive)); } catch {}
+    return alive;
   } catch { /* fall back to whatever this device remembers */ }
   return knownGroups();
 }
@@ -1005,6 +1017,22 @@ export async function deleteGroup(targetId) {
   const { collection, getDocs, doc, deleteDoc, writeBatch } = fb.mod.store;
   const id = targetId || assocId;
 
+  /* Off the account's list FIRST.
+   *
+   * Order matters here. Deleting the members collection removes your own
+   * membership, and anything after that can be refused — which used to leave
+   * the group deleted but still listed, so it kept appearing in the switcher
+   * and every attempt to open it was rejected. Removing the pointer first
+   * means the worst case is a group nobody can see, rather than one nobody can
+   * get rid of. */
+  forgetGroup(id);
+  if (fb && uid) {
+    try { await deleteDoc(doc(fb.db, "userGroups", uid, "groups", id)); } catch {}
+  }
+
+  /* And stop listening before the documents disappear underneath us. */
+  if (id === assocId) stopWatching();
+
   const removeAll = async (name) => {
     const snap = await getDocs(collection(fb.db, "associations", id, name));
     for (let i = 0; i < snap.docs.length; i += 400) {
@@ -1019,19 +1047,9 @@ export async function deleteGroup(targetId) {
   for (const name of ["rounds", "games", "roster", "members"]) {
     try { counts[name] = await removeAll(name); } catch { counts[name] = -1; }
   }
-  await deleteDoc(doc(fb.db, "associations", id));
-
-  forgetGroup(id);
-
-  /* Also drop it from the account's own list, or every device will keep
-     offering a group that no longer exists. */
-  if (fb && uid) {
-    try { await deleteDoc(doc(fb.db, "userGroups", uid, "groups", id)); } catch {}
-  }
+  try { await deleteDoc(doc(fb.db, "associations", id)); } catch { counts.association = -1; }
 
   if (id === assocId) {
-    /* Stop listening before the documents vanish underneath us. */
-    stopWatching();
     assocId = null;
     myMember = null;
     try { localStorage.removeItem(ASSOC_KEY); } catch {}

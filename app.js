@@ -25,6 +25,7 @@ let skipImport = false;
 let confirmDeleteGroup = false;
 let confirmSignOut = false;
 let shareGameNet = true;
+let settling = false;
 let authForm = { email: "", password: "" };
 
 let tab = "enter";
@@ -1398,7 +1399,7 @@ function renderTabs() {
 
 function render() {
   try {
-    if (!ready) {
+    if (!ready || settling) {
       view.innerHTML = `<div class="boot">Opening your scorecard…</div>`;
     } else if (!db.currentAssociation()) {
       tabsEl.innerHTML = "";
@@ -2226,6 +2227,20 @@ async function start(assocId) {
  * which looks like a broken app. So: check membership, and if it is not ours,
  * move to one that is. */
 async function settleGroup(preferred) {
+  /* Held true until this finishes, so the first screen never flashes up
+     "Start your group" at somebody who already has one — which is what made
+     signing in look as though it had lost everything. */
+  settling = true;
+  render();
+  try {
+    return await settleGroupInner(preferred);
+  } finally {
+    settling = false;
+    render();
+  }
+}
+
+async function settleGroupInner(preferred) {
   const mine = await db.loadMyGroups();
 
   if (preferred && await db.amMemberOf(preferred)) {
