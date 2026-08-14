@@ -931,6 +931,40 @@ export async function restoreBackup({ golfers = [], courses = [], rounds = [] })
   return { queued: writes.length };
 }
 
+/* Ties the signed-in person to their golfer record, creating it if needed.
+ *
+ * Lost in the same refactor as myGolferId, and called in four places —
+ * joining a group, joining by code, and creating one. addGolfer already reuses
+ * an existing person when the name matches, so somebody joining a second group
+ * keeps their handicap rather than starting again. */
+export async function linkGolferForMember(displayName) {
+  const name = String(displayName || "").trim();
+  if (!name) return null;
+
+  const { golfer } = await addGolfer({ name });
+
+  if (golfer && !golfer.linkedUid) {
+    outbox.enqueue({
+      type: "update",
+      path: ["golfers", golfer.id],
+      data: { linkedUid: uid },
+      opId: `golfer-link-${golfer.id}`,
+    });
+    flush();
+  }
+  return golfer;
+}
+
+/* The golfer record belonging to whoever is signed in.
+ *
+ * This went missing during a refactor and History called it anyway, so the
+ * screen died on its first line every time. It returns "" rather than null so
+ * a comparison against it can never accidentally match a golfer with no id. */
+export const myGolferId = (golfers) => {
+  const mine = (golfers || []).find((g) => g && g.linkedUid && g.linkedUid === uid);
+  return mine ? mine.id : "";
+};
+
 /* ---------------- the groups this person belongs to ---------------- */
 
 /* Firestore cannot ask "which groups am I in" directly without a collection

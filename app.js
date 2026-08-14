@@ -472,7 +472,9 @@ function buildTrendChart(list) {
 function screenHistory() {
   /* A guest sees their own rounds. Nothing is hidden that concerns them, and
      nothing is shown that does not. */
-  const mine = db.myGolferId(golfers);
+  /* Called defensively. A screen must not die because one helper is missing —
+     that is exactly what happened here, and the guard costs nothing. */
+  const mine = typeof db.myGolferId === "function" ? db.myGolferId(golfers) : "";
 
   /* Every round is checked before it is read from.
    *
