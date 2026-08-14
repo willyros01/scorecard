@@ -987,6 +987,7 @@ function backupSection() {
       <div class="inline-actions stacked">
         <button class="btn" data-act="backup">Back up now</button>
         <button class="btn ghost" data-act="restore">Restore from a file</button>
+        <button class="btn ghost" data-act="paste-restore">Paste a backup instead</button>
       </div>
       <p class="hint">Restoring never deletes anything. Rounds already here are left alone; missing ones are put back.</p>
     </div>
@@ -1093,6 +1094,26 @@ function downloadBackup() {
   } catch {
     flashMsg("This browser wouldn't save the file. Use Email or Copy instead.");
   }
+}
+
+/* Paste the backup text straight in, with no file involved.
+ *
+ * Saving a note as a file, finding it again, and handing it to a file picker is
+ * several fiddly steps on an iPad — and it failed repeatedly. Select All, Copy,
+ * paste here is two taps and cannot go wrong. */
+function openPasteRestore() {
+  sheetEl.hidden = false;
+  sheetEl.innerHTML = `<div class="sheet-body">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <h2>Paste a backup</h2><button class="rowbtn" data-close="1">Close</button></div>
+    <p class="hint">Open the backup wherever you kept it — a note, an email — tap <b>Select All</b>, then <b>Copy</b>. Tap in the box below and paste.</p>
+    <textarea class="field" name="pasted-backup" rows="6" placeholder="Paste here. It starts with a curly brace." autocomplete="off" autocapitalize="none" spellcheck="false"></textarea>
+    <div id="paste-check" class="hint"></div>
+    <div class="inline-actions stacked">
+      <button class="btn" data-paste="restore">Check and restore</button>
+    </div>
+    <p class="hint">Nothing is written until you have seen what it found. Restoring never deletes — anything already here is left alone.</p>
+  </div>`;
 }
 
 /* Asks for the file, checks what is in it, and shows you before writing. */
@@ -1885,6 +1906,7 @@ view.addEventListener("click", async (e) => {
     }
     case "backup": return openBackupSheet();
     case "restore": return askForBackupFile();
+    case "paste-restore": return openPasteRestore();
     case "edit-key": editingKey = true; return render();
     case "cancel-key": editingKey = false; return render();
     case "save-key": {
@@ -1913,6 +1935,63 @@ sheetEl.addEventListener("click", async (e) => {
      belong to, and does not depend on the group still existing. That is why it
      is here — a stale entry kept coming back after every sign-in, and nothing
      that tried to be clever about it ever worked. */
+  const pasting = e.target.closest("[data-paste]");
+  if (pasting) {
+    const field = sheetEl.querySelector('[name="pasted-backup"]');
+    const text = (field ? field.value : "").trim();
+    const check = document.getElementById("paste-check");
+
+    if (!text) { if (check) check.textContent = "Nothing pasted yet."; return; }
+
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      if (check) check.textContent = "That does not look like a backup. It should start with a curly brace and end with one. Make sure the whole thing was copied.";
+      return;
+    }
+
+    const found = {
+      golfers: Array.isArray(parsed.golfers) ? parsed.golfers : [],
+      courses: Array.isArray(parsed.courses) ? parsed.courses : [],
+      rounds: Array.isArray(parsed.rounds) ? parsed.rounds : [],
+    };
+
+    if (!found.rounds.length && !found.golfers.length) {
+      if (check) check.textContent = "That backup has no golfers or rounds in it.";
+      return;
+    }
+
+    /* Shown before anything is written, so a wrong file is caught here. */
+    if (pasting.dataset.armed !== "1") {
+      pasting.dataset.armed = "1";
+      pasting.textContent = `Restore ${found.rounds.length} round${found.rounds.length === 1 ? "" : "s"} — tap again`;
+      if (check) {
+        check.textContent = `Found ${found.golfers.length} golfer${found.golfers.length === 1 ? "" : "s"}, ${found.courses.length} course${found.courses.length === 1 ? "" : "s"} and ${found.rounds.length} round${found.rounds.length === 1 ? "" : "s"}${parsed.savedAt ? `, saved ${String(parsed.savedAt).slice(0, 16).replace("T", " at ")}` : ""}.`;
+      }
+      return;
+    }
+
+    pasting.disabled = true;
+    pasting.textContent = "Restoring…";
+    sheetEl.hidden = true;
+    busy("Restoring your backup");
+    try {
+      const result = await db.restoreBackup(found);
+      flashMsg(`Restored ${found.rounds.length} round${found.rounds.length === 1 ? "" : "s"} and ${found.golfers.length} golfer${found.golfers.length === 1 ? "" : "s"}. Run the tidy page next so the handicaps are recalculated.`);
+    } catch (err) {
+      openProblem({
+        title: "The restore did not go through",
+        detail: String((err && (err.code || err.message)) || err),
+        advice: "Nothing was written — it is all or nothing, so there is no half-restored state. Your backup text is untouched.",
+      });
+    } finally {
+      idleAll();
+      render();
+    }
+    return;
+  }
+
   const forgetting = e.target.closest("[data-forget-group]");
   if (forgetting) {
     const id = forgetting.dataset.forgetGroup;

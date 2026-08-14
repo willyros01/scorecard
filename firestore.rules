@@ -197,6 +197,23 @@ service cloud.firestore {
       allow create, update, delete: if signedIn();
     }
 
+    /* ---------------- finding rounds wherever they are ---------------- */
+
+    /* Lets a signed-in person search every "rounds" collection at once,
+     * whichever group holds it.
+     *
+     * This exists for recovery. Rounds live inside a group, so if a group
+     * document is lost its rounds become unreachable — present in the database
+     * but invisible to every normal query, which is exactly the state the app
+     * ended up in. Without this rule the rescue scan is refused and there is no
+     * way to even find out whether they survived.
+     *
+     * Read only, and only for a signed-in account. Nothing can be written or
+     * deleted through this path. */
+    match /{path=**}/rounds/{roundId} {
+      allow read: if signedIn();
+    }
+
     /* ---------------- which groups an account belongs to ---------------- */
 
     /* A list kept per account rather than per device. Without it, signing in on
