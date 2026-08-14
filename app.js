@@ -413,58 +413,122 @@ function trendChart(list) {
 }
 
 function buildTrendChart(list) {
-  const rounds = (list || []).filter((r) => r && r.date && Number.isFinite(+r.differential))
-    .sort((a, b) => a.date.localeCompare(b.date)).slice(-20);
+  const rounds = (list || [])
+    .filter((r) => r && typeof r.date === "string" && Number.isFinite(+r.differential))
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .slice(-20);
   if (rounds.length < 3) return "";
 
-  /* The index as it stood after each round, so the line shows how it moved. */
+  /* Replay the index round by round, and work out which rounds were actually
+     counting at each point — the best 8 of the last 20 under the World
+     Handicap System. A round that counted is worth seeing: it is the one that
+     moved your handicap, and the rest are just weather. */
   const points = [];
   let window = [];
   for (const r of rounds) {
     window = model.insertIntoWindow(window, {
       roundId: r.id, date: r.date, differential: +r.differential, assocId: r.assocId,
     });
-    points.push({ date: r.date, index: model.displayIndex(window), differential: +r.differential });
+    points.push({
+      id: r.id,
+      date: r.date,
+      differential: +r.differential,
+      index: model.displayIndex(window),
+      gross: r.gross,
+      course: r.courseName || "",
+    });
+  }
+
+  /* Which of the rounds on screen are counting RIGHT NOW. */
+  const counting = new Set();
+  const latest = window;
+  if (latest.length >= 3) {
+    const howMany = Math.min(8, Math.max(1, model.countingRounds(latest.length)));
+    [...latest]
+      .sort((a, b) => a.differential - b.differential)
+      .slice(0, howMany)
+      .forEach((e) => counting.add(e.roundId));
   }
 
   const shown = points.filter((p) => p.index != null);
   if (shown.length < 2) return "";
 
-  const width = 640, height = 220, padLeft = 46, padRight = 14, padTop = 18, padBottom = 30;
-  const values = shown.map((p) => p.index).concat(points.map((p) => p.differential));
-  let low = Math.floor(Math.min(...values) - 1);
-  let high = Math.ceil(Math.max(...values) + 1);
-  if (high - low < 4) { high = low + 4; }
-
-  const x = (i, n) => padLeft + (i / Math.max(1, n - 1)) * (width - padLeft - padRight);
-  const y = (v) => padTop + (1 - (v - low) / (high - low)) * (height - padTop - padBottom);
-
-  const line = shown.map((p, i) => `${i ? "L" : "M"}${x(i, shown.length).toFixed(1)},${y(p.index).toFixed(1)}`).join(" ");
-  const dots = points.map((p, i) =>
-    `<circle cx="${x(i, points.length).toFixed(1)}" cy="${y(p.differential).toFixed(1)}" r="4" class="dot"/>`).join("");
-
-  const ticks = [low, Math.round((low + high) / 2), high].map((v) =>
-    `<line x1="${padLeft}" y1="${y(v).toFixed(1)}" x2="${width - padRight}" y2="${y(v).toFixed(1)}" class="grid"/>
-     <text x="${padLeft - 8}" y="${(y(v) + 4).toFixed(1)}" class="axis" text-anchor="end">${v}</text>`).join("");
-
-  const first = rounds[0].date, last = rounds[rounds.length - 1].date;
   const now = shown[shown.length - 1].index;
-  const then = shown[0].index;
-  const move = now - then;
+  const low = Math.min(...shown.map((p) => p.index));
+  const first = shown[0].index;
+  const move = now - first;
+
+  /* ---- geometry ---- */
+  const W = 680, H = 300;
+  const padL = 52, padR = 16, padT = 22, padB = 46;
+  const values = points.map((p) => p.differential).concat(shown.map((p) => p.index));
+  let lo = Math.floor(Math.min(...values) - 1);
+  let hi = Math.ceil(Math.max(...values) + 1);
+  if (hi - lo < 6) hi = lo + 6;
+
+  const x = (i, n) => padL + (i / Math.max(1, n - 1)) * (W - padL - padR);
+  const y = (v) => padT + (1 - (v - lo) / (hi - lo)) * (H - padT - padB);
+
+  /* ---- gridlines, four of them, on round numbers ---- */
+  const step = Math.max(1, Math.round((hi - lo) / 4));
+  const ticks = [];
+  for (let v = lo; v <= hi; v += step) {
+    ticks.push(`<line x1="${padL}" y1="${y(v).toFixed(1)}" x2="${W - padR}" y2="${y(v).toFixed(1)}" class="grid"/>
+      <text x="${padL - 10}" y="${(y(v) + 4).toFixed(1)}" class="axis" text-anchor="end">${v}</text>`);
+  }
+
+  /* ---- the index line, plus a soft band beneath it ---- */
+  const line = shown.map((p, i) => `${i ? "L" : "M"}${x(i, shown.length).toFixed(1)},${y(p.index).toFixed(1)}`).join(" ");
+  const area = `${line} L${x(shown.length - 1, shown.length).toFixed(1)},${y(lo).toFixed(1)} L${x(0, shown.length).toFixed(1)},${y(lo).toFixed(1)} Z`;
+
+  /* ---- the low index, marked as a reference the way a handicap card does ---- */
+  const lowLine = `<line x1="${padL}" y1="${y(low).toFixed(1)}" x2="${W - padR}" y2="${y(low).toFixed(1)}" class="lowmark"/>
+    <text x="${W - padR}" y="${(y(low) - 6).toFixed(1)}" class="axis low" text-anchor="end">low ${low.toFixed(1)}</text>`;
+
+  /* ---- each round, counting ones filled, the rest hollow ---- */
+  const dots = points.map((p, i) => {
+    const counts = counting.has(p.id);
+    return `<circle cx="${x(i, points.length).toFixed(1)}" cy="${y(p.differential).toFixed(1)}" r="${counts ? 5 : 4}"
+      class="${counts ? "dot counting" : "dot spare"}"><title>${esc(p.date)} · ${p.gross != null ? `${p.gross} gross · ` : ""}differential ${p.differential.toFixed(1)}${counts ? " · counting" : ""}</title></circle>`;
+  }).join("");
+
+  /* ---- dates at each end, and one in the middle if there is room ---- */
+  const middle = Math.floor(points.length / 2);
+  const dateLabels = `
+    <text x="${padL}" y="${H - 14}" class="axis">${points[0].date}</text>
+    ${points.length > 6 ? `<text x="${x(middle, points.length).toFixed(1)}" y="${H - 14}" class="axis" text-anchor="middle">${points[middle].date}</text>` : ""}
+    <text x="${W - padR}" y="${H - 14}" class="axis" text-anchor="end">${points[points.length - 1].date}</text>`;
+
+  const direction = move === 0 ? "no change" : move < 0 ? `down ${Math.abs(move).toFixed(1)}` : `up ${move.toFixed(1)}`;
 
   return `<section class="panel">
     <div class="panel-head"><h2 class="panel-title">Handicap trend</h2>
-      <span class="panel-count">${move === 0 ? "no change" : move < 0 ? `down ${Math.abs(move).toFixed(1)}` : `up ${move.toFixed(1)}`}</span></div>
+      <span class="panel-count">${esc(direction)}</span></div>
+
     <div class="card padded">
-      <svg viewBox="0 0 ${width} ${height}" class="trend" role="img"
-           aria-label="Handicap index over the last ${rounds.length} rounds, from ${then.toFixed(1)} to ${now.toFixed(1)}">
-        ${ticks}
+      <div class="trend-stats">
+        <div><span class="stat-big">${now.toFixed(1)}</span><span class="stat-label">index now</span></div>
+        <div><span class="stat-big">${low.toFixed(1)}</span><span class="stat-label">lowest</span></div>
+        <div><span class="stat-big">${points.length}</span><span class="stat-label">rounds shown</span></div>
+        <div><span class="stat-big ${move <= 0 ? "good" : "bad"}">${move === 0 ? "—" : `${move > 0 ? "+" : ""}${move.toFixed(1)}`}</span><span class="stat-label">since ${points[0].date.slice(0, 7)}</span></div>
+      </div>
+
+      <svg viewBox="0 0 ${W} ${H}" class="trend" role="img"
+           aria-label="Handicap index over the last ${points.length} rounds, from ${first.toFixed(1)} to ${now.toFixed(1)}, lowest ${low.toFixed(1)}">
+        ${ticks.join("")}
+        <path d="${area}" class="trendarea"/>
+        ${lowLine}
         <path d="${line}" class="trendline"/>
         ${dots}
-        <text x="${padLeft}" y="${height - 8}" class="axis">${first}</text>
-        <text x="${width - padRight}" y="${height - 8}" class="axis" text-anchor="end">${last}</text>
+        ${dateLabels}
       </svg>
-      <p class="hint">The line is the handicap index after each round. The dots are each round's differential — how that day actually played.</p>
+
+      <div class="legend">
+        <span><i class="key counting"></i>counting round</span>
+        <span><i class="key spare"></i>not counting</span>
+        <span><i class="key line"></i>handicap index</span>
+      </div>
+      <p class="hint">The line is the index after each round. Filled dots are the rounds currently counting — the best 8 of the last 20. Hollow ones still sit in the window but do not affect the number today.</p>
     </div>
   </section>`;
 }

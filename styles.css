@@ -366,12 +366,55 @@ body { font-size: 1rem; }
 @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2s; } }
 
 /* ---- handicap trend, plain SVG ---- */
-.trend { width: 100%; height: auto; }
-.trend .grid { stroke: var(--rule); stroke-width: 1; }
+.trend { width: 100%; height: auto; margin: 0.4rem 0 0.2rem; overflow: visible; }
+.trend .grid { stroke: var(--rule); stroke-width: 1; opacity: .7; }
 .trend .axis { font-family: var(--mono); font-size: 12px; fill: var(--muted); }
-.trend .trendline { fill: none; stroke: var(--pine); stroke-width: 3; stroke-linejoin: round; stroke-linecap: round; }
+.trend .axis.low { fill: var(--pencil); font-weight: 700; }
+
+.trend .trendarea { fill: var(--pine); opacity: .07; stroke: none; }
+.trend .trendline {
+  fill: none; stroke: var(--pine); stroke-width: 3.5;
+  stroke-linejoin: round; stroke-linecap: round;
+}
+.trend .lowmark { stroke: var(--pencil); stroke-width: 1.5; stroke-dasharray: 5 4; opacity: .75; }
+
+/* A counting round is filled; one that is only sitting in the window is hollow.
+   Same idea as the counting / non-counting split on a handicap record. */
+.trend .dot.counting { fill: var(--pine); stroke: var(--paper); stroke-width: 1.5; }
+.trend .dot.spare { fill: none; stroke: var(--muted); stroke-width: 2; opacity: .55; }
+
 [data-theme="dark"] .trend .trendline { stroke: #7EBEA0; }
-.trend .dot { fill: var(--pencil); opacity: .65; }
+[data-theme="dark"] .trend .trendarea { fill: #7EBEA0; opacity: .10; }
+[data-theme="dark"] .trend .dot.counting { fill: #7EBEA0; stroke: #14261F; }
+[data-theme="dark"] .trend .lowmark { stroke: #E39A87; }
+[data-theme="dark"] .trend .axis.low { fill: #E39A87; }
+
+/* the figures above the chart */
+.trend-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.6rem;
+  padding: 0 0 0.9rem; border-bottom: 1px solid var(--rule); margin-bottom: 0.4rem;
+}
+.trend-stats > div { display: flex; flex-direction: column; gap: 0.15rem; }
+.stat-big { font-family: var(--mono); font-size: 1.5rem; font-weight: 700; line-height: 1; }
+.stat-big.good { color: var(--pine); }
+.stat-big.bad { color: var(--pencil); }
+[data-theme="dark"] .stat-big.good { color: #7EBEA0; }
+.stat-label { font-size: 0.8rem; color: var(--muted); }
+@media (max-width: 420px) {
+  .trend-stats { grid-template-columns: repeat(2, 1fr); row-gap: 0.9rem; }
+}
+
+.legend {
+  display: flex; flex-wrap: wrap; gap: 1rem;
+  font-size: 0.85rem; color: var(--muted); margin: 0.5rem 0 0.2rem;
+}
+.legend span { display: inline-flex; align-items: center; gap: 0.4rem; }
+.legend .key { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+.legend .key.counting { background: var(--pine); }
+.legend .key.spare { border: 2px solid var(--muted); opacity: .6; }
+.legend .key.line { width: 18px; height: 3px; border-radius: 2px; background: var(--pine); }
+[data-theme="dark"] .legend .key.counting,
+[data-theme="dark"] .legend .key.line { background: #7EBEA0; }
 
 /* ---- a friendlier empty screen ---- */
 .welcome { text-align: center; padding: 2.4rem 1.2rem; background: var(--paper);

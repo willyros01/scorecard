@@ -51,6 +51,16 @@ export function handicapIndex(differentialsChronological) {
   return Math.min(54, round1(average + adjustment));
 }
 
+/* How many of the lowest differentials are counting towards the index right
+   now. Used by the trend chart to show which rounds actually moved the number
+   and which are only sitting in the window — the same distinction a handicap
+   card makes between counting and non-counting scores. */
+export function countingRounds(howManyRounds) {
+  const n = Math.min(Math.max(0, Number(howManyRounds) || 0), 20);
+  if (n < 3) return 0;
+  return SCALE[n][0];
+}
+
 export const courseHandicap = (index, slopeRating, courseRating, par) =>
   Math.round(Number(index) * (Number(slopeRating) / 113) + (Number(courseRating) - Number(par)));
 
