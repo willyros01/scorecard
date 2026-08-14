@@ -734,6 +734,11 @@ function gameEditor() {
     <div class="editor-title">New game</div>
     <label class="lbl">Date</label>
     <input class="field" type="date" name="g-date" value="${d.date}">
+    ${d.multiDay ? `
+      <label class="lbl">Last day</label>
+      <input class="field" type="date" name="g-end-date" value="${d.endDate || ""}">
+      <p class="hint">Rounds played on any day in this range can join the game.</p>
+    ` : `<button class="linkbtn" data-act="make-multiday" style="margin-top:0.4rem">Runs over more than one day</button>`}
     <label class="lbl">Course</label>
     <select class="field" name="g-course"><option value="">Select…</option>
       ${sortedCourses().map((c) => `<option value="${c.id}" ${c.id === d.courseId ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select>
@@ -750,32 +755,63 @@ function gameEditor() {
 function gameDetail(gameId) {
   const game = games.find((g) => g.id === gameId);
   if (!game) { openGame = null; return screenGames(); }
+
   const played = rounds.filter((r) => r.gameId === gameId);
   const board = model.gameLeaderboard(played, golfers);
 
+  /* Rounds played on a day this game covers but not yet part of it.
+     This is what saves entering a tournament twice: post rounds as normal on
+     the Enter tab, then sweep them into the game here in one tap. */
+  const candidates = rounds
+    .filter((r) => r && !r.gameId && model.gameCovers(game, r.date))
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)));
+
   return `${flashBar()}
+  <div class="panel-head">
+    <button class="linkbtn" data-act="close-game">‹ All games</button>
+    ${played.length ? `<button class="linkbtn" data-act="share-game">Share</button>` : ""}
+  </div>
+
   <section class="panel">
-    <div class="panel-head">
-      <h2 class="panel-title"><button class="linkbtn" data-act="close-game">‹</button> ${esc(game.name || courseName(game.courseId))}</h2>
+    <h2 class="panel-title">${esc(game.name || courseName(game.courseId))}</h2>
+    <div class="sub">${esc(model.gameSpanLabel(game))} · ${esc(courseName(game.courseId))}</div>
+  </section>
+
+  ${db.canManage() && candidates.length ? `<section class="panel">
+    <div class="card padded">
+      <div class="name">${candidates.length} round${candidates.length === 1 ? "" : "s"} on ${game.endDate ? "these dates" : "this date"} are not in the game</div>
+      <p class="hint" style="margin:0.3rem 0 0.6rem">Untick anybody who was not playing in it.</p>
+      <div class="list">
+        ${candidates.map((r) => `<label class="checkline">
+          <input type="checkbox" name="add-round" value="${esc(r.id)}" checked>
+          <span>${esc((golferById(r.golferId) || {}).name || "Unknown")} · ${esc(r.date)} · ${r.gross == null ? "—" : r.gross}</span>
+        </label>`).join("")}
+      </div>
+      <div class="inline-actions stacked">
+        <button class="btn" data-act="add-to-game">Add the ticked rounds</button>
+      </div>
     </div>
-    <p class="hint">${game.date} · ${esc(courseName(game.courseId))}</p>
-    ${board.length === 0 ? `<div class="card"><p class="blank">No rounds posted to this game yet. On the Enter tab, pick this game when posting.</p></div>` : `
-    <div class="card list">
-      ${board.map((row) => `<div class="list-row">
-        <span class="rank">${row.netPlace || "—"}</span>
-        <span class="grow">
-          <span class="name">${esc(row.name)}</span><br>
-          <span class="sub">${esc(row.teeName)} · gross ${row.gross} (#${row.grossPlace || "—"})${row.courseHandicap != null ? ` · handicap ${row.courseHandicap}` : ""}</span>
-        </span>
-        <span class="netavg">${row.net == null ? "—" : row.net}<br><span class="sub">net</span></span>
-      </div>`).join("")}
+  </section>` : ""}
+
+  ${board.length ? `<section class="panel">
+    <div class="panel-head"><h2 class="panel-title">Leaderboard</h2><span class="panel-count">${board.length}</span></div>
+    <div class="card">
+      <div class="list">
+        ${[...board]
+          .sort((a, b) => (a.net != null && b.net != null) ? a.netPlace - b.netPlace : a.grossPlace - b.grossPlace)
+          .map((r) => `<div class="list-row">
+            <span class="grow"><span class="name">${r.net != null ? `${r.netPlace}. ` : ""}${esc(r.name)}</span><br>
+              <span class="sub">gross ${r.gross}${r.net != null ? ` · net ${r.net}` : " · no handicap yet"}</span></span>
+            ${db.canManage() ? `<button class="rowbtn warn" data-drop-round="${esc(r.roundId)}">Remove</button>` : ""}
+          </div>`).join("")}
+      </div>
     </div>
-    <div class="inline-actions stacked">
-      <button class="btn" data-act="share-game">Share the result</button>
-      ${db.canManage() ? `<button class="btn ghost warn" data-act="delete-game">Delete game</button>` : ""}
-    </div>
-    <p class="hint">Ranked on net. Gross placing is shown beside each player.</p>`}
-  </section>`;
+    ${db.canManage() ? `<p class="hint">Remove takes a round out of this game only. The round and the golfer's handicap are untouched.</p>` : ""}
+  </section>` : `<div class="card padded">
+      <p class="blank">No rounds in this game yet. Post them from Enter and pick this game, or add them above.</p>
+    </div>`}
+
+  ${versionBlock()}`;
 }
 
 /* ================= sharing ================= */
@@ -790,7 +826,7 @@ function gameShareText(gameId, withNet) {
   const includeNet = withNet == null ? everyoneHasNet : withNet;
 
   const lines = [
-    `${game.name || courseName(game.courseId)} — ${game.date}${game.endDate && game.endDate !== game.date ? ` to ${game.endDate}` : ""}`,
+    `${game.name || courseName(game.courseId)} — ${model.gameSpanLabel(game)}`,
     courseName(game.courseId),
   ];
 
@@ -911,6 +947,9 @@ function screenManage() {
       <div class="inline-form bordered">
         <input name="new-golfer" class="inline-input" placeholder="Type a name" autocomplete="off">
         <div class="inline-actions"><button class="btn compact" data-act="add-golfer">Add golfer</button></div>
+        <div class="inline-actions stacked">
+          <button class="btn ghost compact" data-act="from-other-groups">Add from my other groups</button>
+        </div>
       </div>
     </div>
     <p class="hint">Rename changes that person in every group. Remove takes them off this group's roster only — their rounds and handicap stay.</p>
@@ -1755,6 +1794,15 @@ view.addEventListener("click", async (e) => {
 
   if (d.go) { tab = d.go; return render(); }
   if (d.tee) { form.teeId = d.tee; return render(); }
+  if (d.dropRound) {
+    busy("Removing from the game");
+    try {
+      await db.setGameRounds({ gameId: openGame, removeRoundIds: [d.dropRound] });
+      flashMsg("Taken out of the game. The round itself is untouched.");
+    } catch { flashMsg("Couldn't remove it — the message above says why."); }
+    finally { idleAll(); }
+    return render();
+  }
   if (d.game) { openGame = d.game; return render(); }
   if (d.unfilter) { filter[d.unfilter] = ""; return render(); }
   if (d.golferIndex) { filter = { golferId: d.golferIndex, year: "", month: "", courseId: "" }; tab = "history"; return render(); }
@@ -1877,6 +1925,7 @@ view.addEventListener("click", async (e) => {
     case "import-v1": return importV1();
 
     case "add-golfer": return addGolfer();
+    case "from-other-groups": return openOtherGroupPicker();
     case "save-new-group": {
       const field = view.querySelector('[name="new-group-name"]');
       const name = (field ? field.value : "").trim();
@@ -1909,10 +1958,22 @@ view.addEventListener("click", async (e) => {
     case "save-course": return saveCourse();
     case "find": return runFinder();
 
-    case "new-game": gameDraft = { date: today(), courseId: "", name: "" }; return render();
+    case "new-game": gameDraft = { date: today(), endDate: "", courseId: "", name: "", multiDay: false }; return render();
+    case "make-multiday": gameDraft.multiDay = true; return render();
     case "cancel-game": gameDraft = null; return render();
     case "save-game": return saveGame();
     case "close-game": openGame = null; return render();
+    case "add-to-game": {
+      const ids = [...view.querySelectorAll('[name="add-round"]:checked')].map((b) => b.value);
+      if (!ids.length) { flashMsg("Nothing ticked"); return; }
+      busy("Adding to the game");
+      try {
+        await db.setGameRounds({ gameId: openGame, addRoundIds: ids });
+        flashMsg(`${ids.length} round${ids.length === 1 ? "" : "s"} added to the game.`);
+      } catch { flashMsg("Couldn't add them — the message above says why."); }
+      finally { idleAll(); }
+      return render();
+    }
     case "delete-game": db.deleteGame(openGame); openGame = null; flashMsg("Game deleted"); return render();
     case "share-game": {
       const board = model.gameLeaderboard(rounds.filter((r) => r.gameId === openGame), golfers);
@@ -2017,6 +2078,56 @@ sheetEl.addEventListener("click", async (e) => {
      belong to, and does not depend on the group still existing. That is why it
      is here — a stale entry kept coming back after every sign-in, and nothing
      that tried to be clever about it ever worked. */
+  const inviting = e.target.closest("[data-invite]");
+  if (inviting) {
+    const chosen = sheetEl.querySelector('[name="invite-role"]:checked');
+    const role = chosen ? chosen.value : "member";
+    sheetEl.hidden = true;
+    busy("Preparing the invitation");
+    try {
+      if (role === "admin") await db.ensureAdminCode();
+      const link = db.inviteLink(role);
+      if (!link) { flashMsg("Could not build the invitation link."); return; }
+
+      const guide = `${location.origin}${location.pathname}quick-start.html`;
+      const text = [
+        `${association ? association.name : "Our golf group"} — you are invited to keep your handicap with us.`,
+        "",
+        `Join here: ${link}`,
+        "",
+        `How it works, in one page: ${guide}`,
+        "",
+        role === "admin"
+          ? "This link makes you an admin — you can add courses and post rounds for anybody."
+          : "Tap the link, type the name you play under, and you are in. No account, no password.",
+      ].join("\n");
+
+      openShare(text, role === "admin" ? "Admin invitation" : "Invitation");
+    } catch {
+      flashMsg("Couldn't prepare it — the message above says why.");
+    } finally { idleAll(); }
+    return;
+  }
+
+  const picking = e.target.closest("[data-pick]");
+  if (picking) {
+    if (picking.dataset.pick === "all") {
+      sheetEl.querySelectorAll('[name="pick-golfer"]').forEach((b) => { b.checked = true; });
+      return;
+    }
+    const ids = [...sheetEl.querySelectorAll('[name="pick-golfer"]:checked')].map((b) => b.value);
+    if (!ids.length) { flashMsg("Nobody ticked"); return; }
+    sheetEl.hidden = true;
+    busy("Adding them to this group");
+    try {
+      const result = await db.addExistingToRoster(ids);
+      flashMsg(`${result.added} golfer${result.added === 1 ? "" : "s"} added, with their rounds and handicaps.`);
+    } catch { flashMsg("Couldn't add them — the message above says why."); }
+    finally { idleAll(); }
+    render();
+    return;
+  }
+
   const pasting = e.target.closest("[data-paste]");
   if (pasting) {
     const field = sheetEl.querySelector('[name="pasted-backup"]');
@@ -2398,6 +2509,52 @@ async function importHere() {
       : `The import did not finish. ${code || "No detail was given."} Your version 1 data is untouched.`);
   }
   render();
+}
+
+/* Everyone on your other groups' rosters, with tick boxes.
+ *
+ * Typing a name again is what creates a second person with a split handicap.
+ * This adds the SAME golfer, so their rounds and index come with them. */
+async function openOtherGroupPicker() {
+  sheetEl.hidden = false;
+  sheetEl.innerHTML = `<div class="sheet-body"><h2>Looking…</h2></div>`;
+
+  let people = [];
+  try { people = await db.golfersInMyOtherGroups(); }
+  catch {
+    sheetEl.innerHTML = `<div class="sheet-body">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <h2>Could not look</h2><button class="rowbtn" data-close="1">Close</button></div>
+      <p class="hint">Your other groups could not be read just now. Try again in a moment.</p>
+    </div>`;
+    return;
+  }
+
+  if (!people.length) {
+    sheetEl.innerHTML = `<div class="sheet-body">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <h2>Nobody to add</h2><button class="rowbtn" data-close="1">Close</button></div>
+      <p class="hint">Everyone from your other groups is already on this roster, or you have no other groups yet.</p>
+    </div>`;
+    return;
+  }
+
+  sheetEl.innerHTML = `<div class="sheet-body">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <h2>Add from your other groups</h2><button class="rowbtn" data-close="1">Close</button></div>
+    <p class="hint">The same person, not a copy — their rounds and handicap come with them.</p>
+    <div class="card list">
+      ${people.map((p) => `<label class="checkline" style="padding:0.6rem 0.8rem">
+        <input type="checkbox" name="pick-golfer" value="${esc(p.id)}">
+        <span><span class="name">${esc(p.name || "Unnamed")}</span><br>
+          <span class="sub">${esc(p.groups.join(", "))}${p.handicapIndex != null ? ` · index ${Number(p.handicapIndex).toFixed(1)}` : " · no index yet"}</span></span>
+      </label>`).join("")}
+    </div>
+    <div class="inline-actions stacked">
+      <button class="btn" data-pick="all">Tick everybody</button>
+      <button class="btn" data-pick="add">Add the ticked golfers</button>
+    </div>
+  </div>`;
 }
 
 async function addGolfer() {

@@ -104,6 +104,12 @@ service cloud.firestore {
             ||
             (request.resource.data.role == 'member'
               && request.resource.data.joinCode == association(assocId).joinCode)
+            ||
+            /* An admin invitation carries a DIFFERENT secret. Checking it here
+               is what makes a pre-set role safe: a guest link cannot be edited
+               into an admin one, because the guest code will not match. */
+            (request.resource.data.role == 'admin'
+              && request.resource.data.joinCode == association(assocId).adminCode)
           );
 
         /* Only the owner changes roles, and never the owner's own. */

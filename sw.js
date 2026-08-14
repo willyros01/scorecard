@@ -16,7 +16,7 @@
  */
 
 const CACHE = "scorecard-shell";
-const SHELL = ["./", "./index.html", "./cleanup.html", "./repair.html", "./tidy.html", "./rebuild.html", "./styles.css", "./app.js", "./db.js",
+const SHELL = ["./", "./index.html", "./cleanup.html", "./repair.html", "./tidy.html", "./rebuild.html", "./quick-start.html", "./styles.css", "./app.js", "./db.js",
   "./courses-api.js", "./version.js", "./firebase-config.js",
   "./model.js", "./store.js", "./outbox.js", "./migrate.js",
   "./manifest.webmanifest", "./icon.svg"];

@@ -224,15 +224,46 @@ export const buildCourse = ({ name, club = "", location = "", country = "", tees
   createdBy,
 });
 
-export const buildGame = ({ assocId, date, courseId, name = "", createdBy, id = newId() }) => ({
-  id, assocId, date, courseId, name: String(name).trim(), createdBy,
+/* A game can span days. endDate is optional and absent for the ordinary
+   one-day case, so nothing about a normal Saturday changes — a tournament is
+   just a game whose window happens to be wider. */
+export const buildGame = ({ assocId, date, endDate = null, courseId, name = "", createdBy, id = newId() }) => ({
+  id, assocId, date,
+  /* Optional, and absent for an ordinary one-day game, so nothing about a
+     normal Saturday changes — a tournament is simply a game with a wider
+     window. A backwards end date is ignored rather than accepted. */
+  endDate: endDate && endDate > date ? endDate : null,
+  courseId, name: String(name).trim(), createdBy,
 });
 
-export const buildAssociation = ({ name, ownerUid, joinCode = newJoinCode(), id = newId() }) => ({
+/* Whether a date falls inside a game's window, inclusive at both ends. */
+export const gameCovers = (game, date) => {
+  if (!game || typeof date !== "string" || !date) return false;
+  const from = game.date;
+  if (typeof from !== "string") return false;
+  return date >= from && date <= (game.endDate || from);
+};
+
+export const gameSpanLabel = (game) => {
+  if (!game || !game.date) return "";
+  return !game.endDate || game.endDate === game.date
+    ? game.date
+    : `${game.date} to ${game.endDate}`;
+};
+
+/* Two codes, not one.
+ *
+ * An invitation that merely SAYS role=admin would let anyone holding the link
+ * claim admin — the rules cannot tell an honest link from an edited one. So an
+ * admin invitation carries a different secret, and the rules grant the admin
+ * role only when that second code matches. A guest link cannot be altered into
+ * an admin one. */
+export const buildAssociation = ({ name, ownerUid, joinCode = newJoinCode(), adminCode = newJoinCode(), id = newId() }) => ({
   id,
   name: String(name).trim(),
   ownerUid,
   joinCode,
+  adminCode,
   settings: { minRoundsForRanking: 3 },
 });
 

@@ -229,6 +229,22 @@ export async function findAssociationByCode(code) {
 
 /* The code is checked by the security rules, not here. This request simply
    fails if it does not match, which is what makes editing the app pointless. */
+/* Works out which role a code unlocks, so joining does not have to guess.
+   The rules verify it again server-side; this only decides what to ask for. */
+export async function roleForCode(associationId, code) {
+  if (!fb) return "member";
+  try {
+    const { getDoc } = fb.mod.store;
+    const snap = await getDoc(ref("associations", associationId));
+    if (!snap.exists()) return "member";
+    const data = snap.data() || {};
+    return data.adminCode && code === data.adminCode ? "admin" : "member";
+  } catch {
+    /* Cannot read it — ask for the ordinary role, which always works. */
+    return "member";
+  }
+}
+
 export async function joinAssociation({ associationId, code, displayName }) {
   const { setDoc, serverTimestamp } = fb.mod.store;
   const member = model.buildMember({
@@ -468,8 +484,8 @@ export function addCourse(details) {
   return course;
 }
 
-export function addGame({ date, courseId, name }) {
-  const game = model.buildGame({ assocId, date, courseId, name, createdBy: uid });
+export function addGame({ date, endDate = null, courseId, name }) {
+  const game = model.buildGame({ assocId, date, endDate, courseId, name, createdBy: uid });
   outbox.enqueue({
     type: "set",
     path: ["associations", assocId, "games", game.id],
@@ -736,8 +752,42 @@ export function setMemberRole(memberUid, role) {
 
 /* An invitation is a link, so joining is one tap from a message rather than
    a code somebody has to read out and type. */
+/* The group document as last read, so invitation links can be built without a
+   round trip. Kept current by watchAssociation below. */
+let cachedAssociation = null;
+const currentAssociationDoc = () => cachedAssociation;
+
 export const joinLink = (association) =>
   `${location.origin}${location.pathname}?join=${association.id}.${association.joinCode}`;
+
+/* An invitation for a specific role.
+ *
+ * The link carries whichever secret matches the role, so the rules can VERIFY
+ * the role rather than trust a label. An admin link holds a different code
+ * entirely, which is why a guest cannot edit their own link into an admin one. */
+export function inviteLink(role = "member") {
+  const group = currentAssociationDoc();
+  if (!group) return "";
+  const code = role === "admin" ? group.adminCode : group.joinCode;
+  if (!code) return "";
+  return `${location.origin}${location.pathname}?join=${group.id}.${code}`;
+}
+
+/* Groups created before admin invitations existed have no admin code. One is
+   generated and saved the first time an admin invitation is sent, so older
+   groups gain the feature without anybody having to do anything. */
+export async function ensureAdminCode() {
+  const group = currentAssociationDoc();
+  if (!group) return "";
+  if (group.adminCode) return group.adminCode;
+
+  const code = model.newJoinCode();
+  await commitTogether([
+    { op: "set", path: ["associations", group.id], data: { adminCode: code } },
+  ], "add admin code");
+  cachedAssociation = { ...group, adminCode: code };
+  return code;
+}
 
 export function readJoinLink() {
   try {
@@ -1205,4 +1255,81 @@ export async function deleteGroup(targetId) {
     try { localStorage.removeItem(ASSOC_KEY); } catch {}
   }
   return counts;
+}
+
+/* ---------------- building a roster from your other groups ---------------- */
+
+/* Everyone on the rosters of your OTHER groups, with the group they play in.
+ *
+ * This is how a tournament roster gets assembled without retyping seventeen
+ * names — retyping is what creates duplicate people with split handicaps. */
+export async function golfersInMyOtherGroups() {
+  if (!fb || !uid) return [];
+  const { getDocs } = fb.mod.store;
+
+  const groups = (await loadMyGroups()).filter((g) => g.id !== assocId);
+  const here = new Set();
+  try {
+    (await getDocs(col("associations", assocId, "roster"))).forEach((d) => here.add(d.id));
+  } catch {}
+
+  const seen = new Map();
+  for (const group of groups) {
+    let ids = [];
+    try {
+      (await getDocs(col("associations", group.id, "roster"))).forEach((d) => ids.push(d.id));
+    } catch { continue; }
+
+    for (const id of ids) {
+      if (here.has(id)) continue;              /* already plays here */
+      if (seen.has(id)) { seen.get(id).groups.push(group.name); continue; }
+      try {
+        const person = await getDoc_(id);
+        if (person) seen.set(id, { ...person, groups: [group.name] });
+      } catch {}
+    }
+  }
+  return [...seen.values()].sort((a, b) =>
+    String(a.name || "").localeCompare(String(b.name || "")));
+}
+
+async function getDoc_(golferId) {
+  const { getDoc } = fb.mod.store;
+  const snap = await getDoc(ref("golfers", golferId));
+  return snap.exists() ? { ...snap.data(), id: snap.id } : null;
+}
+
+/* Adds several existing golfers to this group's roster in ONE batch — all of
+   them or none, so a half-built roster is impossible. Creates nobody: these are
+   people who already exist, keeping their rounds and their handicap. */
+export async function addExistingToRoster(golferIds) {
+  const ids = [...new Set((golferIds || []).filter(Boolean))];
+  if (!ids.length) return { added: 0 };
+
+  await commitTogether(ids.map((id) => ({
+    op: "set",
+    path: ["associations", assocId, "roster", id],
+    data: { golferId: id, addedAt: Date.now() },
+  })), "add existing golfers");
+
+  return { added: ids.length };
+}
+
+/* ---------------- who is in a game ---------------- */
+
+/* Attaches rounds to a game, or detaches them, in one batch. The game's line-up
+   is simply which rounds carry its id, so editing the line-up is editing those
+   rounds — there is no second list to fall out of step with. */
+export async function setGameRounds({ gameId, addRoundIds = [], removeRoundIds = [] }) {
+  const writes = [
+    ...addRoundIds.map((id) => ({
+      op: "update", path: ["associations", assocId, "rounds", id], data: { gameId },
+    })),
+    ...removeRoundIds.map((id) => ({
+      op: "update", path: ["associations", assocId, "rounds", id], data: { gameId: null },
+    })),
+  ];
+  if (!writes.length) return { changed: 0 };
+  await commitTogether(writes, "set game line-up");
+  return { changed: writes.length };
 }
