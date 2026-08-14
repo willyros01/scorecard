@@ -371,7 +371,7 @@ body { font-size: 1rem; }
 .trend .axis { font-family: var(--mono); font-size: 12px; fill: var(--muted); }
 .trend .axis.low { fill: var(--pencil); font-weight: 700; }
 
-.trend .trendarea { fill: var(--pine); opacity: .07; stroke: none; }
+.trend .trendarea { fill: var(--pine); opacity: .045; stroke: none; }
 .trend .trendline {
   fill: none; stroke: var(--pine); stroke-width: 3.5;
   stroke-linejoin: round; stroke-linecap: round;
@@ -384,7 +384,7 @@ body { font-size: 1rem; }
 .trend .dot.spare { fill: none; stroke: var(--muted); stroke-width: 2; opacity: .55; }
 
 [data-theme="dark"] .trend .trendline { stroke: #7EBEA0; }
-[data-theme="dark"] .trend .trendarea { fill: #7EBEA0; opacity: .10; }
+[data-theme="dark"] .trend .trendarea { fill: #7EBEA0; opacity: .08; }
 [data-theme="dark"] .trend .dot.counting { fill: #7EBEA0; stroke: #14261F; }
 [data-theme="dark"] .trend .lowmark { stroke: #E39A87; }
 [data-theme="dark"] .trend .axis.low { fill: #E39A87; }
@@ -423,3 +423,13 @@ body { font-size: 1rem; }
 .welcome h2 { font-family: var(--display); font-weight: 400; font-size: 1.5rem; margin: 0 0 0.6rem; }
 .welcome p { color: var(--muted); max-width: 34ch; margin: 0 auto 1.2rem; font-size: 1rem; }
 .welcome .btn { max-width: 280px; margin: 0 auto; }
+
+/* what a tapped dot says — iPads have no hover, so this is how the detail
+   is actually reachable on the device this app is used on */
+.readout {
+  margin: 0.6rem 0 0.2rem; padding: 0.7rem 0.9rem;
+  background: var(--tint); border: 1px dashed var(--rule); border-radius: 10px;
+  font-size: 0.95rem; color: var(--muted); min-height: 1.2em;
+}
+.readout.showing { color: var(--ink); border-style: solid; border-color: var(--sand); }
+.trend .dot-target { fill: transparent; cursor: pointer; }

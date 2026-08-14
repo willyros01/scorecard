@@ -189,6 +189,33 @@ async function inspect() {
     }
   }
 
+  /* Course handicaps frozen onto rounds while the index was corrupted.
+   *
+   * A round stores the course handicap that applied when it was entered, and
+   * that is normally right — it stops old results shifting. But rounds entered
+   * during the negative-index period carry nonsense, which is why a 97 showed a
+   * net of 90 for a 24.8 handicap. Re-freezing from today's correct index is a
+   * one-time correction. */
+  const staleHandicaps = [];
+  for (const group of groups) {
+    let snap;
+    try { snap = await getDocs(collection(db, "associations", group.id, "rounds")); } catch { continue; }
+    snap.forEach((d) => {
+      const r = d.data();
+      if (!r || !r.golferId) return;
+      const golfer = golfers.find((g) => g.id === r.golferId);
+      if (!golfer || golfer.handicapIndex == null) return;
+      if (!Number.isFinite(+r.slope) || !Number.isFinite(+r.rating)) return;
+
+      const right = Math.round(+golfer.handicapIndex * (+r.slope / 113) + (+r.rating - +r.par));
+      const stored = r.courseHandicap;
+      /* Only obviously wrong ones: negative, or more than 5 strokes out. */
+      if (stored != null && (stored < 0 || Math.abs(stored - right) > 5)) {
+        staleHandicaps.push({ groupId: group.id, id: d.id, name: golfer.name, date: r.date, stored, right });
+      }
+    });
+  }
+
   const duplicates = [...seenNames.values()].filter((list) => list.length > 1);
   const emptyGroups = groups.filter((g) => g.members === 0);
 
@@ -206,6 +233,17 @@ async function inspect() {
         if (shown !== right) bits.push(`index shows ${shown}, should be ${right}`);
         return `${g.name} — ${bits.join("; ")}`;
       }).join("\n"),
+    });
+  }
+
+  if (staleHandicaps.length) {
+    findings.push({
+      kind: "handicaps", bad: true,
+      title: `${staleHandicaps.length} round${staleHandicaps.length === 1 ? "" : "s"} with a wrong course handicap`,
+      detail: staleHandicaps.slice(0, 8).map((h) =>
+        `${h.name} on ${h.date} — stored ${h.stored}, should be ${h.right}`
+      ).join("\n") + (staleHandicaps.length > 8 ? `\n…and ${staleHandicaps.length - 8} more` : "")
+      + "\n\nThese were frozen while the handicap index was wrong, so their net scores are wrong too.",
     });
   }
 
@@ -231,7 +269,7 @@ async function inspect() {
     findings.push({ kind: "clean", bad: false, title: "Nothing needs fixing", detail: `Checked ${golfers.length} golfers and ${totalRounds} rounds across ${groups.length} group${groups.length === 1 ? "" : "s"}.` });
   }
 
-  plan = { golferFixes, emptyGroups, groups, totalRounds };
+  plan = { golferFixes, emptyGroups, groups, totalRounds, staleHandicaps };
   return findings;
 }
 
@@ -247,7 +285,7 @@ function draw() {
     </div>`).join("")}
   </div>`;
 
-  const fixable = plan.golferFixes.length + plan.emptyGroups.length;
+  const fixable = plan.golferFixes.length + plan.emptyGroups.length + plan.staleHandicaps.length;
   actionsEl.innerHTML = fixable
     ? `<div class="inline-actions stacked" style="margin-top:18px">
          <button class="btn" id="fix">Fix these ${fixable} thing${fixable === 1 ? "" : "s"}</button>
@@ -278,6 +316,25 @@ async function repair() {
       say(`${g.name}: ${g.realCount} round${g.realCount === 1 ? "" : "s"}, index ${g.correctIndex == null ? "not established" : g.correctIndex.toFixed(1)}`);
     } catch (e) {
       say(`Could not fix ${g.name} — ${(e && e.code) || "refused"}`, true);
+    }
+  }
+
+  /* Re-freeze the wrong ones, in batches. */
+  if (plan.staleHandicaps.length) {
+    const { writeBatch } = mod;
+    try {
+      for (let i = 0; i < plan.staleHandicaps.length; i += 300) {
+        const batch = writeBatch(db);
+        for (const h of plan.staleHandicaps.slice(i, i + 300)) {
+          batch.set(doc(db, "associations", h.groupId, "rounds", h.id),
+            { courseHandicap: h.right }, { merge: true });
+        }
+        await batch.commit();
+      }
+      fixed += plan.staleHandicaps.length;
+      say(`${plan.staleHandicaps.length} course handicap${plan.staleHandicaps.length === 1 ? "" : "s"} corrected — net scores will be right now`);
+    } catch (e) {
+      say(`Could not correct the course handicaps — ${(e && e.code) || "refused"}`, true);
     }
   }
 

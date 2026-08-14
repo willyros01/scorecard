@@ -486,10 +486,19 @@ function buildTrendChart(list) {
     <text x="${W - padR}" y="${(y(low) - 6).toFixed(1)}" class="axis low" text-anchor="end">low ${low.toFixed(1)}</text>`;
 
   /* ---- each round, counting ones filled, the rest hollow ---- */
+  /* Each dot is tappable, not merely hoverable.
+   *
+   * The first version used an SVG <title>, which only ever appears on hover —
+   * and an iPad has no hover, so the detail was unreachable on the device this
+   * app is actually used on. A generous invisible target sits over each dot so
+   * a fingertip does not have to be precise. */
   const dots = points.map((p, i) => {
     const counts = counting.has(p.id);
-    return `<circle cx="${x(i, points.length).toFixed(1)}" cy="${y(p.differential).toFixed(1)}" r="${counts ? 5 : 4}"
-      class="${counts ? "dot counting" : "dot spare"}"><title>${esc(p.date)} · ${p.gross != null ? `${p.gross} gross · ` : ""}differential ${p.differential.toFixed(1)}${counts ? " · counting" : ""}</title></circle>`;
+    const cx = x(i, points.length).toFixed(1);
+    const cy = y(p.differential).toFixed(1);
+    const detail = `${p.date} · ${p.gross != null ? `${p.gross} gross · ` : ""}differential ${p.differential.toFixed(1)}${p.index != null ? ` · index after this round ${p.index.toFixed(1)}` : ""}${counts ? " · counting" : " · not counting today"}${p.course ? ` · ${p.course}` : ""}`;
+    return `<circle cx="${cx}" cy="${cy}" r="${counts ? 5 : 4}" class="${counts ? "dot counting" : "dot spare"}"/>
+      <circle cx="${cx}" cy="${cy}" r="16" class="dot-target" data-round-detail="${esc(detail)}"><title>${esc(detail)}</title></circle>`;
   }).join("");
 
   /* ---- dates at each end, and one in the middle if there is room ---- */
@@ -522,6 +531,8 @@ function buildTrendChart(list) {
         ${dots}
         ${dateLabels}
       </svg>
+
+      <div class="readout" id="round-readout">Tap any dot to see that round.</div>
 
       <div class="legend">
         <span><i class="key counting"></i>counting round</span>
@@ -757,7 +768,10 @@ function gameDetail(gameId) {
   if (!game) { openGame = null; return screenGames(); }
 
   const played = rounds.filter((r) => r.gameId === gameId);
-  const board = model.gameLeaderboard(played, golfers);
+  /* allGolfers, not the roster. Somebody who played in this game but has since
+     been taken off the roster must still appear in its result — a past
+     leaderboard should not change because the roster did. */
+  const board = model.gameLeaderboard(played, allGolfers);
 
   /* Rounds played on a day this game covers but not yet part of it.
      This is what saves entering a tournament twice: post rounds as normal on
@@ -1788,6 +1802,18 @@ view.addEventListener("keydown", (e) => {
 });
 
 view.addEventListener("click", async (e) => {
+  /* A tapped dot writes into the readout without redrawing anything, so the
+     chart does not flicker and the tap target stays under the finger. */
+  const dot = e.target.closest("[data-round-detail]");
+  if (dot) {
+    const readout = document.getElementById("round-readout");
+    if (readout) {
+      readout.textContent = dot.dataset.roundDetail;
+      readout.classList.add("showing");
+    }
+    return;
+  }
+
   const t = e.target.closest("[data-act],[data-tee],[data-go],[data-edit],[data-del],[data-confirm-del],[data-unfilter],[data-drill],[data-golfer-index],[data-del-golfer],[data-rename],[data-course],[data-pick],[data-rm-tee],[data-game],[data-role]");
   if (!t) return;
   const d = t.dataset;
@@ -2324,13 +2350,70 @@ sheetEl.addEventListener("click", async (e) => {
   if (!send) return;
   const text = sheetEl.dataset.text || "";
   const how = send.dataset.send;
-  if (how === "save") return saveBackup();
-  if (how === "download") return downloadBackup();
-  if (how === "whatsapp") open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank");
-  else if (how === "email") location.href = `mailto:?subject=${encodeURIComponent(sheetEl.dataset.title || "")}&body=${encodeURIComponent(text)}`;
-  else if (how === "sms") location.href = `sms:?&body=${encodeURIComponent(text)}`;
-  else if (how === "copy") { navigator.clipboard?.writeText(text); }
-  else if (how === "native") navigator.share({ text }).catch(() => {});
+  /* Every one of these now says whether it worked.
+   *
+   * Copy and Save looked like dead buttons because they did their job silently
+   * and, on iOS, often failed silently too — the clipboard is refused unless
+   * the page has focus, and there was no fallback and no message either way. */
+  if (how === "save") { saveBackup(); return; }
+  if (how === "download") { downloadBackup(); return; }
+
+  if (how === "whatsapp") {
+    open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank");
+    return;
+  }
+  if (how === "email") {
+    location.href = `mailto:?subject=${encodeURIComponent(sheetEl.dataset.title || "")}&body=${encodeURIComponent(text)}`;
+    return;
+  }
+  if (how === "sms") {
+    location.href = `sms:?&body=${encodeURIComponent(text)}`;
+    return;
+  }
+
+  if (how === "copy") {
+    send.disabled = true;
+    const was = send.textContent;
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        throw new Error("no clipboard");
+      }
+      send.textContent = "Copied";
+      setTimeout(() => { send.textContent = was; send.disabled = false; }, 1600);
+    } catch {
+      /* Refused, which iOS does often. Select the text instead so a long press
+         and Copy still works — better than a button that appears dead. */
+      send.disabled = false;
+      send.textContent = was;
+      const box = sheetEl.querySelector(".msg, textarea");
+      if (box) {
+        try {
+          if (box.select) { box.focus(); box.select(); }
+          else {
+            const range = document.createRange();
+            range.selectNodeContents(box);
+            const selection = window.getSelection();
+            selection.removeAllRanges();
+            selection.addRange(range);
+          }
+          flashMsg("Selected the text — press and hold it, then tap Copy.");
+        } catch { flashMsg("Copying was refused. Select the text above and copy it by hand."); }
+      }
+    }
+    return;
+  }
+
+  if (how === "native") {
+    if (!navigator.share) { flashMsg("This device has no share sheet. Use one of the other buttons."); return; }
+    try { await navigator.share({ text }); }
+    catch (err) {
+      /* Cancelling is not a failure and should say nothing. */
+      if (err && err.name !== "AbortError") flashMsg("Sharing did not open. Try Email or WhatsApp.");
+    }
+    return;
+  }
 });
 
 /* ================= actions ================= */

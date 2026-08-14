@@ -61,6 +61,9 @@ export function countingRounds(howManyRounds) {
   return SCALE[n][0];
 }
 
+const courseHandicap_ = (index, slopeRating, courseRating, par) =>
+  Math.round(index * (slopeRating / 113) + (courseRating - par));
+
 export const courseHandicap = (index, slopeRating, courseRating, par) =>
   Math.round(Number(index) * (Number(slopeRating) / 113) + (Number(courseRating) - Number(par)));
 
@@ -377,17 +380,43 @@ const byName = (golfers) => {
 };
 
 /* One outing. Returns every player with both placings worked out. */
+/* The leaderboard.
+ *
+ * A round stores the course handicap that applied when it was entered, so a
+ * result never changes retrospectively. But rounds imported or restored from
+ * elsewhere often have nothing stored — and showing those players no net score
+ * at all makes them look as though they did badly, when really the app simply
+ * did not know their handicap yet. So when nothing was frozen, the golfer's
+ * index today is used and the round is marked as estimated. */
 export function gameLeaderboard(rounds, golfers) {
   const lookup = byName(golfers);
-  const rows = (rounds || []).map((r) => ({
-    roundId: r.id,
-    golferId: r.golferId,
-    name: (lookup.get(r.golferId) || {}).name || "Unknown",
-    gross: r.gross,
-    courseHandicap: r.courseHandicap,
-    net: netScore(r),
-    teeName: r.teeName,
-  }));
+  const rows = (rounds || []).map((r) => {
+    const golfer = lookup.get(r.golferId);
+
+    /* Use what was frozen at entry when there is one — that is what keeps a
+       past result from shifting. Otherwise work it out from the golfer's index
+       today, so somebody with a perfectly good handicap is not left with a
+       blank net score merely because their round was imported. */
+    let courseHandicap = r.courseHandicap;
+    let estimated = false;
+    if (courseHandicap == null && golfer && golfer.handicapIndex != null
+        && Number.isFinite(+r.slope) && Number.isFinite(+r.rating)) {
+      const worked = courseHandicap_(+golfer.handicapIndex, +r.slope, +r.rating, +r.par);
+      if (Number.isFinite(worked)) { courseHandicap = worked; estimated = true; }
+    }
+
+    const adjusted = r.adjusted != null ? r.adjusted : r.gross;
+    return {
+      roundId: r.id,
+      golferId: r.golferId,
+      name: (golfer || {}).name || "Unknown",
+      gross: r.gross,
+      courseHandicap,
+      estimated,
+      net: courseHandicap == null || adjusted == null ? null : adjusted - courseHandicap,
+      teeName: r.teeName,
+    };
+  });
 
   const place = (list, key) => {
     const ranked = list.filter((r) => r[key] != null).sort((a, b) => a[key] - b[key]);

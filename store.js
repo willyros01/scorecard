@@ -173,19 +173,26 @@ export async function createAssociation({ name, displayName }) {
 
      The group has to exist before the membership, because the rule that
      authorises an owner membership reads ownerUid off the group document. */
-  /* The group, the owner's membership and the code index are one act.
+  /* Deliberately NOT one batch, and this is the exception that proves the rule.
    *
-   * Written separately, a failure on the second left a group nobody could open
-   * — which is exactly what produced the orphaned groups still cluttering the
-   * database. A batch cannot half-apply, so that state is now impossible. */
-  const { serverTimestamp: stamp } = fb.mod.store;
+   * Firestore evaluates every write in a batch against the database as it
+   * stands BEFORE the batch. The membership rule reads the group document to
+   * check who owns it — so batching the two together meant the rule looked for
+   * a group that did not exist yet and refused the whole thing. Group creation
+   * silently failed for exactly this reason.
+   *
+   * So the group is written first and allowed to settle, then the membership
+   * and the code index go together. If the second step fails, the first is
+   * rolled back rather than left as an orphan nobody can open. */
+  const { deleteDoc } = fb.mod.store;
+
+  await setDoc(ref("associations", association.id), {
+    ...association,
+    createdAt: serverTimestamp(),
+  });
+
   try {
     await commitTogether([
-      {
-        op: "set",
-        path: ["associations", association.id],
-        data: { ...association, createdAt: { __serverTimestamp: true } },
-      },
       {
         op: "set",
         path: ["associations", association.id, "members", uid],
@@ -199,11 +206,12 @@ export async function createAssociation({ name, displayName }) {
         path: ["joinCodes", association.joinCode],
         data: { assocId: association.id },
       },
-    ], "create group");
+    ], "finish creating the group");
   } catch (e) {
-    /* Nothing was written, so there is nothing to clean up. */
+    /* Undo the group rather than leave one nobody can join. */
+    try { await deleteDoc(ref("associations", association.id)); } catch {}
     setError("The group could not be created",
-      "Firebase refused the write, usually because the rules in the console are older than this version. Nothing was saved — publish the latest firestore.rules and try again.");
+      "Firebase refused part of the setup, usually because the rules in the console are older than this version. Nothing was left behind — publish the latest firestore.rules and try again.");
     throw e;
   }
 
@@ -257,6 +265,8 @@ export async function joinAssociation({ associationId, code, displayName }) {
     const group = await loadAssociation(associationId);
     const name = group ? group.name : "Group";
 
+    /* Safe to batch: the association already exists, so the membership rule
+       can read it. Compare with createAssociation, where it does not yet. */
     await commitTogether([
       {
         op: "set",
