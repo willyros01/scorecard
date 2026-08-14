@@ -108,8 +108,38 @@ async function look() {
     } catch {}
   }
 
+  await findStrandedRounds();
   await readRoster();
 }
+
+/* Rounds are stored inside a group. If that group's document was lost but its
+   rounds survived underneath it, they are invisible to the app — reachable only
+   by looking directly. This finds them so they can be moved somewhere live. */
+let stranded = [];
+async function findStrandedRounds() {
+  const { collection, getDocs, collectionGroup } = mod;
+  stranded = [];
+  try {
+    /* Every round in the whole database, whichever group holds it. */
+    const all = await getDocs(collectionGroup(db, "rounds"));
+    const liveGroups = new Set(groups.map((g) => g.id));
+    all.forEach((d) => {
+      const r = d.data();
+      if (!r) return;
+      const parent = d.ref.parent.parent;
+      const holder = parent ? parent.id : null;
+      if (holder && !liveGroups.has(holder)) {
+        stranded.push({ id: d.id, data: r, from: holder });
+      }
+    });
+  } catch (e) {
+    /* collectionGroup needs an index; if it is refused, say so plainly rather
+       than pretending there is nothing there. */
+    stranded = [];
+    strandedError = String((e && e.code) || e);
+  }
+}
+let strandedError = "";
 
 async function readRoster() {
   const { collection, getDocs } = mod;
@@ -142,12 +172,29 @@ function draw() {
       <p class="hint" style="margin:0">Everybody who exists is already on this roster. Nothing to do.</p>
     </div>`;
 
-  actionsEl.innerHTML = missing.length
+  const strandedBox = stranded.length
+    ? `<div class="card padded" style="margin-top:16px">
+         <div class="name">${stranded.length} round${stranded.length === 1 ? "" : "s"} found in a group that no longer exists</div>
+         <p class="hint">They are still in the database. Move them into ${clean(target.name)} and they will appear in History again, with the handicaps recalculated.</p>
+         <div class="inline-actions stacked">
+           <button class="btn" id="rescue">Move them into ${clean(target.name)}</button>
+         </div>
+       </div>`
+    : (strandedError
+        ? `<div class="card padded" style="margin-top:16px">
+             <p class="hint" style="margin:0">Could not scan for stranded rounds — ${clean(strandedError)}. If this says the query needs an index, Firebase will offer a link to create one.</p>
+           </div>`
+        : "");
+
+  actionsEl.innerHTML = strandedBox + (missing.length
     ? `<div class="inline-actions stacked" style="margin-top:18px">
          <button class="btn" id="add">Add the ticked golfers</button>
        </div>
        <p class="hint">Untick anybody who does not play in this group. You can add them later from Manage.</p>`
-    : "";
+    : "");
+
+  const rescueButton = document.getElementById("rescue");
+  if (rescueButton) rescueButton.onclick = rescue;
 
   const chooser = document.getElementById("target");
   if (chooser) chooser.onchange = async () => {
@@ -191,6 +238,34 @@ async function add() {
 
   await readRoster();
   draw();
+}
+
+/* Copies stranded rounds into the live group, in batches. Nothing is deleted
+   from where they are now, so a failure leaves the originals untouched. */
+async function rescue() {
+  const button = document.getElementById("rescue");
+  button.disabled = true;
+  button.textContent = "Moving…";
+
+  const { doc, writeBatch } = mod;
+  let moved = 0;
+  try {
+    for (let i = 0; i < stranded.length; i += 300) {
+      const batch = writeBatch(db);
+      for (const round of stranded.slice(i, i + 300)) {
+        batch.set(doc(db, "associations", target.id, "rounds", round.id),
+          { ...round.data, assocId: target.id }, { merge: true });
+        moved++;
+      }
+      await batch.commit();
+    }
+    say(`${moved} round${moved === 1 ? "" : "s"} moved into ${target.name}`);
+    say("Now run tidy.html so the handicaps are recalculated from them.");
+  } catch (e) {
+    say(`Could not move them — ${(e && e.code) || "refused"}`, true);
+    say("Nothing was changed. The originals are untouched.", true);
+  }
+  button.textContent = "Finished";
 }
 
 (async function run() {

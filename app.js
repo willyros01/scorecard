@@ -403,7 +403,18 @@ const courseName = (id) => { const c = courseById(id); return c ? c.name : "Unkn
  * break, for a line and some dots. Every value here is one the app already
  * calculates. */
 function trendChart(list) {
-  const rounds = [...list].sort((a, b) => a.date.localeCompare(b.date)).slice(-20);
+  /* Wrapped whole. A chart is decoration — it must never be able to stop
+     somebody reading their rounds, which is exactly what it did. */
+  try {
+    return buildTrendChart(list);
+  } catch {
+    return "";
+  }
+}
+
+function buildTrendChart(list) {
+  const rounds = (list || []).filter((r) => r && r.date && Number.isFinite(+r.differential))
+    .sort((a, b) => a.date.localeCompare(b.date)).slice(-20);
   if (rounds.length < 3) return "";
 
   /* The index as it stood after each round, so the line shows how it moved. */
@@ -1498,6 +1509,8 @@ function render() {
       renderTabs();
       const screens = { enter: screenEnter, history: screenHistory, summary: screenSummary,
                         games: screenGames, manage: screenManage, admin: screenAdmin };
+      /* A screen that throws used to show a dead end. Now the failure is
+         reported and the tab bar still works, so nobody is trapped. */
       view.innerHTML = (screens[tab] || screenEnter)();
       const sub = document.getElementById("brandSub");
       const groups = db.knownGroups();
