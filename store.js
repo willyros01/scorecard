@@ -310,7 +310,9 @@ export const currentAssociation = () => assocId;
 export function postRound({ golfer, course, tee, date, gross, adjusted, notes, gameId = null }) {
   /* Guarded rather than taken as read: a stored index can be stale or, before
      this release, negative — and it gets frozen onto the round permanently. */
-  const indexNow = model.displayIndex(golfer.recentWindow);
+  /* A starting figure counts here too — otherwise a tournament player with a
+     known handicap and no rounds yet would post with no course handicap. */
+  const indexNow = model.effectiveIndex(golfer).index;
 
   const round = model.buildRound({
     assocId, golferId: golfer.id, gameId, date, course, tee,
@@ -1224,22 +1226,49 @@ async function commitTogether(writes, what) {
    built from rounds across all of them.
  *
  * Owner only, and the rules enforce it rather than the button being hidden. */
+/* Deleting a group, safely.
+ *
+ * The hard-won lesson: rounds live INSIDE a group, so deleting one used to
+ * take its rounds with it — that is how a season's golf was lost. Golfers and
+ * courses were never at risk, because they live above every group.
+ *
+ * So this now takes a full backup of the rounds FIRST and hands it back to the
+ * caller, which stores it where it can be restored from. Nothing is deleted
+ * until that copy exists. If the backup cannot be made, the deletion does not
+ * happen at all.
+ */
 export async function deleteGroup(targetId) {
   const { collection, getDocs } = fb.mod.store;
   const id = targetId || assocId;
 
-  /* Stop listening first, or live connections keep reading documents as they
-     disappear — which is what blanked the roster after a delete. */
+  /* 1. Copy everything that only exists inside this group. */
+  const rescued = { rounds: [], games: [], roster: [] };
+  for (const part of ["rounds", "games", "roster"]) {
+    try {
+      (await getDocs(collection(fb.db, "associations", id, part)))
+        .forEach((d) => rescued[part].push({ ...d.data(), id: d.id }));
+    } catch (e) {
+      /* Cannot read it means cannot safely delete it. Stop here. */
+      setError("The group was not deleted",
+        "Its rounds could not be read, so there was no way to keep a copy first. Nothing was changed.");
+      throw e;
+    }
+  }
+
+  /* 2. Keep that copy on the device before anything is removed, so even a
+        failure halfway leaves a way back. */
+  try {
+    localStorage.setItem(`golf:v2:deleted:${id}`, JSON.stringify({
+      deletedAt: new Date().toISOString(),
+      groupId: id,
+      groupName: (cachedAssociation && cachedAssociation.id === id ? cachedAssociation.name : "") || "",
+      ...rescued,
+    }));
+  } catch { /* out of space; the copy in memory is still returned below */ }
+
   if (id === assocId) stopWatching();
 
   const counts = {};
-
-  /* Contents first, MEMBERS LAST.
-   *
-   * Deleting your own membership removes the very permission needed to clear
-   * everything else, so doing it first left the group deleted, its contents
-   * stranded, and the pointer behind. Each collection is a batch: within one,
-   * all of it goes or none of it does. */
   for (const part of ["rounds", "games", "roster", "members"]) {
     try {
       const snap = await getDocs(collection(fb.db, "associations", id, part));
@@ -1249,7 +1278,6 @@ export async function deleteGroup(targetId) {
     } catch { counts[part] = -1; }
   }
 
-  /* The group document and the pointer on the account, together. */
   try {
     await commitTogether([
       { op: "delete", path: ["associations", id] },
@@ -1264,7 +1292,35 @@ export async function deleteGroup(targetId) {
     myMember = null;
     try { localStorage.removeItem(ASSOC_KEY); } catch {}
   }
-  return counts;
+
+  /* Handed back so the caller can offer it as a file immediately. */
+  return { ...counts, rescued };
+}
+
+/* Backups taken automatically when a group was deleted. */
+export function deletedGroupBackups() {
+  const found = [];
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith("golf:v2:deleted:")) {
+        try { found.push(JSON.parse(localStorage.getItem(key))); } catch {}
+      }
+    }
+  } catch {}
+  return found.sort((a, b) => String(b.deletedAt).localeCompare(String(a.deletedAt)));
+}
+
+/* A starting handicap for somebody with no rounds here yet. Passing null
+   clears it. Real rounds always take precedence once there are three. */
+export function setManualIndex(golferId, index) {
+  outbox.enqueue({
+    type: "update",
+    path: ["golfers", golferId],
+    data: { manualIndex: index == null ? null : model.clampIndex(index) },
+    opId: `golfer-manual-${golferId}-${Date.now()}`,
+  });
+  flush();
 }
 
 /* ---------------- building a roster from your other groups ---------------- */

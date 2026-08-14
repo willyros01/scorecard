@@ -350,12 +350,17 @@ body { font-size: 1rem; }
 .checkline input { width: 22px; height: 22px; flex: 0 0 auto; accent-color: var(--pine); }
 
 /* ---- busy indicator ---- */
+/* display:flex overrides the hidden attribute, which is why an empty green
+   slab sat under the header doing nothing. The [hidden] rule wins it back —
+   this is the same trap that once made an invisible overlay swallow every tap,
+   so it is worth stating explicitly rather than relying on the default. */
 .busy {
   position: sticky; top: 0; z-index: 15;
   display: flex; align-items: center; gap: 0.7rem;
   max-width: 620px; margin: 0 auto; padding: 0.7rem 1rem;
   background: var(--pine); color: #fff; font-size: 0.95rem; font-weight: 600;
 }
+.busy[hidden], .alert[hidden] { display: none !important; }
 [data-theme="dark"] .busy { background: #1E5943; color: #EAF3EE; }
 .spinner {
   width: 18px; height: 18px; flex: 0 0 auto; border-radius: 50%;
@@ -433,3 +438,19 @@ body { font-size: 1rem; }
 }
 .readout.showing { color: var(--ink); border-style: solid; border-color: var(--sand); }
 .trend .dot-target { fill: transparent; cursor: pointer; }
+
+/* anything with grave consequences sits behind a closed drawer, never beside
+   a button somebody taps routinely */
+.danger-drawer { margin-top: 1rem; border-top: 1px solid var(--rule); padding-top: 0.8rem; }
+.danger-drawer > summary {
+  cursor: pointer; font-size: 0.95rem; color: var(--muted);
+  padding: 0.4rem 0; list-style: revert;
+}
+.danger-drawer[open] > summary { color: var(--pencil); font-weight: 600; }
+
+/* who you are, under the group name — only when there is something to say */
+.whoami {
+  margin: 2px 0 0; font-size: 10.5px; letter-spacing: .08em;
+  text-transform: uppercase; opacity: .6; color: var(--pine-ink);
+}
+.whoami[hidden] { display: none !important; }

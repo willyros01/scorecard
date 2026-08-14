@@ -126,6 +126,30 @@ export function sanitizeWindow(window, knownRoundIds) {
 
 /* The number shown to people. Null until three rounds exist, and never below
    zero. Use this rather than indexFromWindow anywhere it reaches a screen. */
+/* Keeps a typed-in figure inside the range the World Handicap System allows. */
+export const clampIndex = (value) => {
+  /* Empty string and null both become 0 through Number(), which would silently
+     turn "no index" into "scratch golfer" — the same trap that once read a
+     missing differential as zero. Reject them explicitly. */
+  if (value === "" || value == null) return null;
+  const n = Number(value);
+  if (!Number.isFinite(n)) return null;
+  return Math.min(54, Math.max(0, Math.round(n * 10) / 10));
+};
+
+/* The index to use for a golfer, and where it came from.
+ *
+ * Real rounds win as soon as there are three. Below that the manual figure
+ * stands in, so somebody with a known handicap is not treated as unrated. */
+export function effectiveIndex(golfer) {
+  if (!golfer) return { index: null, source: "none" };
+  const fromRounds = displayIndex(golfer.recentWindow);
+  if (fromRounds != null) return { index: fromRounds, source: "rounds" };
+  const manual = clampIndex(golfer.manualIndex);
+  if (manual != null) return { index: manual, source: "manual" };
+  return { index: null, source: "none" };
+}
+
 export function displayIndex(window) {
   const list = window || [];
   if (list.length < 3) return null;
@@ -191,11 +215,19 @@ export function buildRound({
  * and averaging each pile separately produces two indexes, neither of which is
  * the player's handicap. It would look tidy and be wrong.
  */
-export const buildGolfer = ({ name, linkedUid = null, id = newId() }) => ({
+/* manualIndex is a STARTING POINT, not an override.
+ *
+ * A golfer joining a tournament may already have a handicap from elsewhere and
+ * no rounds here yet — without this they would have no index at all, and no
+ * fair net score. Once they have three rounds of their own, those rounds take
+ * over completely and the manual figure is ignored. That is the honest way
+ * round: a real index always beats a remembered one. */
+export const buildGolfer = ({ name, linkedUid = null, manualIndex = null, id = newId() }) => ({
   id,
   name: String(name).trim(),
   nameKey: nameKey(name),
   linkedUid,
+  manualIndex: manualIndex == null ? null : clampIndex(manualIndex),
   handicapIndex: null,
   roundCount: 0,
   recentWindow: [],
@@ -399,10 +431,14 @@ export function gameLeaderboard(rounds, golfers) {
        blank net score merely because their round was imported. */
     let courseHandicap = r.courseHandicap;
     let estimated = false;
-    if (courseHandicap == null && golfer && golfer.handicapIndex != null
-        && Number.isFinite(+r.slope) && Number.isFinite(+r.rating)) {
-      const worked = courseHandicap_(+golfer.handicapIndex, +r.slope, +r.rating, +r.par);
-      if (Number.isFinite(worked)) { courseHandicap = worked; estimated = true; }
+    if (courseHandicap == null && Number.isFinite(+r.slope) && Number.isFinite(+r.rating)) {
+      /* effectiveIndex, so a golfer carrying only a starting figure still gets
+         a fair net score rather than a blank. */
+      const { index } = effectiveIndex(golfer);
+      if (index != null) {
+        const worked = courseHandicap_(index, +r.slope, +r.rating, +r.par);
+        if (Number.isFinite(worked)) { courseHandicap = worked; estimated = true; }
+      }
     }
 
     const adjusted = r.adjusted != null ? r.adjusted : r.gross;

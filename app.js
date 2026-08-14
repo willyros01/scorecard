@@ -39,6 +39,7 @@ let drill = { year: null, month: null };
 let openGame = null;
 let openCourse = null;
 let editingGolfer = null;
+let editingIndex = null;
 let courseDraft = null;
 let gameDraft = null;
 let finder = { q: "", results: [], busy: false, msg: "" };
@@ -65,14 +66,13 @@ const golferById = (id) => allGolfers.find((g) => g.id === id);
 /* The index to show. Never below zero, never from fewer than three rounds —
    a stored value can be stale, so it is checked rather than trusted. */
 function shownIndex(golfer) {
-  if (!golfer) return null;
-  const fromWindow = model.displayIndex(golfer.recentWindow);
-  if (fromWindow != null) return fromWindow;
-  const stored = golfer.handicapIndex;
-  if (stored == null || !Number.isFinite(+stored) || +stored < 0) return null;
-  if ((golfer.recentWindow || []).length < 3) return null;
-  return +stored;
+  const { index } = model.effectiveIndex(golfer);
+  return index;
 }
+
+/* Whether an index came from real rounds or a typed-in starting figure, so a
+   screen can say so rather than passing off an estimate as a calculation. */
+const indexSource = (golfer) => model.effectiveIndex(golfer).source;
 const courseById = (id) => courses.find((c) => c.id === id);
 
 /* ================= appearance ================= */
@@ -954,6 +954,7 @@ function screenManage() {
             <span class="grow"><span class="name">${esc(g.name)}</span><br>
               <span class="sub">${g.handicapIndex == null ? "no index yet" : `index ${(+g.handicapIndex).toFixed(1)}`} · ${g.roundCount || 0} round${g.roundCount === 1 ? "" : "s"}</span></span>
             <button class="rowbtn" data-rename="${g.id}">Rename</button>
+            <button class="rowbtn" data-set-index="${g.id}">Index</button>
             <button class="rowbtn warn" data-del-golfer="${g.id}">Remove</button>
           </div>`;
         }).join("")}
@@ -1009,15 +1010,24 @@ function groupSwitcher() {
         <button class="grow" data-goto-group="${esc(g.id)}" style="background:none;border:0;text-align:left;padding:0;color:inherit">
           <span class="name">${esc(g.name)}</span>${g.id === current ? `<br><span class="sub">you are here</span>` : ""}
         </button>
-        ${g.id === current
-          ? `<span class="chev">✓</span>`
-          : `<button class="rowbtn warn" data-forget-group="${esc(g.id)}" data-forget-name="${esc(g.name)}">Forget</button>`}
+        <span class="chev">${g.id === current ? "✓" : "›"}</span>
       </div>`).join("")}
     </div>
-    <div class="inline-actions stacked">
+    ${db.isOwner() || !current ? `<div class="inline-actions stacked">
       <button class="btn ghost" data-act="new-group">Start another group</button>
-    </div>
+    </div>` : ""}
     <p class="hint">A golfer's handicap is the same in every group — it is built from all their rounds, wherever they played them.</p>
+
+    ${groups.length > 1 ? `<details class="danger-drawer">
+      <summary>Remove a group from this list</summary>
+      <p class="hint">This only takes a group off <b>your</b> list. It deletes nothing — no rounds, no golfers, and nobody else is affected. Use it for a group you no longer want to see.</p>
+      <div class="list">
+        ${groups.filter((g) => g.id !== current).map((g) => `<div class="list-row">
+          <span class="grow"><span class="name">${esc(g.name)}</span></span>
+          <button class="rowbtn warn" data-forget-group="${esc(g.id)}" data-forget-name="${esc(g.name)}">Remove from my list</button>
+        </div>`).join("")}
+      </div>
+    </details>` : ""}
   </div>`;
 }
 
@@ -1097,15 +1107,18 @@ function groupSection() {
     <div class="card padded">
       <p class="hint" style="margin:0 0 0.7rem">Removes <b>${esc(association ? association.name : "")}</b> and every round and game in it. <b>Golfers are not deleted</b> — they are people, and they keep their handicap and their place in your other groups.</p>
       ${confirmDeleteGroup ? `
-        <div class="note warn">This cannot be undone. ${rounds.length} round${rounds.length === 1 ? "" : "s"} will go.</div>
+        <div class="note warn">
+          <b>What goes:</b> this group, its ${rounds.length} round${rounds.length === 1 ? "" : "s"} and its ${games.length} game${games.length === 1 ? "" : "s"}.<br>
+          <b>What stays:</b> all ${golfers.length} golfer${golfers.length === 1 ? "" : "s"}, every course, and every round they have played in your other groups. Their handicaps are rebuilt from what remains.
+        </div>
+        <p class="hint">A copy of the rounds is saved to this device first, and offered to you as a file straight afterwards — so even this is recoverable.</p>
         <div class="inline-actions stacked">
-          <button class="btn danger" data-act="really-delete-group">Yes, delete it</button>
           <button class="btn ghost" data-act="cancel-delete-group">Keep it</button>
+          <button class="btn danger" data-act="really-delete-group">Delete ${esc(association ? association.name : "this group")}</button>
         </div>
       ` : `<div class="inline-actions stacked">
           <button class="btn ghost warn" data-act="delete-group">Delete this group</button>
         </div>`}
-      <p class="hint">Take a backup first if you are not certain.</p>
     </div>
   </section>`;
 }
@@ -1672,6 +1685,23 @@ function render() {
       const groups = db.knownGroups();
       sub.textContent = (association ? association.name : "Handicap tracking") + (groups.length > 1 ? "  ▾" : "");
       sub.dataset.act = "switch-group";
+
+      /* Who you are, beside the group. Shown only when there is something worth
+         saying: a role is only meaningful for an admin or the owner, and a
+         guest sees nothing extra rather than the word "guest" following them
+         around. */
+      const who = document.getElementById("whoAmI");
+      if (who) {
+        const me = members.find((m) => m.uid === db.status().uid);
+        const role = me && me.role;
+        const email = db.currentEmail();
+        const parts = [];
+        if (me && me.displayName) parts.push(me.displayName);
+        if (role === "owner" || role === "admin") parts.push(role);
+        who.textContent = parts.join(" · ");
+        who.title = email || "";
+        who.hidden = !parts.length;
+      }
     }
   } catch (e) {
     view.innerHTML = `<div class="fatal"><div class="fatal-mark">!</div>
@@ -1838,6 +1868,7 @@ view.addEventListener("click", async (e) => {
     else { filter = { golferId: d.drill, year: drill.year, month: drill.month, courseId: "" }; tab = "history"; }
     return render();
   }
+  if (d.setIndex) { editingIndex = d.setIndex; return render(); }
   if (d.rename) { editingGolfer = d.rename; return render(); }
   if (d.course) { openCourse = openCourse === d.course ? null : d.course; return render(); }
   if (d.delGolfer) {
@@ -1950,6 +1981,26 @@ view.addEventListener("click", async (e) => {
     case "create-group": return createGroup();
     case "import-v1": return importV1();
 
+    case "save-index": {
+      const field = view.querySelector('[name="manual-index"]');
+      const value = field ? field.value.trim() : "";
+      const id = editingIndex;
+      editingIndex = null;
+      if (!value) { flashMsg("Type an index, or tap Clear it"); return render(); }
+      const clean = model.clampIndex(value);
+      if (clean == null) { flashMsg("That does not look like a handicap index"); return render(); }
+      db.setManualIndex(id, clean);
+      flashMsg(`Starting index set to ${clean.toFixed(1)}. Real rounds will take over after three.`);
+      return render();
+    }
+    case "clear-index": {
+      const id = editingIndex;
+      editingIndex = null;
+      db.setManualIndex(id, null);
+      flashMsg("Starting index cleared.");
+      return render();
+    }
+    case "cancel-index": editingIndex = null; return render();
     case "add-golfer": return addGolfer();
     case "from-other-groups": return openOtherGroupPicker();
     case "save-new-group": {
@@ -2215,9 +2266,26 @@ sheetEl.addEventListener("click", async (e) => {
   if (forgetting) {
     const id = forgetting.dataset.forgetGroup;
     const name = forgetting.dataset.forgetName;
-    if (forgetting.dataset.armed !== "1") {
+
+    /* Three deliberate taps, each saying something different, and the button
+       lives behind a closed drawer well away from the group you tap to switch.
+       Nothing here deletes data — but it is still the sort of thing nobody
+       should be able to do by brushing the screen. */
+    const step = forgetting.dataset.armed || "0";
+    if (step === "0") {
       forgetting.dataset.armed = "1";
-      forgetting.textContent = "Tap again";
+      forgetting.textContent = `Remove ${name}?`;
+      return;
+    }
+    if (step === "1") {
+      forgetting.dataset.armed = "2";
+      forgetting.textContent = "Tap once more to confirm";
+      setTimeout(() => {
+        if (forgetting.dataset.armed === "2") {
+          forgetting.dataset.armed = "0";
+          forgetting.textContent = "Remove from my list";
+        }
+      }, 6000);
       return;
     }
     forgetting.disabled = true;
