@@ -104,7 +104,9 @@ export function sanitizeWindow(window, knownRoundIds) {
   const known = knownRoundIds instanceof Set ? knownRoundIds : new Set(knownRoundIds || []);
   return (window || []).filter((e) =>
     e && e.roundId && known.has(e.roundId)
-    && Number.isFinite(Number(e.differential))
+    /* Number(null) is 0, which is finite — so null slipped through and was
+       treated as a differential of zero, dragging the index down. */
+    && e.differential != null && Number.isFinite(Number(e.differential))
     && typeof e.date === "string" && e.date.length >= 10
   );
 }
@@ -399,4 +401,10 @@ export function periodRanking(rounds, golfers, { minRounds = 3 } = {}) {
 }
 
 export const inPeriod = (round, { year, month }) =>
-  (!year || round.date.slice(0, 4) === year) && (!month || round.date.slice(5, 7) === month);
+  /* A round with no date belongs to no period, so it is excluded from a
+     filtered ranking rather than throwing. Restored and imported rounds can
+     arrive without one, and a single missing date used to take down the whole
+     Summary screen. */
+  (typeof round.date === "string")
+    ? ((!year || round.date.slice(0, 4) === year) && (!month || round.date.slice(5, 7) === month))
+    : (!year && !month);

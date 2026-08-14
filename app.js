@@ -473,14 +473,25 @@ function screenHistory() {
   /* A guest sees their own rounds. Nothing is hidden that concerns them, and
      nothing is shown that does not. */
   const mine = db.myGolferId(golfers);
-  const scope = db.canManage() ? rounds : rounds.filter((r) => r.golferId === mine);
-  const years = [...new Set(scope.map((r) => r.date.slice(0, 4)))].sort().reverse();
+
+  /* Every round is checked before it is read from.
+   *
+   * A restored or imported round can be missing a field the screen assumed was
+   * always there — a date, most often — and one undefined value used to throw
+   * and take the whole screen down. Rounds without a date are still counted and
+   * listed; they simply sort last. Nothing is hidden. */
+  const usable = (db.canManage() ? rounds : rounds.filter((r) => r && r.golferId === mine))
+    .filter((r) => r && typeof r === "object");
+  const dateOf = (r) => (typeof r.date === "string" ? r.date : "");
+  const scope = usable;
+
+  const years = [...new Set(scope.map((r) => dateOf(r).slice(0, 4)).filter(Boolean))].sort().reverse();
   const rows = scope.filter((r) =>
     (!filter.golferId || r.golferId === filter.golferId) &&
-    (!filter.year || r.date.slice(0, 4) === filter.year) &&
-    (!filter.month || r.date.slice(5, 7) === filter.month) &&
+    (!filter.year || dateOf(r).slice(0, 4) === filter.year) &&
+    (!filter.month || dateOf(r).slice(5, 7) === filter.month) &&
     (!filter.courseId || r.courseId === filter.courseId)
-  ).sort((a, b) => b.date.localeCompare(a.date));
+  ).sort((a, b) => dateOf(b).localeCompare(dateOf(a)));
 
   const chips = Object.entries(filter).filter(([, v]) => v).map(([k, v]) =>
     `<button class="pill" data-unfilter="${k}">${k === "month" ? MONTHS[+v - 1] : k === "courseId" ? esc(courseName(v)) : esc((golferById(v) || {}).name || v)} ✕</button>`).join("");
@@ -503,14 +514,14 @@ function screenHistory() {
     return `<div style="padding:0.85rem 0.9rem">
       <div style="display:flex;gap:12px;justify-content:space-between">
         <div class="grow" style="min-width:0">
-          <div><span class="sub">${r.date}</span> <span class="name">${esc((golferById(r.golferId) || {}).name || "Unknown")}</span></div>
-          <div class="small truncate">${esc(r.courseName)} · ${esc(r.teeName)}</div>
-          <div class="sub">${r.gross}${r.adjusted !== r.gross ? ` (adj ${r.adjusted})` : ""}${r.courseHandicap != null ? ` · net ${model.netScore(r)}` : ""} · ${(+r.rating).toFixed(1)}/${r.slope}</div>
+          <div><span class="sub">${esc(dateOf(r) || "no date")}</span> <span class="name">${esc((golferById(r.golferId) || {}).name || "Unknown")}</span></div>
+          <div class="small truncate">${esc(r.courseName || "Unknown course")}${r.teeName ? ` · ${esc(r.teeName)}` : ""}</div>
+          <div class="sub">${r.gross == null ? "—" : r.gross}${r.adjusted != null && r.adjusted !== r.gross ? ` (adj ${r.adjusted})` : ""}${r.courseHandicap != null ? ` · net ${model.netScore(r)}` : ""}${Number.isFinite(+r.rating) && r.slope ? ` · ${(+r.rating).toFixed(1)}/${r.slope}` : ""}</div>
           ${r.gameId ? `<div class="sub">in game: ${esc((games.find((g) => g.id === r.gameId) || {}).name || courseName((games.find((g) => g.id === r.gameId) || {}).courseId))}</div>` : ""}
           ${r.notes ? `<div class="small muted" style="font-style:italic">${esc(r.notes)}</div>` : ""}
         </div>
         <div style="text-align:right">
-          <span class="stamp sm">${(+r.differential).toFixed(1)}</span>
+          <span class="stamp sm">${Number.isFinite(+r.differential) ? (+r.differential).toFixed(1) : "—"}</span>
           ${editable ? `<div class="inline-actions" style="margin-top:0.5rem">
             <button class="rowbtn" data-edit="${r.id}">Edit</button>
             <button class="rowbtn warn" data-del="${r.id}">Delete</button>
@@ -541,11 +552,12 @@ function screenSummary() {
     ${versionBlock()}`;
   }
 
-  const scoped = rounds.filter((r) => (!drill.year || r.date.slice(0, 4) === drill.year) && (!drill.month || r.date.slice(5, 7) === drill.month));
+  const dated = rounds.filter((r) => r && typeof r.date === "string");
+  const scoped = dated.filter((r) => (!drill.year || r.date.slice(0, 4) === drill.year) && (!drill.month || r.date.slice(5, 7) === drill.month));
   const level = drill.month ? "golfer" : drill.year ? "month" : "year";
   let items;
-  if (level === "year") items = [...new Set(rounds.map((r) => r.date.slice(0, 4)))].sort().reverse()
-    .map((y) => ({ key: y, label: y, list: rounds.filter((r) => r.date.slice(0, 4) === y) }));
+  if (level === "year") items = [...new Set(dated.map((r) => r.date.slice(0, 4)))].sort().reverse()
+    .map((y) => ({ key: y, label: y, list: dated.filter((r) => r.date.slice(0, 4) === y) }));
   else if (level === "month") items = [...new Set(scoped.map((r) => r.date.slice(5, 7)))].sort().reverse()
     .map((m) => ({ key: m, label: MONTHS[+m - 1], list: scoped.filter((r) => r.date.slice(5, 7) === m) }));
   else items = [...new Set(scoped.map((r) => r.golferId))]
@@ -590,7 +602,11 @@ function rankingSection() {
   const period = { year: rankPeriod.year, month: rankPeriod.month };
   const scoped = rounds.filter((r) => model.inPeriod(r, period));
   const table = model.periodRanking(scoped, golfers, { minRounds: 3 });
-  const years = [...new Set(rounds.map((r) => r.date.slice(0, 4)))].sort().reverse();
+  /* Undated rounds are skipped for ranking purposes only — a ranking needs a
+     period to sit in. They still count everywhere else, and still appear in
+     History. */
+  const datedRounds = rounds.filter((r) => r && typeof r.date === "string");
+  const years = [...new Set(datedRounds.map((r) => r.date.slice(0, 4)))].sort().reverse();
   const label = period.month ? `${MONTHS[+period.month - 1]} ${period.year}` : period.year;
 
   return `<section class="panel">
