@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scorecard — Rebuild the roster</title>
+<link rel="stylesheet" href="./styles.css">
+<script src="./version.js"></script>
+<style>
+  body { padding: 24px 18px 60px; font-size: 20px; }
+  .box { max-width: 700px; margin: 0 auto; }
+  h1 { font-family: Georgia, serif; font-weight: 400; font-size: 32px; margin: 0 0 10px; }
+  .lead { color: var(--muted); margin: 0 0 22px; }
+  .who { display: flex; align-items: center; gap: 14px; padding: 12px 14px;
+         border-bottom: 1px solid var(--rule); }
+  .who:last-child { border-bottom: 0; }
+  .who input { width: 24px; height: 24px; flex: 0 0 auto; accent-color: var(--pine); }
+  .who .grow { flex: 1; min-width: 0; }
+  #log div { padding: 5px 0; font-size: 1rem; }
+  #log .done::before { content: "✓ "; color: var(--pine); font-weight: 700; }
+  #log .fail { color: var(--pencil); }
+</style>
+</head>
+<body>
+<div class="box">
+  <h1>Rebuild the roster</h1>
+  <p class="lead">Puts golfers who already exist back onto a group's roster, with their rounds and
+  handicaps. Nothing is created and nothing is deleted — these people never went anywhere, they
+  just need to be listed in the group again.</p>
+
+  <div id="state" class="card padded">Connecting…</div>
+  <div id="pick"></div>
+  <div id="actions"></div>
+  <div id="log"></div>
+
+  <p class="hint" style="margin-top:26px"><a href="./">Back to the app</a></p>
+</div>
+
+<script type="module">
+/* A one-time repair, so it lives here rather than in the app.
+ *
+ * Golfers, courses and rounds are stored above any group — that is what kept
+ * them safe when a group document was lost. What a group holds is a roster: a
+ * list of which golfers play in it. Rebuild that list and everything reappears.
+ */
+
+const stateEl = document.getElementById("state");
+const pickEl = document.getElementById("pick");
+const actionsEl = document.getElementById("actions");
+const logEl = document.getElementById("log");
+
+const say = (text, bad) => {
+  const line = document.createElement("div");
+  line.className = bad ? "fail" : "done";
+  line.textContent = text;
+  logEl.appendChild(line);
+};
+const clean = (s) => String(s == null ? "" : s).replace(/[<>&]/g, "");
+
+const SDK = "https://www.gstatic.com/firebasejs/10.12.0";
+let db, mod, uid, email = "";
+let groups = [], golfers = [], roundsByGolfer = new Map(), target = null, onRoster = new Set();
+
+async function connect() {
+  const config = await import("./firebase-config.js");
+  if (!config.isConfigured) { stateEl.textContent = "No Firebase settings found."; return false; }
+  const [app, auth, store] = await Promise.all([
+    import(`${SDK}/firebase-app.js`),
+    import(`${SDK}/firebase-auth.js`),
+    import(`${SDK}/firebase-firestore.js`),
+  ]);
+  const instance = app.initializeApp(config.firebaseConfig);
+  const authority = auth.getAuth(instance);
+  db = store.getFirestore(instance);
+  mod = store;
+  return new Promise((resolve) => {
+    auth.onAuthStateChanged(authority, async (user) => {
+      if (!user) { try { await auth.signInAnonymously(authority); } catch { resolve(false); } return; }
+      uid = user.uid; email = user.email || "";
+      resolve(true);
+    });
+  });
+}
+
+async function look() {
+  const { collection, getDocs, query, where } = mod;
+
+  const owned = await getDocs(query(collection(db, "associations"), where("ownerUid", "==", uid)));
+  groups = owned.docs.map((d) => ({ id: d.id, name: (d.data() || {}).name || "Unnamed" }));
+  if (!groups.length) { stateEl.textContent = "No groups found on this account."; return; }
+
+  target = groups[0];
+
+  /* Everybody who exists, anywhere. */
+  golfers = [];
+  (await getDocs(collection(db, "golfers"))).forEach((d) => golfers.push({ ...d.data(), id: d.id }));
+  golfers.sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+
+  /* How many rounds each has, so you can see who is worth adding. */
+  roundsByGolfer = new Map();
+  for (const group of groups) {
+    try {
+      (await getDocs(collection(db, "associations", group.id, "rounds"))).forEach((d) => {
+        const r = d.data();
+        if (!r || !r.golferId) return;
+        roundsByGolfer.set(r.golferId, (roundsByGolfer.get(r.golferId) || 0) + 1);
+      });
+    } catch {}
+  }
+
+  await readRoster();
+}
+
+async function readRoster() {
+  const { collection, getDocs } = mod;
+  onRoster = new Set();
+  try {
+    (await getDocs(collection(db, "associations", target.id, "roster"))).forEach((d) => onRoster.add(d.id));
+  } catch {}
+}
+
+function draw() {
+  stateEl.innerHTML = `<div class="name">${clean(email || "this device")}</div>
+    <div class="sub">${golfers.length} golfer${golfers.length === 1 ? "" : "s"} exist · ${onRoster.size} currently on this roster</div>
+    ${groups.length > 1 ? `<label class="lbl" style="margin-top:0.8rem">Add them to</label>
+      <select class="field" id="target">
+        ${groups.map((g) => `<option value="${g.id}" ${g.id === target.id ? "selected" : ""}>${clean(g.name)}</option>`).join("")}
+      </select>` : `<div class="sub" style="margin-top:0.6rem">Group: <b>${clean(target.name)}</b></div>`}`;
+
+  const missing = golfers.filter((g) => !onRoster.has(g.id));
+
+  pickEl.innerHTML = missing.length ? `<div class="card" style="margin-top:16px">
+    ${missing.map((g) => {
+      const n = roundsByGolfer.get(g.id) || 0;
+      return `<label class="who">
+        <input type="checkbox" value="${g.id}" checked>
+        <span class="grow"><span class="name">${clean(g.name || "Unnamed")}</span><br>
+          <span class="sub">${n} round${n === 1 ? "" : "s"}${g.handicapIndex != null ? ` · index ${Number(g.handicapIndex).toFixed(1)}` : ""}</span></span>
+      </label>`;
+    }).join("")}
+  </div>` : `<div class="card padded" style="margin-top:16px">
+      <p class="hint" style="margin:0">Everybody who exists is already on this roster. Nothing to do.</p>
+    </div>`;
+
+  actionsEl.innerHTML = missing.length
+    ? `<div class="inline-actions stacked" style="margin-top:18px">
+         <button class="btn" id="add">Add the ticked golfers</button>
+       </div>
+       <p class="hint">Untick anybody who does not play in this group. You can add them later from Manage.</p>`
+    : "";
+
+  const chooser = document.getElementById("target");
+  if (chooser) chooser.onchange = async () => {
+    target = groups.find((g) => g.id === chooser.value) || groups[0];
+    await readRoster();
+    draw();
+  };
+
+  const button = document.getElementById("add");
+  if (button) button.onclick = add;
+}
+
+async function add() {
+  const button = document.getElementById("add");
+  button.disabled = true;
+  button.textContent = "Adding…";
+
+  const chosen = [...pickEl.querySelectorAll("input:checked")].map((b) => b.value);
+  if (!chosen.length) { say("Nothing was ticked.", true); button.disabled = false; button.textContent = "Add the ticked golfers"; return; }
+
+  const { doc, writeBatch } = mod;
+
+  /* One batch: every golfer joins the roster together, or none does. A partial
+     roster is exactly the half-finished state that caused so much trouble. */
+  try {
+    for (let i = 0; i < chosen.length; i += 400) {
+      const batch = writeBatch(db);
+      for (const id of chosen.slice(i, i + 400)) {
+        batch.set(doc(db, "associations", target.id, "roster", id),
+          { golferId: id, addedAt: Date.now() }, { merge: true });
+      }
+      await batch.commit();
+    }
+    say(`${chosen.length} golfer${chosen.length === 1 ? "" : "s"} added to ${target.name}`);
+    say("Their rounds and handicaps came with them.");
+    say("Close the app on every device and reopen it.");
+  } catch (e) {
+    say(`Nothing was added — ${(e && e.code) || "refused"}`, true);
+    say("No half-finished roster was left behind. Publish the latest firestore.rules and try again.", true);
+  }
+
+  await readRoster();
+  draw();
+}
+
+(async function run() {
+  try {
+    if (!(await connect())) { stateEl.textContent = "Could not sign in to Firebase."; return; }
+    stateEl.textContent = "Looking for your golfers…";
+    await look();
+    if (target) draw();
+  } catch (e) {
+    stateEl.innerHTML = `<div class="name">Could not read your data</div>
+      <div class="sub">${clean((e && e.message) || e)}</div>`;
+    say("Most likely the rules in the console are older than this page. Publish the latest firestore.rules and reload.", true);
+  }
+})();
+</script>
+</body>
+</html>

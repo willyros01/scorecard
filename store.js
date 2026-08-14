@@ -956,7 +956,10 @@ export async function loadMyGroups() {
   try {
     const { getDocs, getDoc } = fb.mod.store;
     const snap = await getDocs(col("userGroups", uid, "groups"));
-    const listed = snap.docs.map((d) => ({ id: d.id, name: (d.data() || {}).name || "Group" }));
+    const hidden = hiddenGroups();
+    const listed = snap.docs
+      .map((d) => ({ id: d.id, name: (d.data() || {}).name || "Group" }))
+      .filter((g) => !hidden.includes(g.id));
 
     /* NOTHING IS DELETED HERE.
      *
@@ -1010,8 +1013,47 @@ export function rememberGroup(id, name) {
 }
 
 export function knownGroups() {
-  try { return JSON.parse(localStorage.getItem(GROUPS_KEY) || "[]"); } catch { return []; }
+  try {
+    const hidden = hiddenGroups();
+    return JSON.parse(localStorage.getItem(GROUPS_KEY) || "[]").filter((g) => !hidden.includes(g.id));
+  } catch { return []; }
 }
+
+/* Removes a group from this account and this device, permanently.
+ *
+ * The stale entry kept returning after every sign-in because the account's copy
+ * in Firestore was never cleared — the device forgot, then read it back. This
+ * clears both, and cannot fail in a way that matters: if Firestore refuses, the
+ * local list is still cleared and the entry is added to a suppression list that
+ * loadMyGroups always filters out. It never touches the group itself. */
+export async function forgetGroupEverywhere(id) {
+  forgetGroup(id);
+
+  try {
+    const hidden = JSON.parse(localStorage.getItem("golf:v2:hidden") || "[]");
+    if (!hidden.includes(id)) hidden.push(id);
+    localStorage.setItem("golf:v2:hidden", JSON.stringify(hidden));
+  } catch {}
+
+  if (fb && uid) {
+    try {
+      const { deleteDoc, doc } = fb.mod.store;
+      await deleteDoc(doc(fb.db, "userGroups", uid, "groups", id));
+    } catch { /* the suppression list still holds */ }
+  }
+
+  if (id === assocId) {
+    stopWatching();
+    assocId = null;
+    myMember = null;
+    try { localStorage.removeItem(ASSOC_KEY); } catch {}
+  }
+  return true;
+}
+
+const hiddenGroups = () => {
+  try { return JSON.parse(localStorage.getItem("golf:v2:hidden") || "[]"); } catch { return []; }
+};
 
 export function forgetGroup(id) {
   try {

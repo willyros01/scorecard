@@ -364,3 +364,19 @@ body { font-size: 1rem; }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2s; } }
+
+/* ---- handicap trend, plain SVG ---- */
+.trend { width: 100%; height: auto; }
+.trend .grid { stroke: var(--rule); stroke-width: 1; }
+.trend .axis { font-family: var(--mono); font-size: 12px; fill: var(--muted); }
+.trend .trendline { fill: none; stroke: var(--pine); stroke-width: 3; stroke-linejoin: round; stroke-linecap: round; }
+[data-theme="dark"] .trend .trendline { stroke: #7EBEA0; }
+.trend .dot { fill: var(--pencil); opacity: .65; }
+
+/* ---- a friendlier empty screen ---- */
+.welcome { text-align: center; padding: 2.4rem 1.2rem; background: var(--paper);
+           border: 1px solid var(--rule); border-radius: 14px; }
+.welcome-mark { font-size: 2.6rem; line-height: 1; margin-bottom: 0.8rem; }
+.welcome h2 { font-family: var(--display); font-weight: 400; font-size: 1.5rem; margin: 0 0 0.6rem; }
+.welcome p { color: var(--muted); max-width: 34ch; margin: 0 auto 1.2rem; font-size: 1rem; }
+.welcome .btn { max-width: 280px; margin: 0 auto; }

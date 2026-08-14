@@ -331,7 +331,8 @@ function screenEnter() {
     <div class="row">
       <div>
         <div class="eyebrow">Date</div>
-        <input class="field" type="date" name="date" value="${form.date}">
+        <input class="field" type="date" name="date" id="round-date" value="${form.date}">
+        ${form.date === today() ? "" : `<button class="linkbtn" data-act="date-today" style="margin-top:0.4rem">Back to today</button>`}
       </div>
       <div>
         <div class="eyebrow">Golfer</div>
@@ -396,6 +397,67 @@ const courseName = (id) => { const c = courseById(id); return c ? c.name : "Unkn
 
 /* ================= history ================= */
 
+/* A handicap trend, drawn as plain SVG from rounds already in memory.
+ *
+ * No chart library: one would add a download, a build step and another thing to
+ * break, for a line and some dots. Every value here is one the app already
+ * calculates. */
+function trendChart(list) {
+  const rounds = [...list].sort((a, b) => a.date.localeCompare(b.date)).slice(-20);
+  if (rounds.length < 3) return "";
+
+  /* The index as it stood after each round, so the line shows how it moved. */
+  const points = [];
+  let window = [];
+  for (const r of rounds) {
+    window = model.insertIntoWindow(window, {
+      roundId: r.id, date: r.date, differential: +r.differential, assocId: r.assocId,
+    });
+    points.push({ date: r.date, index: model.displayIndex(window), differential: +r.differential });
+  }
+
+  const shown = points.filter((p) => p.index != null);
+  if (shown.length < 2) return "";
+
+  const width = 640, height = 220, padLeft = 46, padRight = 14, padTop = 18, padBottom = 30;
+  const values = shown.map((p) => p.index).concat(points.map((p) => p.differential));
+  let low = Math.floor(Math.min(...values) - 1);
+  let high = Math.ceil(Math.max(...values) + 1);
+  if (high - low < 4) { high = low + 4; }
+
+  const x = (i, n) => padLeft + (i / Math.max(1, n - 1)) * (width - padLeft - padRight);
+  const y = (v) => padTop + (1 - (v - low) / (high - low)) * (height - padTop - padBottom);
+
+  const line = shown.map((p, i) => `${i ? "L" : "M"}${x(i, shown.length).toFixed(1)},${y(p.index).toFixed(1)}`).join(" ");
+  const dots = points.map((p, i) =>
+    `<circle cx="${x(i, points.length).toFixed(1)}" cy="${y(p.differential).toFixed(1)}" r="4" class="dot"/>`).join("");
+
+  const ticks = [low, Math.round((low + high) / 2), high].map((v) =>
+    `<line x1="${padLeft}" y1="${y(v).toFixed(1)}" x2="${width - padRight}" y2="${y(v).toFixed(1)}" class="grid"/>
+     <text x="${padLeft - 8}" y="${(y(v) + 4).toFixed(1)}" class="axis" text-anchor="end">${v}</text>`).join("");
+
+  const first = rounds[0].date, last = rounds[rounds.length - 1].date;
+  const now = shown[shown.length - 1].index;
+  const then = shown[0].index;
+  const move = now - then;
+
+  return `<section class="panel">
+    <div class="panel-head"><h2 class="panel-title">Handicap trend</h2>
+      <span class="panel-count">${move === 0 ? "no change" : move < 0 ? `down ${Math.abs(move).toFixed(1)}` : `up ${move.toFixed(1)}`}</span></div>
+    <div class="card padded">
+      <svg viewBox="0 0 ${width} ${height}" class="trend" role="img"
+           aria-label="Handicap index over the last ${rounds.length} rounds, from ${then.toFixed(1)} to ${now.toFixed(1)}">
+        ${ticks}
+        <path d="${line}" class="trendline"/>
+        ${dots}
+        <text x="${padLeft}" y="${height - 8}" class="axis">${first}</text>
+        <text x="${width - padRight}" y="${height - 8}" class="axis" text-anchor="end">${last}</text>
+      </svg>
+      <p class="hint">The line is the handicap index after each round. The dots are each round's differential — how that day actually played.</p>
+    </div>
+  </section>`;
+}
+
 function screenHistory() {
   /* A guest sees their own rounds. Nothing is hidden that concerns them, and
      nothing is shown that does not. */
@@ -422,6 +484,7 @@ function screenHistory() {
       ${sortedCourses().map((c) => `<option value="${c.id}" ${c.id === filter.courseId ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select>
   </div>
   ${chips ? `<div class="pills">${chips}<button class="linkbtn" data-act="clear-filters">Clear</button></div>` : ""}
+  ${filter.golferId ? trendChart(rounds.filter((r) => r.golferId === filter.golferId)) : ""}
   ${rows.length === 0 ? empty("No rounds here yet", "Post one from the Enter tab, or widen the filters above.") : `
   <div class="eyebrow" style="display:flex;justify-content:space-between"><span>${rows.length} round${rows.length === 1 ? "" : "s"}</span><span>Differential</span></div>
   <div class="card list">${rows.map((r) => {
@@ -452,7 +515,20 @@ function screenHistory() {
 /* ================= summary ================= */
 
 function screenSummary() {
-  if (!rounds.length) return flashBar() + empty("Nothing to summarize yet", "Indexes and rankings appear once rounds are posted.") + versionBlock();
+  if (!rounds.length) {
+    return `${flashBar()}
+    <section class="panel">
+      <div class="welcome">
+        <div class="welcome-mark">⛳</div>
+        <h2>No rounds yet</h2>
+        <p>Handicap indexes appear here after three rounds. Rankings and trends follow as the season builds up.</p>
+        <div class="inline-actions stacked">
+          <button class="btn" data-go="enter">Post your first round</button>
+        </div>
+      </div>
+    </section>
+    ${versionBlock()}`;
+  }
 
   const scoped = rounds.filter((r) => (!drill.year || r.date.slice(0, 4) === drill.year) && (!drill.month || r.date.slice(5, 7) === drill.month));
   const level = drill.month ? "golfer" : drill.year ? "month" : "year";
@@ -714,6 +790,12 @@ function screenManage() {
   <section class="panel">
     <div class="panel-head"><h2 class="panel-title">Golfers in this group</h2><span class="panel-count">${golfers.length || ""}</span></div>
     <div class="card">
+      ${!golfers.length && db.canManage() ? `<div class="welcome" style="border:0;padding:1.4rem 1rem">
+        <p style="margin:0 0 1rem">Nobody is on this roster yet. If your golfers already exist from before, put them back in one tap.</p>
+        <div class="inline-actions stacked">
+          <a class="btn" href="./rebuild.html" style="text-decoration:none;display:flex;align-items:center;justify-content:center">Rebuild the roster</a>
+        </div>
+      </div>` : ""}
       ${golfers.length ? `<div class="list">
         ${sortedGolfers().map((g) => {
           if (editingGolfer === g.id) {
@@ -777,10 +859,14 @@ function groupSwitcher() {
     <div style="display:flex;justify-content:space-between;align-items:center">
       <h2>Your groups</h2><button class="rowbtn" data-close="1">Close</button></div>
     <div class="card list" style="margin-top:0.6rem">
-      ${groups.map((g) => `<button class="list-row" data-goto-group="${esc(g.id)}">
-        <span class="grow"><span class="name">${esc(g.name)}</span>${g.id === current ? `<br><span class="sub">you are here</span>` : ""}</span>
-        ${g.id === current ? `<span class="chev">✓</span>` : `<span class="chev">›</span>`}
-      </button>`).join("")}
+      ${groups.map((g) => `<div class="list-row">
+        <button class="grow" data-goto-group="${esc(g.id)}" style="background:none;border:0;text-align:left;padding:0;color:inherit">
+          <span class="name">${esc(g.name)}</span>${g.id === current ? `<br><span class="sub">you are here</span>` : ""}
+        </button>
+        ${g.id === current
+          ? `<span class="chev">✓</span>`
+          : `<button class="rowbtn warn" data-forget-group="${esc(g.id)}" data-forget-name="${esc(g.name)}">Forget</button>`}
+      </div>`).join("")}
     </div>
     <div class="inline-actions stacked">
       <button class="btn ghost" data-act="new-group">Start another group</button>
@@ -857,7 +943,7 @@ function groupSection() {
         <button class="btn ghost" data-act="rename-group">Save the name</button>
       </div>
     </div>
-    <p class="hint"><a href="./tidy.html">Check and tidy the data</a> · <a href="./cleanup.html">Clean up unused groups</a></p>
+    <p class="hint"><a href="./rebuild.html">Rebuild the roster</a> · <a href="./tidy.html">Check and tidy the data</a> · <a href="./cleanup.html">Clean up unused groups</a></p>
   </section>
 
   <section class="panel">
@@ -1613,6 +1699,16 @@ view.addEventListener("click", async (e) => {
     case "clear-filters": filter = { golferId: "", year: "", month: "", courseId: "" }; return render();
     case "drill-back": drill.month ? (drill.month = null) : (drill.year = null); return render();
     case "view-scope": filter = { golferId: "", year: drill.year || "", month: drill.month || "", courseId: "" }; tab = "history"; return render();
+    case "date-today": {
+      /* Writes the value straight into the field as well as into state. Setting
+         only the state left the picker showing the old date, which is why this
+         appeared to do nothing. */
+      form.date = today();
+      const field = view.querySelector("#round-date");
+      if (field) field.value = form.date;
+      updateEnterHints();
+      return render();
+    }
     case "post": return postRound();
 
     case "begin": return begin();
@@ -1797,6 +1893,30 @@ view.addEventListener("click", async (e) => {
 
 sheetEl.addEventListener("click", async (e) => {
   if (e.target === sheetEl || e.target.closest("[data-close]")) { sheetEl.hidden = true; return; }
+
+  /* Forget removes a group from THIS account's list and this device, without
+     touching the group itself. It is the one action that cannot fail: it does
+     not read anything, does not need permission from a group you may no longer
+     belong to, and does not depend on the group still existing. That is why it
+     is here — a stale entry kept coming back after every sign-in, and nothing
+     that tried to be clever about it ever worked. */
+  const forgetting = e.target.closest("[data-forget-group]");
+  if (forgetting) {
+    const id = forgetting.dataset.forgetGroup;
+    const name = forgetting.dataset.forgetName;
+    if (forgetting.dataset.armed !== "1") {
+      forgetting.dataset.armed = "1";
+      forgetting.textContent = "Tap again";
+      return;
+    }
+    forgetting.disabled = true;
+    forgetting.textContent = "Forgetting…";
+    await db.forgetGroupEverywhere(id);
+    sheetEl.hidden = true;
+    flashMsg(`${name} removed from your list. Nothing in it was deleted.`);
+    render();
+    return;
+  }
 
   const quick = e.target.closest("[data-quick]");
   if (quick) {
