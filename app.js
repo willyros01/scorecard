@@ -170,7 +170,9 @@ function screenJoin() {
           <div class="inline-actions stacked">
             <button class="btn" data-act="accept-named" ${joining ? "disabled" : ""}>${joining ? "Joining…" : "Yes, that's me — join"}</button>
           </div>
-          <p class="hint">Nothing to type. Your rounds and handicap come with you.</p>
+          <p class="hint">${invite.role === "admin"
+            ? "You are joining as an <b>admin</b>, so you will be asked to set a password afterwards."
+            : "Nothing to type. Your rounds and handicap come with you."}</p>
           <p class="hint">Not you? <button class="linkbtn" data-act="not-me">This is somebody else's invitation</button></p>
         </div>
         ${versionBlock()}
@@ -2224,7 +2226,10 @@ view.addEventListener("click", async (e) => {
       busy("Joining the group");
       render();
       try {
-        const role = await db.roleForCode(link.associationId, link.code);
+        /* The role comes from the link. Somebody who has not joined yet cannot
+           read the group document, so asking it is pointless — the rules verify
+           the code against the group when the membership is written. */
+        const role = link.role || "member";
         const result = await db.acceptNamedInvite({
           associationId: link.associationId, code: link.code,
           golferId: link.golferId, role,
@@ -3352,6 +3357,8 @@ db.onChange((s) => { sync = s; render(); });
   const link = db.readJoinLink();
   if (link && link.golferId) {
     invitedGolfer = await db.golferNamedInLink(link.golferId);
+    /* Usually null — a group document is not readable until you belong to it.
+       The screen falls back to a generic heading rather than looking broken. */
     const group = await db.loadAssociation(link.associationId);
     invitedGroupName = group ? group.name : "";
   }

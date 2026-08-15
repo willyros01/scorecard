@@ -239,6 +239,11 @@ export async function findAssociationByCode(code) {
    fails if it does not match, which is what makes editing the app pointless. */
 /* Works out which role a code unlocks, so joining does not have to guess.
    The rules verify it again server-side; this only decides what to ask for. */
+/* Which role a code unlocks.
+ *
+ * Only usable by somebody who can already read the group — that is, an
+ * existing member. A person arriving on an invitation cannot, so joining uses
+ * the role carried in the link instead and lets the rules verify it. */
 export async function roleForCode(associationId, code) {
   if (!fb) return "member";
   try {
@@ -248,7 +253,6 @@ export async function roleForCode(associationId, code) {
     const data = snap.data() || {};
     return data.adminCode && code === data.adminCode ? "admin" : "member";
   } catch {
-    /* Cannot read it — ask for the ordinary role, which always works. */
     return "member";
   }
 }
@@ -802,7 +806,18 @@ export function inviteLink(role = "member", golferId = null) {
      handicap. It also links them to their EXISTING roster entry, rounds and
      index included. */
   const named = golferId ? `.${golferId}` : "";
-  return `${location.origin}${location.pathname}?join=${group.id}.${code}${named}`;
+  /* The role travels in the link as its own parameter.
+   *
+   * It cannot be worked out on arrival: somebody who has not joined yet is not
+   * a member, so they cannot read the group document to see which code they
+   * hold. The app was falling back to "guest", then presenting an ADMIN code
+   * while asking for the guest role — and the rules rightly refused it.
+   *
+   * Carrying the role here is safe because it is a claim, not a grant: the
+   * rules still check the code against the group, so a link edited to say
+   * admin while holding the guest code is refused. */
+  const as = role === "admin" ? "&as=admin" : "";
+  return `${location.origin}${location.pathname}?join=${group.id}.${code}${named}${as}`;
 }
 
 /* Groups created before admin invitations existed have no admin code. One is
@@ -830,10 +845,13 @@ export function readJoinLink() {
        group.code.golferId   — a named one, for a specific person on the roster */
     const parts = value.split(".");
     if (parts.length < 2) return null;
+    const params = new URLSearchParams(location.search);
     return {
       associationId: parts[0],
       code: parts[1],
       golferId: parts.length > 2 ? parts.slice(2).join(".") : null,
+      /* Verified against the group by the rules, never trusted on its own. */
+      role: params.get("as") === "admin" ? "admin" : "member",
     };
   } catch { return null; }
 }
@@ -882,6 +900,9 @@ export async function acceptNamedInvite({ associationId, code, golferId, role })
     joinCode: code,
   });
 
+  /* Not readable by somebody who has not joined yet, so this is expected to
+     come back null on an invitation. The group's real name arrives from the
+     watcher the moment membership exists. */
   const group = await loadAssociation(associationId);
   const name = group ? group.name : "Group";
 
@@ -932,6 +953,8 @@ export async function acceptNamedInvite({ associationId, code, golferId, role })
   return { ok: true, role };
 }
 
+/* Called only AFTER the join has succeeded — it strips the whole query string,
+   including the role, so anything that still needs it must read it first. */
 export const clearJoinLink = () => {
   try { history.replaceState(null, "", location.pathname); } catch {}
 };
