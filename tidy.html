@@ -216,6 +216,30 @@ async function inspect() {
     });
   }
 
+  /* Golfers who exist but belong to nothing.
+   *
+   * Test people, and the extras created by repeated taps before the waiting
+   * card existed. Safe to remove ONLY when all three are true: no rounds
+   * anywhere, on no roster, and no account linked to them. Anything failing
+   * even one of those is left alone and reported — a golfer with rounds must
+   * never be deleted, or those rounds are orphaned. */
+  const removable = [];
+  const keptBack = [];
+  for (const golfer of golfers) {
+    const rounds = roundsByGolfer.get(golfer.id) || 0;
+    const onRoster = rosterIds.has(golfer.id);
+    const linked = !!golfer.linkedUid;
+
+    if (!rounds && !onRoster && !linked) {
+      removable.push({ id: golfer.id, name: golfer.name || "Unnamed", nameKey: golfer.nameKey });
+    } else if (!onRoster) {
+      keptBack.push({
+        name: golfer.name || "Unnamed",
+        why: rounds ? `${rounds} round${rounds === 1 ? "" : "s"}` : "signed in on a device",
+      });
+    }
+  }
+
   const duplicates = [...seenNames.values()].filter((list) => list.length > 1);
   const emptyGroups = groups.filter((g) => g.members === 0);
 
@@ -247,6 +271,24 @@ async function inspect() {
     });
   }
 
+  if (removable.length) {
+    findings.push({
+      kind: "unused", bad: true,
+      title: `${removable.length} golfer${removable.length === 1 ? "" : "s"} in no group, with no rounds`,
+      detail: removable.map((g) => g.name).join("\n")
+        + "\n\nNobody has played a round as them and no account is linked to them, so removing them loses nothing. Their names become free to use again.",
+    });
+  }
+
+  if (keptBack.length) {
+    findings.push({
+      kind: "kept", bad: false,
+      title: `${keptBack.length} golfer${keptBack.length === 1 ? "" : "s"} in no group, but kept`,
+      detail: keptBack.map((g) => `${g.name} — ${g.why}`).join("\n")
+        + "\n\nThese are left alone. Deleting somebody with rounds would strand those rounds.",
+    });
+  }
+
   if (duplicates.length) {
     findings.push({
       kind: "duplicates", bad: true,
@@ -269,7 +311,7 @@ async function inspect() {
     findings.push({ kind: "clean", bad: false, title: "Nothing needs fixing", detail: `Checked ${golfers.length} golfers and ${totalRounds} rounds across ${groups.length} group${groups.length === 1 ? "" : "s"}.` });
   }
 
-  plan = { golferFixes, emptyGroups, groups, totalRounds, staleHandicaps };
+  plan = { golferFixes, emptyGroups, groups, totalRounds, staleHandicaps, removable };
   return findings;
 }
 
@@ -285,7 +327,8 @@ function draw() {
     </div>`).join("")}
   </div>`;
 
-  const fixable = plan.golferFixes.length + plan.emptyGroups.length + plan.staleHandicaps.length;
+  const fixable = plan.golferFixes.length + plan.emptyGroups.length
+    + plan.staleHandicaps.length + plan.removable.length;
   actionsEl.innerHTML = fixable
     ? `<div class="inline-actions stacked" style="margin-top:18px">
          <button class="btn" id="fix">Fix these ${fixable} thing${fixable === 1 ? "" : "s"}</button>
@@ -335,6 +378,25 @@ async function repair() {
       say(`${plan.staleHandicaps.length} course handicap${plan.staleHandicaps.length === 1 ? "" : "s"} corrected — net scores will be right now`);
     } catch (e) {
       say(`Could not correct the course handicaps — ${(e && e.code) || "refused"}`, true);
+    }
+  }
+
+  /* Remove the unused golfers, and free their names. */
+  if (plan.removable.length) {
+    const { writeBatch } = mod;
+    try {
+      for (let i = 0; i < plan.removable.length; i += 200) {
+        const batch = writeBatch(db);
+        for (const g of plan.removable.slice(i, i + 200)) {
+          batch.delete(doc(db, "golfers", g.id));
+          if (g.nameKey) batch.delete(doc(db, "golferNames", g.nameKey));
+        }
+        await batch.commit();
+      }
+      fixed += plan.removable.length;
+      say(`${plan.removable.length} unused golfer${plan.removable.length === 1 ? "" : "s"} removed, and their names freed`);
+    } catch (e) {
+      say(`Could not remove the unused golfers — ${(e && e.code) || "refused"}`, true);
     }
   }
 

@@ -3,200 +3,553 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>The Scorecard — Quick Start</title>
+<title>The Scorecard — Getting Started</title>
 <style>
 :root{
   --ink:#14261F; --pine:#1F5641; --card:#FBF7EE; --paper:#FFF; --pencil:#B4402F;
-  --sand:#E0D3B6; --rule:#D5CBB4; --muted:#46534C;
+  --sand:#E0D3B6; --rule:#D5CBB4; --muted:#46534C; --tint:#F0EDE3;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
   --display:Georgia,"Iowan Old Style",serif;
   --body:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
 }
 *{box-sizing:border-box}
-body{margin:0;background:var(--card);color:var(--ink);font-family:var(--body);font-size:20px;line-height:1.6}
-.page{max-width:800px;margin:0 auto;padding:34px 26px 50px}
-.page + .page{border-top:4px solid var(--sand);margin-top:20px}
-h1{font-family:var(--display);font-weight:400;font-size:38px;margin:0 0 6px}
-.who{display:inline-block;background:var(--pine);color:#fff;font-size:15px;font-weight:700;
-     letter-spacing:.14em;text-transform:uppercase;padding:6px 14px;border-radius:999px;margin-bottom:16px}
-.who.admin{background:var(--pencil)}
-.lead{color:var(--muted);margin:0 0 26px;font-size:19px}
-h2{font-size:23px;margin:30px 0 10px}
-p{margin:0 0 14px}
-ol,ul{margin:0 0 18px;padding-left:26px}
-li{margin-bottom:11px}
-.card{background:var(--paper);border:1px solid var(--rule);border-radius:12px;padding:18px 22px;margin:0 0 20px}
-.card.tip{border-left:6px solid var(--pine)}
-.card.warn{border-left:6px solid var(--pencil)}
-table{width:100%;border-collapse:collapse;font-size:19px;margin:0 0 22px;background:var(--paper);
-      border:1px solid var(--rule);border-radius:10px;overflow:hidden}
-th,td{text-align:left;padding:13px 15px;border-bottom:1px solid var(--rule)}
-th{background:rgba(31,86,65,.1);font-size:15px;text-transform:uppercase;color:var(--pine)}
+body{margin:0;background:var(--card);color:var(--ink);font-family:var(--body);
+     font-size:21px;line-height:1.65}
+.wrap{max-width:820px;margin:0 auto;padding:0 24px 90px}
+
+header.hero{background:var(--pine);color:#fff;padding:52px 24px 42px;margin-bottom:34px}
+header.hero .wrap{padding-bottom:0}
+.kicker{font-size:16px;letter-spacing:.18em;text-transform:uppercase;opacity:.85;margin:0 0 12px}
+h1{font-family:var(--display);font-weight:400;font-size:46px;line-height:1.1;margin:0 0 16px}
+header.hero p{margin:0;font-size:21px;opacity:.95;max-width:52ch}
+
+h2{font-family:var(--display);font-weight:400;font-size:34px;margin:58px 0 8px;
+   padding-bottom:12px;border-bottom:3px solid var(--sand)}
+h2 .num{display:inline-block;background:var(--pine);color:#fff;font-family:var(--mono);
+        font-size:20px;width:40px;height:40px;line-height:40px;text-align:center;
+        border-radius:50%;margin-right:14px;vertical-align:2px}
+h3{font-size:25px;margin:36px 0 10px}
+h4{font-size:21px;margin:26px 0 8px;color:var(--pine)}
+p{margin:0 0 16px}
+ol,ul{margin:0 0 20px;padding-left:28px}
+li{margin-bottom:14px}
+b{font-weight:700}
+
+.lead{font-size:22px;color:var(--muted)}
+
+.note{background:var(--paper);border:1px solid var(--rule);border-left:7px solid var(--pencil);
+      border-radius:10px;padding:18px 22px;margin:0 0 24px}
+.note b{color:var(--pencil)}
+.note.tip{border-left-color:var(--pine)}
+.note.tip b{color:var(--pine)}
+
+table{width:100%;border-collapse:collapse;font-size:20px;margin:0 0 26px;
+      background:var(--paper);border:1px solid var(--rule);border-radius:10px;overflow:hidden}
+th,td{text-align:left;padding:15px 16px;border-bottom:1px solid var(--rule);vertical-align:top}
+th{background:rgba(31,86,65,.1);font-size:16px;letter-spacing:.04em;
+   text-transform:uppercase;color:var(--pine);font-weight:700}
 tr:last-child td{border-bottom:0}
+
+figure{margin:26px 0 32px}
+figure svg{display:block;width:100%;height:auto;border-radius:12px;
+           border:1px solid var(--rule);background:#fff}
+figcaption{font-size:18px;color:var(--muted);margin-top:10px;font-style:italic}
+.narrow{max-width:340px;margin-left:auto;margin-right:auto}
+.pair{display:flex;gap:20px;flex-wrap:wrap}
+.pair figure{flex:1 1 290px;margin:0}
+
+.step{display:flex;gap:18px;margin:30px 0 10px;align-items:flex-start}
+.n{flex:0 0 auto;width:46px;height:46px;line-height:46px;text-align:center;border-radius:50%;
+   background:var(--pine);color:#fff;font-family:var(--mono);font-weight:700;font-size:21px}
+.step h3,.step h4{margin:8px 0 0}
+.body{padding-left:64px}
+@media(max-width:620px){.body{padding-left:0}}
+
+.check{background:var(--paper);border:3px solid var(--pine);border-radius:14px;
+       padding:24px 26px;margin:34px 0}
+.check h3{margin-top:0}
+
+.platform{background:var(--tint);border-radius:12px;padding:4px 22px 12px;margin:0 0 26px;
+          border:1px solid var(--rule)}
+
+svg .scr{fill:#FBF7EE}
+svg .hdr{fill:#1F5641}
+svg .cardw{fill:#fff;stroke:#D5CBB4;stroke-width:1.5}
+svg .btn{fill:#1F5641}
+svg .btnghost{fill:#fff;stroke:#D5CBB4;stroke-width:1.5}
+svg .chrome{fill:#EDEDF0;stroke:#C9C9CE;stroke-width:1}
+svg .t{font-family:-apple-system,Segoe UI,Roboto,sans-serif;font-size:13px;fill:#14261F}
+svg .tb{font-family:-apple-system,Segoe UI,Roboto,sans-serif;font-size:14px;font-weight:700;fill:#14261F}
+svg .td{font-family:-apple-system,Segoe UI,Roboto,sans-serif;font-size:11.5px;fill:#46534C}
+svg .tw{font-family:Georgia,serif;font-size:15px;fill:#fff}
+svg .tbtn{font-family:-apple-system,Segoe UI,Roboto,sans-serif;font-size:13px;font-weight:700;fill:#fff}
+svg .mono{font-family:ui-monospace,Menlo,monospace;font-size:12px;fill:#14261F}
+svg .hi{fill:none;stroke:#B4402F;stroke-width:2.5;stroke-dasharray:6 4}
+
 @media print{
   body{background:#fff;font-size:12pt}
-  .page{max-width:none;padding:0}
-  .page + .page{page-break-before:always;border-top:0;margin-top:0}
-  .card,table{page-break-inside:avoid}
-  @page{size:Letter;margin:16mm 15mm}
+  header.hero{background:#fff;color:var(--ink);padding:0 0 18px;border-bottom:3px solid var(--pine)}
+  header.hero h1{color:var(--ink)} header.hero p,.kicker{color:var(--muted);opacity:1}
+  .wrap{max-width:none;padding:0}
+  h2{font-size:22px;page-break-after:avoid} h3,h4{page-break-after:avoid}
+  figure,table,.note,.check,.platform{page-break-inside:avoid}
+  .step{page-break-after:avoid}
+  @page{size:Letter;margin:15mm 14mm}
 }
 </style>
 </head>
 <body>
 
-<div class="page">
-  <span class="who">For everyone playing</span>
-  <h1>Quick start</h1>
-  <p class="lead">Everything you need. There is nothing else to learn.</p>
-
-  <h2>Getting in</h2>
-  <ol>
-    <li>Tap the link you were sent.</li>
-    <li>Type the name you play under.</li>
-    <li>Tap <b>Start</b>. That is it — no account, no password.</li>
-  </ol>
-
-  <div class="card tip">
-    <b>Add it to your home screen so you can find it again.</b><br>
-    iPhone or iPad: tap the share button, scroll down, tap <b>Add to Home Screen</b>.<br>
-    Android: tap the menu, then <b>Install app</b>.
+<header class="hero">
+  <div class="wrap">
+    <p class="kicker">The Scorecard</p>
+    <h1>Getting started</h1>
+    <p>Everything from opening it the first time to running a tournament. No knowledge assumed —
+    if you can send a text message, you can use this.</p>
   </div>
+</header>
 
-  <h2>Posting your round</h2>
-  <ol>
-    <li>Open <b>Enter</b>.</li>
-    <li>Your name is already filled in.</li>
-    <li>Pick the course, then the tees you played.</li>
-    <li>Type your score.</li>
-    <li>Tap <b>Post round</b>.</li>
-  </ol>
+<div class="wrap">
 
-  <p>Made a mistake? Go to <b>My rounds</b> and tap <b>Edit</b>. You have 24 hours; after that ask whoever runs the group.</p>
+<h2><span class="num">1</span>What this is</h2>
 
-  <h2>Your handicap</h2>
-  <p>Open <b>Summary</b>. After <b>three rounds</b> your Handicap Index appears. Before that it tells you how many more you need.</p>
-  <p>It uses the World Handicap System — the average of your best 8 rounds out of your last 20. If you play in more than one group, all of them count towards the same index.</p>
+<p class="lead">A golf handicap tracker your group shares. Somebody posts the scores after a round,
+and everyone's handicap keeps itself up to date.</p>
 
-  <h2>Results</h2>
-  <table>
-    <tr><th>To see</th><th>Go to</th></tr>
-    <tr><td>Who won on Saturday</td><td><b>Games</b>, then tap the game</td></tr>
-    <tr><td>Monthly or yearly standings</td><td><b>Summary</b></td></tr>
-    <tr><td>Your own rounds</td><td><b>My rounds</b></td></tr>
-    <tr><td>How your handicap has moved</td><td><b>My rounds</b> — the trend chart at the top</td></tr>
-  </table>
+<p>It is a <b>website that behaves like an app</b>. There is nothing to buy and nothing to install
+from an app store. You open a web address once, add it to your home screen, and after that it opens
+like any other app — including when you have no signal.</p>
 
-  <p><b>About the trend chart.</b> The line is your Handicap Index after each round. <b>Filled dots</b>
-  are the rounds currently counting — the best 8 of your last 20. <b>Hollow dots</b> are still in the
-  window but are not affecting your number today. The dashed line marks your lowest.</p>
+<table>
+<tr><th>It does</th><th>It does not</th></tr>
+<tr><td>Work out handicaps the official way (World Handicap System)</td><td>Need an app store account</td></tr>
+<tr><td>Keep working with no signal, and catch up later</td><td>Cost anything</td></tr>
+<tr><td>Share results to WhatsApp, email or text</td><td>Show adverts</td></tr>
+<tr><td>Handle several groups, and tournaments over more than one day</td><td>Need a password, for most people</td></tr>
+</table>
 
-  <p><b>Net</b> is your score minus your handicap — that is what the ranking uses, so everyone competes fairly. <b>Gross</b> is your raw score, shown beside it.</p>
+<h2><span class="num">2</span>Opening it the first time</h2>
 
-  <div class="card">
-    <b>No signal on the course?</b> Post anyway. Rounds are saved on your phone and upload by themselves when you get signal back. The badge at the top right turns red while they are waiting.
-  </div>
+<p>Everything starts with a web address — the same sort of thing you type to reach any website. It
+will look like this:</p>
 
-  <p style="color:var(--muted)">Cannot see a Manage tab? That is normal. Only organisers have it.</p>
+<figure class="narrow">
+<svg viewBox="0 0 340 90" role="img" aria-label="A browser address bar containing the app's web address">
+  <rect width="340" height="90" fill="#fff"/>
+  <rect x="20" y="26" width="300" height="38" rx="19" class="chrome"/>
+  <text x="170" y="51" class="tb" text-anchor="middle">willyros01.github.io</text>
+  <path d="M20 78 Q170 92 320 78" class="hi"/>
+  <text x="170" y="18" class="td" text-anchor="middle">type this into the address bar</text>
+</svg>
+<figcaption>Whoever runs your group will send you the exact address, usually as a link you can just tap.</figcaption>
+</figure>
+
+<div class="note tip"><b>If you were sent an invitation link, simply tap it.</b> It opens the app,
+knows which group you belong to, and greets you by name. Skip to section 4.</div>
+
+<h2><span class="num">3</span>Putting it on your device</h2>
+
+<p>You only do this once. Afterwards it sits with your other apps and opens with one tap.</p>
+
+<p><b>Why bother?</b> Because it opens full screen without the browser's bars around it, it starts
+faster, and it keeps working when you have no signal out on the course.</p>
+
+<div class="platform">
+<h3>iPhone and iPad</h3>
+
+<div class="step"><div class="n">1</div><h4>Open it in Safari</h4></div>
+<div class="body"><p>It must be <b>Safari</b>. Chrome on an iPhone cannot add apps to the home screen.</p></div>
+
+<div class="step"><div class="n">2</div><h4>Tap the Share button</h4></div>
+<div class="body"><p>A square with an arrow pointing up out of it. On an iPhone it is at the bottom
+of the screen; on an iPad it is at the top right.</p></div>
+
+<figure class="narrow">
+<svg viewBox="0 0 320 200" role="img" aria-label="The iOS share button and the Add to Home Screen option">
+  <rect width="320" height="200" fill="#fff"/>
+  <rect x="14" y="12" width="292" height="176" rx="22" fill="#14261F"/>
+  <rect x="22" y="20" width="276" height="160" rx="16" class="scr"/>
+
+  <rect x="22" y="20" width="276" height="34" rx="16" class="chrome"/>
+  <rect x="22" y="40" width="276" height="14" class="chrome"/>
+  <text x="150" y="42" class="td" text-anchor="middle">willyros01.github.io</text>
+
+  <g transform="translate(258,28)">
+    <path d="M8 14 V3 M4 7 l4-4 4 4" stroke="#1F5641" stroke-width="1.8" fill="none" stroke-linecap="round"/>
+    <path d="M2 10 v7 h12 v-7" stroke="#1F5641" stroke-width="1.8" fill="none"/>
+  </g>
+  <circle cx="266" cy="37" r="15" class="hi"/>
+  <text x="266" y="72" class="td" text-anchor="middle">1. Share</text>
+
+  <rect x="46" y="88" width="228" height="80" rx="12" class="cardw"/>
+  <text x="60" y="110" class="t">Add Bookmark</text>
+  <line x1="60" y1="120" x2="260" y2="120" stroke="#E4E0D6"/>
+  <text x="60" y="140" class="tb">Add to Home Screen</text>
+  <rect x="52" y="126" width="216" height="22" rx="6" class="hi"/>
+  <line x1="60" y1="152" x2="260" y2="152" stroke="#E4E0D6"/>
+  <text x="60" y="166" class="t">Print</text>
+</svg>
+<figcaption>Tap Share, then scroll down the list until you see Add to Home Screen.</figcaption>
+</figure>
+
+<div class="step"><div class="n">3</div><h4>Scroll down and tap Add to Home Screen</h4></div>
+<div class="body"><p>The list is long. Keep scrolling — it is well down, past Add Bookmark and
+Add to Favourites.</p></div>
+
+<div class="step"><div class="n">4</div><h4>Tap Add</h4></div>
+<div class="body"><p>Top right corner. The icon appears on your home screen with your other apps.</p></div>
+
+<div class="note"><b>The one thing to know about iPhones and iPads.</b> Safari and the home-screen
+icon are treated as two separate places. If you use both, sign in on each — otherwise the app thinks
+you are two different people. Guests who joined by an invitation link need do nothing.</div>
 </div>
 
-<div class="page">
-  <span class="who admin">For organisers</span>
-  <h1>Quick start</h1>
-  <p class="lead">Everything above, plus the parts only you can reach.</p>
+<div class="platform">
+<h3>Android</h3>
 
-  <h2>Before the first outing</h2>
-  <ol>
-    <li><b>Manage</b> → add every golfer, including those without phones. They can be scored without ever opening the app.</li>
-    <li><b>Manage</b> → add your courses. Search by name, or type the rating and slope off the scorecard.</li>
-    <li><b>Manage</b> → <b>Invite</b> beside a golfer's name. The link names them, so they tap it
-      once and they are in — nothing to type, and no chance of a misspelled second record with a
-      split handicap. Choose <b>guest</b> or <b>admin</b>, then pick WhatsApp, email, text or
-      anything else. The message includes a link to this guide.</li>
-  </ol>
+<div class="step"><div class="n">1</div><h4>Open it in Chrome</h4></div>
+<div class="body"><p>Chrome is the one that comes with most Android phones.</p></div>
 
-  <div class="card warn">
-    <b>Spell names the same way.</b> When someone joins, the app matches their name against your roster. "Bob" and "Robert Tan" become two people with two handicaps. Agree the spelling and stick to it.
-  </div>
-
-  <h2>Roles</h2>
-  <table>
-    <tr><th>Role</th><th>Can do</th></tr>
-    <tr><td><b>Guest</b></td><td>Posts their own rounds, sees results and rankings.</td></tr>
-    <tr><td><b>Admin</b></td><td>Also adds courses and golfers, creates games, posts for anybody, edits any round.</td></tr>
-    <tr><td><b>You</b></td><td>Everything, plus invitations, roles, backup and settings.</td></tr>
-  </table>
-
-  <p>To promote somebody who has already joined: <b>Admin</b> → tap <b>Make admin</b> beside their name.
-  Or invite them as an admin in the first place, and they arrive with the role already set.</p>
-
-  <div class="card tip">
-    <b>Guests need no password. Admins do.</b> A guest taps their link and is in. An admin is asked
-    to set a password, because their link, if it went astray, would hand over the roster.
-    A <b>guest link keeps working</b> for that same person on another device; an <b>admin link works
-    once</b>.
-  </div>
-
-  <div class="card">
-    <b>An admin invitation is a different link.</b> Nobody can turn a guest link into an admin one —
-    they carry different secrets, and the database checks which was used.
-  </div>
-
-  <h2>On the day</h2>
-  <ol>
-    <li><b>Games</b> → <b>Add a game</b>. Set the date and course.</li>
-    <li>Everyone posts their round. They can pick the game, but they do not have to.</li>
-    <li>Open the game afterwards. Any round played on that date is offered — tick and add in one tap.</li>
-    <li><b>Share the result</b> when you are done.</li>
-  </ol>
-
-  <div class="card tip">
-    <b>Set somebody's handicap after the game already exists?</b> Open the game and tap
-    <b>Recalculate this game's handicaps</b>. A round remembers the handicap that applied when it was
-    posted — that is what stops old results shifting — so an index set afterwards does not reach back
-    into it. Recalculating re-freezes every round in that game, and shows you the changes first.
-  </div>
-
-  <div class="card tip">
-    <b>A tournament over several days?</b> When adding the game, tap <b>Runs over more than one day</b>
-    and set the last day. Any round played on any day in that range can be added to it.
-    Open the game and you get a <b>Standing</b> — every player, their score each day, and a running
-    total, with the leader at the top. Tap <b>Edit</b> on a game to change its name, dates or course
-    afterwards.
-  </div>
-
-  <p>You can also take a round back out of a game — open the game and tap <b>Remove</b> beside the name.
-  The round itself and the golfer's handicap are untouched.</p>
-
-  <h2>Things worth doing</h2>
-  <table>
-    <tr><th>What</th><th>Where</th><th>How often</th></tr>
-    <tr><td>Back up</td><td><b>Admin</b> → Back up now → Save it somewhere</td><td>Monthly, and before anything risky</td></tr>
-    <tr><td>Course search key</td><td><b>Admin</b> → Course lookup</td><td>Once</td></tr>
-    <tr><td>Rename the group</td><td><b>Admin</b> → Group</td><td>Whenever</td></tr>
-    <tr><td>Give somebody a starting handicap</td><td><b>Manage</b> → Index beside their name</td><td>New players</td></tr>
-    <tr><td>Start another group</td><td>Tap the group name at the top</td><td>As needed</td></tr>
-    <tr><td>Add golfers from another group</td><td><b>Manage</b> → Add from my other groups</td><td>Setting up a new group</td></tr>
-  </table>
-
-  <div class="card tip">
-    <b>One person, one handicap.</b> A golfer who plays in two of your groups is one record. Their index is built from all their rounds, wherever they played. Rename them once and it changes everywhere.
-  </div>
-
-  <div class="card warn">
-    <b>Deleting a group.</b> Its rounds and games go with it. <b>Golfers and courses never do</b> —
-    they belong to you, not to a group, and their handicaps are rebuilt from whatever rounds remain.
-    A copy of the rounds is saved to the device first and offered to you as a file, so even this is
-    recoverable. Only the owner can delete a group.
-  </div>
-
-  <h2>If something looks wrong</h2>
-  <table>
-    <tr><th>What you see</th><th>What to do</th></tr>
-    <tr><td>The old version after an update</td><td>Add <b>/reset.html</b> to the web address</td></tr>
-    <tr><td>Groups you never meant to create</td><td>Add <b>/cleanup.html</b> to the web address</td></tr>
-    <tr><td>A red bar under the header</td><td>It names the problem and the fix</td></tr>
-    <tr><td>Not sure which version is running</td><td>Bottom of <b>Summary</b></td></tr>
-  </table>
+<div class="step"><div class="n">2</div><h4>Look for the prompt, or use the menu</h4></div>
+<div class="body">
+<p>Chrome often offers <b>Install app</b> or <b>Add to Home screen</b> along the bottom by itself.
+Tap it and you are finished.</p>
+<p>If it does not appear, tap the <b>three dots</b> at the top right, then <b>Add to Home screen</b>
+or <b>Install app</b>.</p>
 </div>
 
+<figure class="narrow">
+<svg viewBox="0 0 320 200" role="img" aria-label="The Chrome menu on Android with Install app highlighted">
+  <rect width="320" height="200" fill="#fff"/>
+  <rect x="14" y="12" width="292" height="176" rx="18" fill="#14261F"/>
+  <rect x="22" y="20" width="276" height="160" rx="12" class="scr"/>
+
+  <rect x="22" y="20" width="276" height="30" class="chrome"/>
+  <text x="140" y="40" class="td" text-anchor="middle">willyros01.github.io</text>
+  <circle cx="278" cy="30" r="1.8" fill="#46534C"/>
+  <circle cx="278" cy="35" r="1.8" fill="#46534C"/>
+  <circle cx="278" cy="40" r="1.8" fill="#46534C"/>
+  <circle cx="278" cy="35" r="14" class="hi"/>
+  <text x="252" y="62" class="td" text-anchor="end">1. three dots</text>
+
+  <rect x="140" y="70" width="150" height="98" rx="10" class="cardw"/>
+  <text x="154" y="90" class="t">New tab</text>
+  <text x="154" y="112" class="t">Bookmarks</text>
+  <text x="154" y="134" class="tb">Install app</text>
+  <rect x="147" y="120" width="130" height="20" rx="6" class="hi"/>
+  <text x="154" y="156" class="t">Settings</text>
+</svg>
+<figcaption>Either the prompt or the menu works. Both do exactly the same thing.</figcaption>
+</figure>
+</div>
+
+<div class="platform">
+<h3>Mac</h3>
+
+<div class="step"><div class="n">1</div><h4>Open it in Safari</h4></div>
+<div class="body"><p>On macOS Sonoma or newer.</p></div>
+
+<div class="step"><div class="n">2</div><h4>Menu bar, File, then Add to Dock</h4></div>
+<div class="body"><p>It then lives in your Dock and opens in its own window, without tabs or an
+address bar.</p>
+<p><b>On an older Mac</b> there is no Add to Dock. Use Chrome or Edge instead: the three dots at the
+top right, then <b>Cast, save and share</b>, then <b>Install page as app</b>.</p></div>
+</div>
+
+<div class="platform">
+<h3>Windows</h3>
+
+<div class="step"><div class="n">1</div><h4>Open it in Edge or Chrome</h4></div>
+<div class="body"><p>Edge comes with Windows.</p></div>
+
+<div class="step"><div class="n">2</div><h4>Click the install icon in the address bar</h4></div>
+<div class="body">
+<p>A small screen-with-an-arrow icon appears at the right-hand end of the address bar. Click it,
+then click <b>Install</b>.</p>
+<p>If you cannot see it: three dots at the top right, then <b>Apps</b>, then
+<b>Install this site as an app</b>.</p>
+</div>
+
+<figure class="narrow">
+<svg viewBox="0 0 340 110" role="img" aria-label="The install icon at the right of a desktop browser address bar">
+  <rect width="340" height="110" fill="#fff"/>
+  <rect x="16" y="24" width="308" height="40" rx="10" class="chrome"/>
+  <text x="34" y="49" class="t">willyros01.github.io</text>
+  <g transform="translate(288,36)">
+    <rect x="0" y="0" width="16" height="12" rx="2" fill="none" stroke="#1F5641" stroke-width="1.6"/>
+    <path d="M8 3 v6 M5 6 l3 3 3-3" stroke="#1F5641" stroke-width="1.6" fill="none" stroke-linecap="round"/>
+  </g>
+  <circle cx="296" cy="43" r="17" class="hi"/>
+  <text x="296" y="84" class="td" text-anchor="middle">click this</text>
+</svg>
+<figcaption>The install icon only appears on sites that can be installed. This is one of them.</figcaption>
+</figure>
+</div>
+
+<h2><span class="num">4</span>Joining your group</h2>
+
+<p>Almost everybody joins by tapping a link. There is nothing to type and no password.</p>
+
+<figure class="narrow">
+<svg viewBox="0 0 320 300" role="img" aria-label="The invitation screen greeting somebody by name with one button">
+  <rect width="320" height="300" fill="#F2F1EC"/>
+  <rect x="14" y="12" width="292" height="276" rx="24" fill="#14261F"/>
+  <rect x="22" y="20" width="276" height="260" rx="18" class="scr"/>
+  <rect x="22" y="20" width="276" height="52" rx="18" class="hdr"/>
+  <rect x="22" y="56" width="276" height="16" class="hdr"/>
+  <text x="38" y="44" class="tw">The Scorecard</text>
+  <text x="38" y="62" class="td" fill="#A9C7B8">GETTING STARTED</text>
+
+  <rect x="38" y="88" width="244" height="176" rx="12" class="cardw"/>
+  <text x="56" y="114" class="tb" style="font-size:16px;font-family:Georgia,serif">Golfing Buddies</text>
+  <text x="56" y="134" class="td">You have been invited to keep</text>
+  <text x="56" y="150" class="td">your handicap with this group.</text>
+
+  <rect x="56" y="162" width="208" height="52" rx="10" fill="#F0EDE3" stroke="#E0D3B6" stroke-width="2"/>
+  <text x="160" y="180" class="td" text-anchor="middle">Joining as</text>
+  <text x="160" y="199" class="tb" text-anchor="middle" style="font-size:17px">Willy Rosales</text>
+
+  <rect x="56" y="224" width="208" height="30" rx="9" class="btn"/>
+  <text x="160" y="244" class="tbtn" text-anchor="middle">Yes, that's me — join</text>
+</svg>
+<figcaption>The link knows who you are. One tap and you are in, with your rounds and handicap already attached.</figcaption>
+</figure>
+
+<h4>If you were given a code instead</h4>
+<p>Type your name exactly as it appears on your group's list, then the six-character code. Spelling
+matters — "Bob" and "Robert Tan" become two different people with two different handicaps.</p>
+
+<h4>Using more than one device</h4>
+<p>Tap the same invitation link on each of them. Your link keeps working for you.</p>
+
+<h2><span class="num">5</span>Posting a round</h2>
+
+<div class="pair">
+<figure>
+<svg viewBox="0 0 320 330" role="img" aria-label="The Enter screen as a guest sees it">
+  <rect width="320" height="330" fill="#fff"/>
+  <text x="20" y="24" class="tb">What you fill in</text>
+  <rect x="20" y="36" width="280" height="276" rx="10" class="scr" stroke="#D5CBB4"/>
+  <text x="38" y="64" class="td">DATE</text>
+  <rect x="38" y="72" width="110" height="30" rx="8" fill="#fff" stroke="#D5CBB4"/>
+  <text x="50" y="92" class="t">Aug 15, 2026</text>
+  <text x="170" y="64" class="td">GOLFER</text>
+  <rect x="170" y="72" width="112" height="30" rx="8" fill="#EAF0EC" stroke="#9DB6A8" stroke-dasharray="5 3"/>
+  <text x="182" y="92" class="tb">Willy Rosales</text>
+  <text x="38" y="126" class="td">COURSE</text>
+  <rect x="38" y="134" width="244" height="30" rx="8" fill="#fff" stroke="#D5CBB4"/>
+  <text x="50" y="154" class="t">Royal Ontario</text>
+  <text x="38" y="188" class="td">TEES</text>
+  <rect x="38" y="196" width="116" height="30" rx="8" class="btn"/>
+  <text x="96" y="216" class="tbtn" text-anchor="middle">White 68.8/133</text>
+  <rect x="164" y="196" width="118" height="30" rx="8" class="btnghost"/>
+  <text x="223" y="216" class="td" text-anchor="middle">Blue 70.5/138</text>
+  <text x="38" y="250" class="td">GROSS SCORE</text>
+  <rect x="38" y="258" width="100" height="34" rx="8" fill="#fff" stroke="#D5CBB4"/>
+  <text x="50" y="281" class="mono" style="font-size:16px">97</text>
+</svg>
+<figcaption>Your own name is fixed in place, so you cannot post against somebody else by mistake.</figcaption>
+</figure>
+
+<figure>
+<svg viewBox="0 0 320 330" role="img" aria-label="The waiting card that appears while the app is saving">
+  <rect width="320" height="330" fill="#fff"/>
+  <text x="20" y="24" class="tb">What you see while it saves</text>
+  <rect x="20" y="36" width="280" height="276" rx="10" fill="#14261F" opacity="0.55"/>
+  <rect x="60" y="126" width="200" height="102" rx="14" fill="#fff"/>
+  <circle cx="160" cy="158" r="17" fill="none" stroke="#E0D3B6" stroke-width="5"/>
+  <path d="M160 141 a17 17 0 0 1 17 17" fill="none" stroke="#1F5641" stroke-width="5" stroke-linecap="round"/>
+  <text x="160" y="192" class="tb" text-anchor="middle" style="font-size:15px">Posting your round…</text>
+  <text x="160" y="210" class="td" text-anchor="middle">This can take a moment</text>
+</svg>
+<figcaption>Whenever the app is working it dims the screen and says so. Wait for it to clear rather than tapping again.</figcaption>
+</figure>
+</div>
+
+<h4>Adjusted score</h4>
+<p>Leave it blank almost always. It exists for the official rule that caps each hole at net double
+bogey. If you do not already know you need it, you do not need it.</p>
+
+<h4>If you have no signal</h4>
+<p>Post anyway. The round is kept on your phone and uploads by itself when signal returns. The badge
+at the top right turns red while anything is waiting.</p>
+
+<h2><span class="num">6</span>Your handicap</h2>
+
+<p>Open <b>Summary</b>. After <b>three rounds</b> your Handicap Index appears. Before that it tells
+you how many more you need.</p>
+
+<table>
+<tr><th>Term</th><th>What it means</th></tr>
+<tr><td><b>Handicap Index</b></td><td>Your ability as one number, the same at every course. This is the one people mean by "my handicap".</td></tr>
+<tr><td><b>Course Handicap</b></td><td>How many strokes you get at <i>this</i> course from <i>these</i> tees. Worked out from your index.</td></tr>
+<tr><td><b>Gross</b></td><td>Your actual score.</td></tr>
+<tr><td><b>Net</b></td><td>Your score minus your course handicap. This is what makes a game between different abilities fair.</td></tr>
+<tr><td><b>Differential</b></td><td>How well you played that day, adjusted for how hard the course was. Your index comes from your best eight of the last twenty.</td></tr>
+</table>
+
+<h3>The trend chart</h3>
+
+<p>Open <b>My rounds</b> and it appears at the top.</p>
+
+<figure>
+<svg viewBox="0 0 660 250" role="img" aria-label="The handicap trend chart, showing counting and non-counting rounds">
+  <rect width="660" height="250" fill="#fff"/>
+  <line x1="60" y1="60" x2="620" y2="60" stroke="#D5CBB4"/>
+  <line x1="60" y1="110" x2="620" y2="110" stroke="#D5CBB4"/>
+  <line x1="60" y1="160" x2="620" y2="160" stroke="#D5CBB4"/>
+  <text x="48" y="64" class="td" text-anchor="end">30</text>
+  <text x="48" y="114" class="td" text-anchor="end">26</text>
+  <text x="48" y="164" class="td" text-anchor="end">22</text>
+
+  <path d="M70 130 L150 122 L230 126 L310 116 L390 118 L470 112 L550 108 L610 106"
+        fill="none" stroke="#1F5641" stroke-width="3.5" stroke-linejoin="round"/>
+
+  <line x1="60" y1="150" x2="620" y2="150" stroke="#B4402F" stroke-width="1.5" stroke-dasharray="5 4"/>
+  <text x="614" y="144" class="td" text-anchor="end" fill="#B4402F">low 23.1</text>
+
+  <circle cx="70" cy="72" r="4" fill="none" stroke="#46534C" stroke-width="2" opacity=".55"/>
+  <circle cx="150" cy="150" r="5" fill="#1F5641"/>
+  <circle cx="230" cy="86" r="4" fill="none" stroke="#46534C" stroke-width="2" opacity=".55"/>
+  <circle cx="310" cy="152" r="5" fill="#1F5641"/>
+  <circle cx="390" cy="94" r="4" fill="none" stroke="#46534C" stroke-width="2" opacity=".55"/>
+  <circle cx="470" cy="148" r="5" fill="#1F5641"/>
+  <circle cx="550" cy="100" r="4" fill="none" stroke="#46534C" stroke-width="2" opacity=".55"/>
+  <circle cx="610" cy="146" r="5" fill="#1F5641"/>
+
+  <circle cx="150" cy="150" r="16" class="hi"/>
+  <text x="150" y="196" class="td" text-anchor="middle">a counting round</text>
+
+  <circle cx="230" cy="86" r="14" class="hi"/>
+  <text x="248" y="66" class="td">not counting</text>
+
+  <text x="70" y="224" class="td">May 2025</text>
+  <text x="610" y="224" class="td" text-anchor="end">Aug 2026</text>
+</svg>
+<figcaption>The line is your index after each round. Filled dots are the eight rounds currently counting. Hollow ones are still in the window but are not affecting your number today. Tap any dot for the details.</figcaption>
+</figure>
+
+<h2><span class="num">7</span>For whoever runs the group</h2>
+
+<p>Everything above, plus three tabs guests never see: <b>Manage</b>, <b>Admin</b>, and the full
+<b>History</b>.</p>
+
+<h3>Before the first outing</h3>
+
+<div class="step"><div class="n">1</div><h4>Add every golfer</h4></div>
+<div class="body"><p><b>Manage</b>, type the name, <b>Add golfer</b>. Include people without phones —
+they can be scored without ever opening the app.</p>
+<p>Setting up a second group? <b>Add from my other groups</b> brings people across with their rounds
+and handicap. Never retype a name — that creates a second person with half their history.</p></div>
+
+<div class="step"><div class="n">2</div><h4>Add your courses</h4></div>
+<div class="body"><p><b>Manage</b>, <b>Add a course</b>. Search by name, or type the rating and slope
+from the scorecard.</p></div>
+
+<div class="step"><div class="n">3</div><h4>Invite everybody</h4></div>
+<div class="body"><p><b>Manage</b>, then <b>Invite</b> beside each name. The link names them, so they
+tap once and are in. Choose guest or admin, then WhatsApp, email or text.</p></div>
+
+<figure class="narrow">
+<svg viewBox="0 0 320 190" role="img" aria-label="The Manage roster showing the buttons beside each golfer">
+  <rect width="320" height="190" fill="#fff"/>
+  <rect x="16" y="16" width="288" height="158" rx="10" class="cardw"/>
+
+  <text x="32" y="44" class="tb">Rey Gozum</text>
+  <text x="32" y="60" class="td">index 17.0 · 6 rounds</text>
+  <rect x="150" y="32" width="46" height="24" rx="6" class="btnghost"/>
+  <text x="173" y="48" class="td" text-anchor="middle" fill="#9AA5A0">Invited</text>
+  <rect x="202" y="32" width="46" height="24" rx="6" class="btnghost"/>
+  <text x="225" y="48" class="td" text-anchor="middle">Rename</text>
+  <rect x="254" y="32" width="36" height="24" rx="6" class="btnghost"/>
+  <text x="272" y="48" class="td" text-anchor="middle" fill="#9AA5A0">Index</text>
+  <line x1="32" y1="72" x2="288" y2="72" stroke="#E4E0D6"/>
+
+  <text x="32" y="98" class="tb">Sonny Sisante</text>
+  <text x="32" y="114" class="td">no index yet · 0 rounds</text>
+  <rect x="150" y="86" width="46" height="24" rx="6" class="btn"/>
+  <text x="173" y="102" class="tbtn" text-anchor="middle">Invite</text>
+  <rect x="202" y="86" width="46" height="24" rx="6" class="btnghost"/>
+  <text x="225" y="102" class="td" text-anchor="middle">Rename</text>
+  <rect x="254" y="86" width="36" height="24" rx="6" class="btnghost"/>
+  <text x="272" y="102" class="td" text-anchor="middle" fill="#1F5641">Index</text>
+  <rect x="248" y="80" width="48" height="36" rx="8" class="hi"/>
+
+  <text x="32" y="146" class="td">Invited is greyed out once somebody has joined.</text>
+  <text x="32" y="162" class="td">Index greys out once their own rounds take over.</text>
+</svg>
+<figcaption>Each golfer has Invite, Rename and Index. Buttons grey out when they no longer apply.</figcaption>
+</figure>
+
+<h3>Somebody who already has a handicap</h3>
+<p><b>Manage</b>, <b>Index</b> beside their name, and type it in. It stands in until they have three
+rounds with you, then their own rounds take over completely.</p>
+
+<h3>Guest, admin, owner</h3>
+
+<table>
+<tr><th>Role</th><th>Can do</th><th>Password?</th></tr>
+<tr><td><b>Guest</b></td><td>Posts their own rounds; sees results, rankings and their own history.</td><td>None</td></tr>
+<tr><td><b>Admin</b></td><td>Also adds courses and golfers, creates games, posts for anybody, edits any round.</td><td>Yes</td></tr>
+<tr><td><b>Owner</b></td><td>Everything, plus invitations, roles, backup and settings. Cannot be demoted.</td><td>Yes</td></tr>
+</table>
+
+<div class="note"><b>An admin link is a different link.</b> A guest cannot turn theirs into an admin
+one. A guest link keeps working for that same person on another device; an admin link works once.</div>
+
+<h3>Running a game</h3>
+
+<ol>
+<li><b>Games</b>, <b>Add a game</b>. Set the date and course. For a tournament, tap
+<b>Runs over more than one day</b> and set the last day.</li>
+<li>Everyone posts their round as normal. They do not have to pick the game.</li>
+<li>Open the game afterwards. Every round played on those dates is offered — tick and add in one tap.</li>
+<li><b>Share</b> the result. Tick net, gross, or both.</li>
+</ol>
+
+<div class="note tip"><b>Set somebody's handicap after the game already existed?</b> Open the game and
+tap <b>Recalculate this game's handicaps</b>. A round remembers the handicap that applied when it was
+posted — that is what stops old results shifting — so an index set afterwards does not reach back
+into it. Recalculating shows you every change before making it.</div>
+
+<h3>Things worth doing</h3>
+<table>
+<tr><th>What</th><th>Where</th><th>How often</th></tr>
+<tr><td>Back up</td><td><b>Admin</b>, Back up now, then save it somewhere</td><td>Monthly, and before anything risky</td></tr>
+<tr><td>Course search key</td><td><b>Admin</b>, Course lookup</td><td>Once</td></tr>
+<tr><td>Check the data</td><td>Add <b>/tidy.html</b> to the web address</td><td>If a number looks wrong</td></tr>
+<tr><td>Start another group</td><td>Tap the group name at the top</td><td>As needed</td></tr>
+</table>
+
+<h2><span class="num">8</span>When something looks wrong</h2>
+
+<table>
+<tr><th>What you see</th><th>What to do</th></tr>
+<tr><td>The old version after an update</td><td>Add <b>/reset.html</b> to the web address</td></tr>
+<tr><td>A red bar under the header</td><td>It names the problem and the fix. The app keeps working; only syncing is affected.</td></tr>
+<tr><td>"This screen couldn't be drawn"</td><td>Tap <b>Technical detail</b> and send that text to whoever maintains the app. It says exactly what went wrong.</td></tr>
+<tr><td>Status badge red, rounds waiting</td><td>You are offline. Rounds are safe and upload when signal returns.</td></tr>
+<tr><td>Somebody's name twice</td><td>Add <b>/tidy.html</b> to the web address. It reports duplicates and can clear unused ones.</td></tr>
+<tr><td>Golfers missing after a change</td><td>Add <b>/rebuild.html</b> to the web address. It puts everyone back with their rounds.</td></tr>
+<tr><td>Not sure which version is running</td><td>Foot of <b>Summary</b>, or add <b>/reset.html</b> to the address</td></tr>
+</table>
+
+<div class="note tip"><b>Nothing you can tap in the app deletes a golfer or their rounds.</b>
+Remove only takes somebody off a roster. Their record, rounds and handicap stay where they are.</div>
+
+<div class="check">
+<h3>Before you hand it to the group</h3>
+<ul>
+<li>The app opens and shows no red bar.</li>
+<li>Your courses and roster are in, under Manage.</li>
+<li>You have taken a backup and saved it somewhere you will find it.</li>
+<li>You have joined on a second device and it shows the same rounds.</li>
+<li>One friend has joined and can post a round — and cannot see Manage or Admin.</li>
+<li>Airplane mode: post a round, the badge goes red, turn it off, it uploads.</li>
+</ul>
+<p style="margin-bottom:0">Then send the invitations.</p>
+</div>
+
+</div>
 </body>
 </html>

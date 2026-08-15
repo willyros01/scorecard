@@ -220,7 +220,16 @@ service cloud.firestore {
     match /golfers/{golferId} {
       allow read: if signedIn();
       allow create, update: if signedIn();
-      allow delete: if false;
+
+      /* Permitted, but only ever from the tidy page, and only for somebody who
+       * has no rounds, no roster place and no account linked to them — the page
+       * checks all three and shows you the list before removing anything.
+       *
+       * The rules cannot verify "has no rounds" without a query, which rules
+       * cannot do. So this is deliberately a trusted operation guarded by the
+       * page rather than by the database: the alternative is leaving every test
+       * golfer in the database for ever, which the user rightly objected to. */
+      allow delete: if signedIn();
     }
 
     /* Name uniqueness. One document per name, so two people cannot both be
