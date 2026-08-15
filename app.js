@@ -1054,6 +1054,27 @@ function screenManage() {
       </div>` : ""}
       ${golfers.length ? `<div class="list">
         ${sortedGolfers().map((g) => {
+          /* The starting-index editor, shown in place of the row while open —
+             the same shape as the rename editor below it. This branch was
+             missing entirely, which is why tapping Index did nothing visible
+             even after the button itself was wired up. */
+          if (editingIndex === g.id) {
+            const current = g.manualIndex == null ? "" : g.manualIndex;
+            return `<div class="inline-form">
+              <p class="hint" style="margin:0 0 .6rem">
+                A starting handicap for <b>${esc(g.name)}</b>, who has not played three rounds with you yet.
+                Their own rounds take over as soon as they have three.
+              </p>
+              <input name="manual-index" class="inline-input" inputmode="decimal"
+                     value="${esc(current)}" placeholder="e.g. 14.2" autocomplete="off">
+              <div class="inline-actions">
+                <button class="btn compact" data-act="save-index">Save</button>
+                ${g.manualIndex != null ? `<button class="btn ghost compact" data-act="clear-index">Clear it</button>` : ""}
+                <button class="btn ghost compact" data-act="cancel-index">Cancel</button>
+              </div>
+            </div>`;
+          }
+
           if (editingGolfer === g.id) {
             return `<div class="inline-form">
               <input name="rename-golfer" class="inline-input" value="${esc(g.name)}" autocomplete="off">
