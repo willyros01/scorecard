@@ -856,8 +856,10 @@ export async function golferNamedInLink(golferId) {
  * guests. Both are enforced by a claim written alongside the membership: it
  * records which account accepted, so a forwarded link cannot be used by
  * somebody else. */
+const serverTimestampValue = () => fb.mod.store.serverTimestamp();
+
 export async function acceptNamedInvite({ associationId, code, golferId, role }) {
-  const { getDoc, serverTimestamp } = fb.mod.store;
+  const { getDoc } = fb.mod.store;
 
   const claimRef = ref("associations", associationId, "invites", golferId);
   let claim = null;
@@ -883,12 +885,22 @@ export async function acceptNamedInvite({ associationId, code, golferId, role })
   const group = await loadAssociation(associationId);
   const name = group ? group.name : "Group";
 
-  await commitTogether([
-    {
-      op: "set",
-      path: ["associations", associationId, "members", uid],
-      data: { ...member, joinedAt: { __serverTimestamp: true }, golferId },
-    },
+  /* TWO STEPS, and the order matters — the same rule that broke group
+     creation. The roster rule asks "is this account a member?", and inside a
+     single batch the answer is still no, because the membership is in that
+     same batch and Firestore evaluates every write against the state BEFORE
+     it. So the membership is written first and allowed to land, and only then
+     does everything that depends on it go together. */
+  const { setDoc } = fb.mod.store;
+
+  await setDoc(ref("associations", associationId, "members", uid), {
+    ...member,
+    golferId,
+    joinedAt: serverTimestampValue(),
+  });
+
+  try {
+    await commitTogether([
     {
       op: "set",
       path: ["associations", associationId, "invites", golferId],
@@ -906,7 +918,12 @@ export async function acceptNamedInvite({ associationId, code, golferId, role })
       path: ["associations", associationId, "roster", golferId],
       data: { golferId, addedAt: Date.now() },
     },
-  ], "accept invitation");
+    ], "accept invitation");
+  } catch (e) {
+    setError("Joining did not finish",
+      "Your membership was created, but the rest could not be written — usually because the rules in the console are older than this version. Tap the link again once they are published.");
+    throw e;
+  }
 
   assocId = associationId;
   rememberAssociation(associationId);

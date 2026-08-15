@@ -1526,9 +1526,13 @@ function accountSection() {
         `}
 
         <div class="inline-actions stacked">
-          <button class="btn ghost" data-act="sign-out">Sign out of this device</button>
+          <button class="btn ${confirmSignOut ? "danger" : "ghost"}" data-act="sign-out">
+            ${confirmSignOut ? "Tap again to sign out" : "Sign out of this device"}
+          </button>
         </div>
-        <p class="hint">Signing out deletes nothing. It returns this device to the first screen.</p>
+        <p class="hint">${confirmSignOut
+          ? "Nothing is deleted — this device simply returns to the first screen. Wait a few seconds to cancel."
+          : "Signing out deletes nothing. It returns this device to the first screen."}</p>
       </div>
     </section>`;
   }
@@ -2246,10 +2250,21 @@ view.addEventListener("click", async (e) => {
         flashMsg(role === "admin"
           ? "You're in as an admin. Set a password under Admin so this works on your other devices."
           : "You're in. Post your round on the Enter tab.");
-      } catch {
+      } catch (err) {
         joining = false;
         idleAll();
-        flashMsg("Couldn't join — the message above says why.");
+        /* Say what actually went wrong. Swallowing it left the screen exactly
+           as it was, which reads as the button doing nothing at all. */
+        const code = String((err && (err.code || err.message)) || "");
+        openProblem({
+          title: "Could not join the group",
+          detail: code.includes("permission")
+            ? "Firebase refused the write, usually because the rules in the console are older than this version."
+            : code || "No detail was given.",
+          advice: code.includes("permission")
+            ? "Ask whoever runs the group to publish the latest firestore.rules, then tap the link again. Nothing was changed."
+            : "Nothing was changed. Try the link again, or send this report.",
+        });
       }
       return render();
     }
@@ -2418,14 +2433,33 @@ view.addEventListener("click", async (e) => {
     }
 
     case "sign-out": {
-      if (!confirmSignOut) { confirmSignOut = true; flashMsg("Tap Sign out again to confirm. Nothing is deleted."); return render(); }
+      /* Confirmed in the button itself rather than by a message underneath it.
+         A small line of text is easy to miss, so the first tap looked like
+         nothing happening and the second like a button that needed hitting
+         twice. Now the button says what the next tap will do. */
+      if (!confirmSignOut) {
+        confirmSignOut = true;
+        setTimeout(() => {
+          if (confirmSignOut) { confirmSignOut = false; render(); }
+        }, 6000);
+        return render();
+      }
       confirmSignOut = false;
-      busy("Signing out");
-      busy("Signing out");
+
+      /* render() FIRST, then busy(). Drawing the screen re-reads the waiting
+         card's state, so raising it beforehand was immediately undone — which
+         is why no spinner appeared. */
       render();
+      busy("Signing out");
       try { await db.signOutEverywhere(); }
-      catch { idle(); flashMsg("Couldn't sign out. Try again."); return render(); }
-      return;   /* signOutEverywhere reloads the page; the spinner goes with it */
+      catch {
+        idleAll();
+        flashMsg("Couldn't sign out. Try again.");
+        return render();
+      }
+      /* No idle() on success: signOutEverywhere reloads the page, and the card
+         should stay up until it does. */
+      return;
     }
     case "delete-group": confirmDeleteGroup = true; return render();
     case "cancel-delete-group": confirmDeleteGroup = false; return render();
@@ -2673,11 +2707,13 @@ sheetEl.addEventListener("click", async (e) => {
          what somebody just asked for. */
       bootMessage = "Signing out…";
       ready = false;
-      busy("Signing out");
+      /* render() before busy(), for the reason given in the sign-out case:
+         drawing the screen re-reads the waiting card's state and would undo it. */
       render();
+      busy("Signing out");
       try { await db.signOutEverywhere(); }
       catch { idleAll(); flashMsg("Couldn't sign out. Try again."); render(); }
-      return;   /* signOutEverywhere reloads the page, taking the spinner with it */
+      return;   /* signOutEverywhere reloads the page, taking the card with it */
     }
     return;
   }
