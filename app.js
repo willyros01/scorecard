@@ -898,6 +898,19 @@ function gameDetail(gameId) {
       : "Gross scores — somebody has no handicap yet, so the standing cannot use net."}${standings.days.length < model.gameDays(game) ? " More days still to play." : ""}</p>
   </section>` : ""}
 
+  ${db.canManage() && board.some((r) => r.net == null || r.estimated) ? `<section class="panel">
+    <div class="card padded">
+      <div class="name">${board.filter((r) => r.net == null).length
+        ? `${board.filter((r) => r.net == null).length} player${board.filter((r) => r.net == null).length === 1 ? " has" : "s have"} no net score`
+        : "Some net scores are worked out, not frozen"}</div>
+      <p class="hint">A round records the handicap that applied when it was posted. Anybody whose index was set afterwards kept nothing, so their net is blank. Recalculating re-freezes every round in this game from each golfer's index today.</p>
+      <div class="inline-actions stacked">
+        <button class="btn" data-act="recalc-game">Recalculate this game's handicaps</button>
+      </div>
+      <p class="hint">Only this game. Nothing else is touched.</p>
+    </div>
+  </section>` : ""}
+
   ${board.length ? `<section class="panel">
     <div class="panel-head"><h2 class="panel-title">${multiDay ? "Every round" : "Leaderboard"}</h2><span class="panel-count">${board.length}</span></div>
     <div class="card">
@@ -2262,6 +2275,42 @@ view.addEventListener("click", async (e) => {
     case "save-game": return saveGame();
     case "close-game": openGame = null; editingGame = false; return render();
     case "edit-game": editingGame = !editingGame; return render();
+    case "recalc-game": {
+      busy("Working out the handicaps");
+      let preview;
+      try {
+        preview = await db.recalculateGameHandicaps(openGame, { preview: true });
+      } catch {
+        idleAll();
+        flashMsg("Couldn't read the rounds — the message above says why.");
+        return render();
+      }
+      idleAll();
+
+      if (!preview.changes.length) {
+        flashMsg("Nothing to change — every round already has the right handicap.");
+        return render();
+      }
+
+      /* Shown before anything is written, the same as every other correction. */
+      sheetEl.hidden = false;
+      sheetEl.innerHTML = `<div class="sheet-body">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <h2>Recalculate ${preview.changes.length} round${preview.changes.length === 1 ? "" : "s"}</h2>
+          <button class="rowbtn" data-close="1">Close</button></div>
+        <p class="hint">These are the changes. Nothing is written until you confirm.</p>
+        <div class="card list">
+          ${preview.changes.map((c) => `<div class="list-row">
+            <span class="grow"><span class="name">${esc(c.name)}</span><br>
+              <span class="sub">${esc(c.date || "")} · ${c.was == null ? "no handicap" : c.was} → ${c.now} (index ${c.index.toFixed(1)})</span></span>
+          </div>`).join("")}
+        </div>
+        <div class="inline-actions stacked">
+          <button class="btn" data-recalc="go">Apply these changes</button>
+        </div>
+      </div>`;
+      return;
+    }
     case "save-game-edit": {
       const name = (view.querySelector('[name="edit-game-name"]') || {}).value || "";
       const date = (view.querySelector('[name="edit-game-date"]') || {}).value || "";
@@ -2396,6 +2445,19 @@ sheetEl.addEventListener("click", async (e) => {
      belong to, and does not depend on the group still existing. That is why it
      is here — a stale entry kept coming back after every sign-in, and nothing
      that tried to be clever about it ever worked. */
+  const recalc = e.target.closest("[data-recalc]");
+  if (recalc) {
+    sheetEl.hidden = true;
+    busy("Re-freezing the handicaps");
+    try {
+      const result = await db.recalculateGameHandicaps(openGame);
+      flashMsg(`${result.applied} round${result.applied === 1 ? "" : "s"} updated. The net scores are right now.`);
+    } catch { flashMsg("Couldn't apply them — the message above says why."); }
+    finally { idleAll(); }
+    render();
+    return;
+  }
+
   const inviting = e.target.closest("[data-invite]");
   if (inviting) {
     const chosen = sheetEl.querySelector('[name="invite-role"]:checked');
@@ -2974,17 +3036,39 @@ async function addGolfer() {
   const input = view.querySelector('[name="new-golfer"]');
   const name = (input ? input.value : "").trim();
   if (!name) { flashMsg("Type a name first"); return; }
-  if (golfers.some((g) => g.name.toLowerCase() === name.toLowerCase())) { flashMsg(`${name} is already in this group`); return; }
-
-  /* The veil goes up FIRST and blocks the screen, so a second tap is
-     impossible while this is in flight. Four copies of one golfer were created
-     because this took several seconds and showed nothing. */
+  /* The veil goes up FIRST — before any check — so every outcome looks the
+     same and none of them can be tapped through. Returning early on a
+     duplicate used to skip the veil entirely, so that case alone showed
+     nothing at all and the message flashed past. */
   busy(`Adding ${name}`);
+
+  const already = golfers.find((g) => g.name.toLowerCase() === name.toLowerCase());
+  if (already) {
+    idleAll();
+    openProblem({
+      title: `${already.name} is already on this roster`,
+      detail: "Nothing was added. One person should appear once, or their rounds and handicap end up split between two records.",
+      advice: "If you meant somebody different, give them a middle initial or surname so the two names are distinct.",
+    });
+    if (input) input.value = "";
+    return render();
+  }
   try {
     const { golfer, reused } = await db.addGolfer({ name });
-    flashMsg(reused
-      ? `${golfer.name} added — same person as in your other group, so their handicap comes with them.`
-      : `${golfer.name} added`);
+    idleAll();
+    if (reused) {
+      /* Worth a proper message rather than a flash: it means the handicap and
+         rounds came with them, which is exactly what somebody adding a name by
+         hand is trying to avoid getting wrong. */
+      openProblem({
+        title: `${golfer.name} was already known`,
+        detail: `They have been added to this roster as the same person, so their rounds and handicap${golfer.handicapIndex != null ? ` (index ${Number(golfer.handicapIndex).toFixed(1)})` : ""} come with them. No second record was created.`,
+        advice: "",
+      });
+    } else {
+      flashMsg(`${golfer.name} added`);
+    }
+    if (input) input.value = "";
   } catch (e) {
     const code = String((e && (e.code || e.message)) || "");
     flashMsg(code.includes("already")

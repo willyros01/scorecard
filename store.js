@@ -1427,6 +1427,69 @@ export async function updateGameDetails(gameId, { name, date, endDate, courseId 
   return clean;
 }
 
+/* Re-freezes the course handicap on every round in ONE game.
+ *
+ * A round stores the handicap that applied when it was posted, which is what
+ * stops old results shifting. But an index set AFTERWARDS — a starting figure
+ * typed in once a tournament is already under way — never reaches back into
+ * rounds already posted, so their net scores stay blank or wrong.
+ *
+ * Deliberately scoped to a single game. A blanket sweep would rewrite results
+ * that have already been shared, which is the opposite of what freezing is for.
+ */
+export async function recalculateGameHandicaps(gameId, { preview = false } = {}) {
+  const { getDocs, query, where, getDoc } = fb.mod.store;
+
+  const snap = await getDocs(
+    query(col("associations", assocId, "rounds"), where("gameId", "==", gameId))
+  );
+
+  const changes = [];
+  const seen = new Map();
+
+  for (const d of snap.docs) {
+    const r = d.data();
+    if (!r || !r.golferId) continue;
+    if (!Number.isFinite(+r.slope) || !Number.isFinite(+r.rating)) continue;
+
+    let golfer = seen.get(r.golferId);
+    if (golfer === undefined) {
+      try {
+        const found = await getDoc(ref("golfers", r.golferId));
+        golfer = found.exists() ? found.data() : null;
+      } catch { golfer = null; }
+      seen.set(r.golferId, golfer);
+    }
+    if (!golfer) continue;
+
+    const { index } = model.effectiveIndex(golfer);
+    if (index == null) continue;
+
+    const right = model.courseHandicap(index, +r.slope, +r.rating, +r.par);
+    if (!Number.isFinite(right)) continue;
+    if (r.courseHandicap === right) continue;
+
+    changes.push({
+      roundId: d.id,
+      name: golfer.name || "Unknown",
+      date: r.date,
+      was: r.courseHandicap,
+      now: right,
+      index,
+    });
+  }
+
+  if (preview || !changes.length) return { changes, applied: 0 };
+
+  await commitTogether(changes.map((c) => ({
+    op: "update",
+    path: ["associations", assocId, "rounds", c.roundId],
+    data: { courseHandicap: c.now, indexAtEntry: c.index },
+  })), "recalculate game handicaps");
+
+  return { changes, applied: changes.length };
+}
+
 /* A starting handicap for somebody with no rounds here yet. Passing null
    clears it. Real rounds always take precedence once there are three. */
 export function setManualIndex(golferId, index) {
