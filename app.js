@@ -1406,6 +1406,7 @@ async function saveBackup() {
       await writable.close();
       sheetEl.hidden = true;
       flashMsg("Saved where you chose.");
+      render();
       return;
     } catch (e) {
       if (e && e.name === "AbortError") return;   /* they changed their mind */
@@ -1418,6 +1419,7 @@ async function saveBackup() {
       await navigator.share({ files: [file], title: sheetEl.dataset.title || "Scorecard backup" });
       sheetEl.hidden = true;
       flashMsg("Choose Save to Files, then pick iCloud Drive or any folder you like.");
+      render();
       return;
     }
   } catch (e) {
@@ -2199,10 +2201,10 @@ view.addEventListener("click", async (e) => {
       const address = ((view.querySelector('[name="email"]') || {}).value || authForm.email).trim();
       if (!address) { flashMsg("Type your email address first"); return; }
       busy("Sending the reset link");
-      try { await db.sendPasswordReset(address); flashMsg(`Reset link sent to ${address}`); }
+      try { await db.sendPasswordReset(address); flashMsg(`Reset link sent to ${address}. Open it, choose a new password, then sign in with it.`); }
       catch { flashMsg("Couldn't send the reset link. Check the email address."); }
       finally { idleAll(); }
-      return;
+      return render();
     }
     case "accept-invite": return acceptInvite();
     case "not-me": {
@@ -2454,8 +2456,8 @@ view.addEventListener("click", async (e) => {
       const name = (field ? field.value : "").trim();
       if (!name) { flashMsg("Give the group a name"); return; }
       db.updateAssociation({ name });
-      flashMsg("Renamed");
-      return;
+      flashMsg(`Renamed to ${name}.`);
+      return render();
     }
     case "backup": return openBackupSheet();
     case "restore": return askForBackupFile();
@@ -2512,7 +2514,17 @@ sheetEl.addEventListener("click", async (e) => {
     try {
       if (role === "admin") await db.ensureAdminCode();
       const link = db.inviteLink(role, golferId);
-      if (!link) { flashMsg("Could not build the invitation link."); return; }
+      if (!link) {
+        /* This used to flashMsg and return without redrawing, so the button
+           looked completely dead. Say it properly instead. */
+        idleAll();
+        openProblem({
+          title: "The invitation link could not be built",
+          detail: "The group's details have not finished loading yet.",
+          advice: "Wait a moment and try again. If it keeps happening, close the app and reopen it.",
+        });
+        return;
+      }
 
       const guide = `${location.origin}${location.pathname}quick-start.html`;
       const text = [
@@ -2844,7 +2856,7 @@ sheetEl.addEventListener("click", async (e) => {
 /* Joins or creates, whichever fits, then lands on Enter. */
 async function begin() {
   const name = ((view.querySelector('[name="join-name"]') || {}).value || joinForm.name).trim();
-  if (!name) { flashMsg("Type the name you play under"); return; }
+  if (!name) { flashMsg("Type the name you play under"); return render(); }
   joinForm.name = name;
   const invite = db.readJoinLink();
   if (invite) return acceptInvite();
@@ -3273,7 +3285,11 @@ async function settleGroupInner(preferred) {
     if (await db.amMemberOf(group.id)) {
       await start(group.id);
       if (preferred && preferred !== group.id) {
-        flashMsg(`Switched to ${group.name}. The group this device was showing belonged to an older sign-in on it.`);
+        /* settleGroup() renders in its finally block, so this message does
+         reach the screen — the note is here so nobody removes that render
+         without noticing what depends on it. */
+      flashMsg(`Switched to ${group.name}. The group this device was showing belonged to an older sign-in on it.`);
+      render();
       }
       return;
     }

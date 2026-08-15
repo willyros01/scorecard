@@ -718,6 +718,14 @@ export const rememberAssociation = (id) => { try { localStorage.setItem(ASSOC_KE
 export const recallAssociation = () => { try { return localStorage.getItem(ASSOC_KEY) || ""; } catch { return ""; } };
 
 let myMember = null;
+
+/* The group document as last read, so an invitation link can be built without
+   a round trip. Filled by loadAssociation and kept current by
+   watchAssociation. Declared up here with the rest of the module state — it
+   was previously below its first use, which is the kind of ordering fault that
+   silently breaks a whole feature. */
+let cachedAssociation = null;
+const currentAssociationDoc = () => cachedAssociation;
 export const myRole = () => (myMember ? myMember.role : null);
 export const canManage = () => ["owner", "admin"].includes(myRole());
 export const isOwner = () => myRole() === "owner";
@@ -745,7 +753,12 @@ export async function loadAssociation(id) {
   const { getDoc } = fb.mod.store;
   try {
     const snap = await getDoc(ref("associations", id));
-    return snap.exists() ? snap.data() : null;
+    if (!snap.exists()) return null;
+    const group = { ...snap.data(), id: snap.id };
+    /* Filled here as well as in the watcher, so an invitation can be built
+       before any snapshot has arrived. */
+    if (id === assocId) cachedAssociation = group;
+    return group;
   } catch { return null; }
 }
 
@@ -771,11 +784,6 @@ export function setMemberRole(memberUid, role) {
 
 /* An invitation is a link, so joining is one tap from a message rather than
    a code somebody has to read out and type. */
-/* The group document as last read, so invitation links can be built without a
-   round trip. Kept current by watchAssociation below. */
-let cachedAssociation = null;
-const currentAssociationDoc = () => cachedAssociation;
-
 export const joinLink = (association) =>
   `${location.origin}${location.pathname}?join=${association.id}.${association.joinCode}`;
 
@@ -1036,7 +1044,16 @@ export async function importLegacyV1({ v1, assocName, displayName }) {
 export function watchAssociation(callback) {
   const { onSnapshot } = fb.mod.store;
   const stop = onSnapshot(ref("associations", assocId),
-    (snap) => { if (snap.exists()) callback(snap.data()); }, (e) => report(e));
+    (snap) => {
+      if (!snap.exists()) return;
+      /* Keep the cached copy current. inviteLink() and ensureAdminCode() read
+         it rather than making a round trip — and while nothing filled it,
+         inviteLink returned an empty string and the invitation button did
+         nothing at all. */
+      cachedAssociation = { ...snap.data(), id: snap.id };
+      callback(cachedAssociation);
+    },
+    (e) => report(e));
   unsubscribers.push(stop);
   return stop;
 }
