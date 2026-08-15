@@ -439,6 +439,12 @@ export async function addGolfer({ name }) {
   const key = model.nameKey(name);
   if (!key) throw new Error("A golfer needs a name.");
 
+  /* The name index is checked BEFORE anything is written.
+   *
+   * It always existed, but nothing consulted it at the moment of creation — so
+   * repeated taps each created another person with the same name and a split
+   * handicap. Four copies of one golfer came from exactly this. */
+
   const { getDoc, setDoc } = fb.mod.store;
   let golfer = null;
   let reused = false;
@@ -458,6 +464,7 @@ export async function addGolfer({ name }) {
      — or a name claimed by a golfer who does not exist. */
   const writes = [];
   if (!golfer) {
+    /* Nothing matched, so this really is somebody new. */
     golfer = model.buildGolfer({ name });
     writes.push({ op: "set", path: ["golfers", golfer.id], data: golfer });
     writes.push({ op: "set", path: ["golferNames", key], data: { golferId: golfer.id, name: golfer.name } });
@@ -777,12 +784,17 @@ export const joinLink = (association) =>
  * The link carries whichever secret matches the role, so the rules can VERIFY
  * the role rather than trust a label. An admin link holds a different code
  * entirely, which is why a guest cannot edit their own link into an admin one. */
-export function inviteLink(role = "member") {
+export function inviteLink(role = "member", golferId = null) {
   const group = currentAssociationDoc();
   if (!group) return "";
   const code = role === "admin" ? group.adminCode : group.joinCode;
   if (!code) return "";
-  return `${location.origin}${location.pathname}?join=${group.id}.${code}`;
+  /* A named invitation carries the golfer, so the person joining never types
+     their name and cannot misspell it into a second record with a split
+     handicap. It also links them to their EXISTING roster entry, rounds and
+     index included. */
+  const named = golferId ? `.${golferId}` : "";
+  return `${location.origin}${location.pathname}?join=${group.id}.${code}${named}`;
 }
 
 /* Groups created before admin invitations existed have no admin code. One is
@@ -805,10 +817,94 @@ export function readJoinLink() {
   try {
     const value = new URLSearchParams(location.search).get("join");
     if (!value) return null;
-    const dot = value.lastIndexOf(".");
-    if (dot < 1) return null;
-    return { associationId: value.slice(0, dot), code: value.slice(dot + 1) };
+
+    /* group.code            — an open invitation, they type their name
+       group.code.golferId   — a named one, for a specific person on the roster */
+    const parts = value.split(".");
+    if (parts.length < 2) return null;
+    return {
+      associationId: parts[0],
+      code: parts[1],
+      golferId: parts.length > 2 ? parts.slice(2).join(".") : null,
+    };
   } catch { return null; }
+}
+
+/* The golfer a named invitation points at, read straight from the database so
+   the screen shows their real name rather than one carried in the link — a URL
+   can be edited, a document cannot. */
+export async function golferNamedInLink(golferId) {
+  if (!fb || !golferId) return null;
+  try {
+    const { getDoc } = fb.mod.store;
+    const snap = await getDoc(ref("golfers", golferId));
+    return snap.exists() ? { ...snap.data(), id: snap.id } : null;
+  } catch { return null; }
+}
+
+/* Accepting a named invitation.
+ *
+ * The link is single use for admins and locked to the first account for
+ * guests. Both are enforced by a claim written alongside the membership: it
+ * records which account accepted, so a forwarded link cannot be used by
+ * somebody else. */
+export async function acceptNamedInvite({ associationId, code, golferId, role }) {
+  const { getDoc, serverTimestamp } = fb.mod.store;
+
+  const claimRef = ref("associations", associationId, "invites", golferId);
+  let claim = null;
+  try {
+    const snap = await getDoc(claimRef);
+    if (snap.exists()) claim = snap.data();
+  } catch { /* unreadable; the rules decide below */ }
+
+  if (claim && claim.acceptedBy && claim.acceptedBy !== uid) {
+    return {
+      ok: false,
+      reason: role === "admin" ? "USED" : "TAKEN",
+    };
+  }
+
+  const member = model.buildMember({
+    uid,
+    displayName: (await golferNamedInLink(golferId) || {}).name || "",
+    role: role === "admin" ? "admin" : "member",
+    joinCode: code,
+  });
+
+  const group = await loadAssociation(associationId);
+  const name = group ? group.name : "Group";
+
+  await commitTogether([
+    {
+      op: "set",
+      path: ["associations", associationId, "members", uid],
+      data: { ...member, joinedAt: { __serverTimestamp: true }, golferId },
+    },
+    {
+      op: "set",
+      path: ["associations", associationId, "invites", golferId],
+      data: { acceptedBy: uid, role, at: Date.now() },
+    },
+    {
+      op: "set",
+      path: ["userGroups", uid, "groups", associationId],
+      data: { assocId: associationId, name, at: Date.now() },
+    },
+    /* Tie the account to the golfer they were invited as. */
+    { op: "update", path: ["golfers", golferId], data: { linkedUid: uid } },
+    {
+      op: "set",
+      path: ["associations", associationId, "roster", golferId],
+      data: { golferId, addedAt: Date.now() },
+    },
+  ], "accept invitation");
+
+  assocId = associationId;
+  rememberAssociation(associationId);
+  rememberGroup(associationId, name);
+  clearError();
+  return { ok: true, role };
 }
 
 export const clearJoinLink = () => {
@@ -1309,6 +1405,26 @@ export function deletedGroupBackups() {
     }
   } catch {}
   return found.sort((a, b) => String(b.deletedAt).localeCompare(String(a.deletedAt)));
+}
+
+/* Editing a game after it exists — its name, its dates, its course.
+ *
+ * Widening the range only makes more rounds eligible to be added; it never
+ * pulls any in by itself, and never removes one already in the game. Narrowing
+ * it likewise leaves existing rounds alone, so a date change cannot silently
+ * drop somebody's score out of a tournament. */
+export async function updateGameDetails(gameId, { name, date, endDate, courseId }) {
+  const clean = {
+    name: String(name || "").trim(),
+    date,
+    endDate: endDate && endDate > date ? endDate : null,
+  };
+  if (courseId) clean.courseId = courseId;
+
+  await commitTogether([
+    { op: "update", path: ["associations", assocId, "games", gameId], data: clean },
+  ], "update game");
+  return clean;
 }
 
 /* A starting handicap for somebody with no rounds here yet. Passing null

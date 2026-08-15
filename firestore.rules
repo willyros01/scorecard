@@ -124,6 +124,35 @@ service cloud.firestore {
           || (signedIn() && association(assocId).ownerUid == request.auth.uid);
       }
 
+      /* ---------------- invitation claims ---------------- */
+
+      /* One document per invited golfer, recording which account accepted.
+       *
+       * This is what makes a named invitation safe to forward by accident: the
+       * claim is written in the same batch as the membership, so whoever
+       * accepts first owns it. A guest link stays usable by that same account
+       * on another device; an admin link is spent.
+       *
+       * Readable by anyone signed in, because somebody holding a link must be
+       * able to discover it is already taken before they try. */
+      match /invites/{golferId} {
+        allow read: if signedIn();
+
+        /* Create only if nobody has claimed it, and only for yourself. */
+        allow create: if signedIn()
+          && request.resource.data.acceptedBy == request.auth.uid;
+
+        /* Update only by the account that already holds it — this is what lets
+           a guest re-use their own link on a second device, and what stops
+           anybody else using it at all. */
+        allow update: if signedIn()
+          && resource.data.acceptedBy == request.auth.uid
+          && request.resource.data.acceptedBy == request.auth.uid
+          && request.resource.data.role != 'admin';
+
+        allow delete: if isOwner(assocId);
+      }
+
       /* ---------------- roster: which golfers play in this group ---------------- */
 
       /* Just a list of ids. The golfers themselves live at the top level,

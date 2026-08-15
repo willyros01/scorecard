@@ -64,7 +64,13 @@
     </div>
   </header>
 
-  <div id="busy" class="busy" role="status" hidden></div>
+  <div id="busy" class="busy-veil" role="status" aria-live="polite" hidden>
+    <div class="busy-card">
+      <div class="busy-spinner"></div>
+      <p class="busy-what" id="busyWhat">Working</p>
+      <p class="busy-wait">This can take a moment</p>
+    </div>
+  </div>
   <div id="alert" class="alert" role="alert" hidden></div>
 
   <main id="view" aria-live="polite"><div class="boot">Opening your scorecard…</div></main>

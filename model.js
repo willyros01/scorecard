@@ -279,6 +279,64 @@ export const gameCovers = (game, date) => {
   return date >= from && date <= (game.endDate || from);
 };
 
+/* How many days a game covers, inclusive. */
+export function gameDays(game) {
+  if (!game || !game.date) return 0;
+  const to = game.endDate || game.date;
+  const from = Date.parse(`${game.date}T00:00:00Z`);
+  const until = Date.parse(`${to}T00:00:00Z`);
+  if (!Number.isFinite(from) || !Number.isFinite(until)) return 1;
+  return Math.max(1, Math.round((until - from) / 86400000) + 1);
+}
+
+/* A multi-day game's standing: every player's rounds day by day, plus their
+   running totals.
+ *
+ * A tournament is not just a bag of rounds — you want to see who is leading
+ * after two days, and what each day cost them. Players are ranked on total net
+ * where everyone has one, otherwise on total gross. */
+export function gameStandings(rounds, golfers, game) {
+  const days = [...new Set((rounds || [])
+    .map((r) => r && r.date)
+    .filter((d) => typeof d === "string"))].sort();
+
+  const board = gameLeaderboard(rounds, golfers);
+  const byRound = new Map(board.map((row) => [row.roundId, row]));
+
+  const players = new Map();
+  for (const r of rounds || []) {
+    if (!r || !r.golferId) continue;
+    if (!players.has(r.golferId)) {
+      players.set(r.golferId, {
+        golferId: r.golferId,
+        name: (golfers.find((g) => g.id === r.golferId) || {}).name || "Unknown",
+        byDay: {}, totalGross: 0, totalNet: 0, netKnown: true, played: 0,
+      });
+    }
+    const p = players.get(r.golferId);
+    const row = byRound.get(r.id) || {};
+    p.byDay[r.date] = { gross: r.gross, net: row.net };
+    p.played++;
+    if (Number.isFinite(+r.gross)) p.totalGross += +r.gross;
+    if (row.net == null) p.netKnown = false;
+    else p.totalNet += row.net;
+  }
+
+  const list = [...players.values()];
+  const everyoneHasNet = list.length > 0 && list.every((p) => p.netKnown);
+  list.sort((a, b) => everyoneHasNet ? a.totalNet - b.totalNet : a.totalGross - b.totalGross);
+
+  let place = 0, seen = 0, previous = null;
+  for (const p of list) {
+    seen++;
+    const key = everyoneHasNet ? p.totalNet : p.totalGross;
+    if (key !== previous) { place = seen; previous = key; }
+    p.place = place;
+  }
+
+  return { days, players: list, rankedOnNet: everyoneHasNet };
+}
+
 export const gameSpanLabel = (game) => {
   if (!game || !game.date) return "";
   return !game.endDate || game.endDate === game.date

@@ -40,6 +40,19 @@ let openGame = null;
 let openCourse = null;
 let editingGolfer = null;
 let editingIndex = null;
+let editingGame = false;
+let invitedGolfer = null;
+let invitedGroupName = "";
+
+/* Kept beside the handlers so adding a button and forgetting the selector
+   cannot happen silently — a test compares this list against the markup. */
+const CLICKABLE = [
+  "data-act", "data-tee", "data-go", "data-edit", "data-del", "data-confirm-del",
+  "data-unfilter", "data-drill", "data-golfer-index", "data-del-golfer", "data-rename",
+  "data-set-index", "data-course", "data-pick", "data-rm-tee", "data-game", "data-role",
+  "data-invite-golfer",
+  "data-drop-round", "data-goto-group", "data-forget-group",
+].map((name) => `[${name}]`).join(",");
 let courseDraft = null;
 let gameDraft = null;
 let finder = { q: "", results: [], busy: false, msg: "" };
@@ -136,6 +149,33 @@ function screenJoin() {
   const invite = db.readJoinLink();
 
   if (invite) {
+    /* A named invitation greets them by name and needs one tap. The name is
+       read from the database, not from the link — a URL can be edited. */
+    if (invite.golferId && invitedGolfer) {
+      return `<div class="stack">
+        ${flashBar()}
+        <div class="card padded">
+          <h2 class="panel-title">${esc(invitedGroupName || "You have been invited")}</h2>
+          <p class="hint">You have been invited to keep your handicap with this group.</p>
+
+          <div class="invited-as">
+            <span class="sub">Joining as</span>
+            <span class="name big">${esc(invitedGolfer.name)}</span>
+            ${invitedGolfer.handicapIndex != null
+              ? `<span class="sub">index ${Number(invitedGolfer.handicapIndex).toFixed(1)}</span>`
+              : `<span class="sub">no handicap yet</span>`}
+          </div>
+
+          <div class="inline-actions stacked">
+            <button class="btn" data-act="accept-named" ${joining ? "disabled" : ""}>${joining ? "Joining…" : "Yes, that's me — join"}</button>
+          </div>
+          <p class="hint">Nothing to type. Your rounds and handicap come with you.</p>
+          <p class="hint">Not you? <button class="linkbtn" data-act="not-me">This is somebody else's invitation</button></p>
+        </div>
+        ${versionBlock()}
+      </div>`;
+    }
+
     return `<div class="stack">
       ${flashBar()}
       <div class="card padded">
@@ -255,7 +295,7 @@ async function importV1() {
   if (!name) { flashMsg("Type the name you play under"); return; }
 
   importing = true;
-  flash = "Importing. This can take a moment — do not close the app.";
+  busy("Importing your version 1 rounds");
   render();
   try {
     const result = await db.importLegacyV1({ v1: legacy.v1, assocName: groupName, displayName: name });
@@ -278,6 +318,10 @@ async function importV1() {
     flashMsg(`The import did not finish. ${cause}`);
     setTimeout(() => { flash = `Nothing was lost — your version 1 scorecard is untouched and version 1 still opens it.`; render(); }, 3400);
     render();
+  } finally {
+    /* Without this the veil stayed up for ever on both paths — success and
+       failure — leaving the app apparently frozen behind it. */
+    idleAll();
   }
 }
 
@@ -729,7 +773,7 @@ function screenGames() {
         return `<button class="list-row" data-game="${g.id}">
           <span class="grow">
             <span class="name">${esc(g.name || courseName(g.courseId))}</span><br>
-            <span class="sub">${g.date} · ${played.length} player${played.length === 1 ? "" : "s"}</span>
+            <span class="sub">${esc(model.gameSpanLabel(g))} · ${played.length} player${played.length === 1 ? "" : "s"}${g.endDate && g.endDate !== g.date ? ` · ${model.gameDays(g)} days` : ""}</span>
           </span>
           <span class="chev">›</span>
         </button>`;
@@ -768,6 +812,8 @@ function gameDetail(gameId) {
   if (!game) { openGame = null; return screenGames(); }
 
   const played = rounds.filter((r) => r.gameId === gameId);
+  const multiDay = !!(game.endDate && game.endDate !== game.date);
+  const standings = multiDay ? model.gameStandings(played, allGolfers, game) : { days: [], players: [] };
   /* allGolfers, not the roster. Somebody who played in this game but has since
      been taken off the roster must still appear in its result — a past
      leaderboard should not change because the roster did. */
@@ -787,8 +833,28 @@ function gameDetail(gameId) {
   </div>
 
   <section class="panel">
-    <h2 class="panel-title">${esc(game.name || courseName(game.courseId))}</h2>
+    <div class="panel-head">
+      <h2 class="panel-title">${esc(game.name || courseName(game.courseId))}</h2>
+      ${db.canManage() ? `<button class="linkbtn" data-act="edit-game">${editingGame ? "Cancel" : "Edit"}</button>` : ""}
+    </div>
     <div class="sub">${esc(model.gameSpanLabel(game))} · ${esc(courseName(game.courseId))}</div>
+
+    ${editingGame ? `<div class="card editor">
+      <label class="lbl">Name</label>
+      <input class="field" name="edit-game-name" value="${esc(game.name || "")}" placeholder="e.g. Pagong Cup">
+      <label class="lbl">First day</label>
+      <input class="field" type="date" name="edit-game-date" value="${esc(game.date || "")}">
+      <label class="lbl">Last day</label>
+      <input class="field" type="date" name="edit-game-end" value="${esc(game.endDate || "")}">
+      <p class="hint">Leave the last day empty for a one-day game. Widening the range lets more rounds be added; it never removes any already in the game.</p>
+      <label class="lbl">Course</label>
+      <select class="field" name="edit-game-course">
+        ${sortedCourses().map((c) => `<option value="${c.id}" ${c.id === game.courseId ? "selected" : ""}>${esc(c.name)}</option>`).join("")}
+      </select>
+      <div class="inline-actions stacked">
+        <button class="btn" data-act="save-game-edit">Save the changes</button>
+      </div>
+    </div>` : ""}
   </section>
 
   ${db.canManage() && candidates.length ? `<section class="panel">
@@ -807,15 +873,40 @@ function gameDetail(gameId) {
     </div>
   </section>` : ""}
 
+  ${multiDay && standings.players.length ? `<section class="panel">
+    <div class="panel-head"><h2 class="panel-title">Standing</h2>
+      <span class="panel-count">after ${standings.days.length} of ${model.gameDays(game)} day${model.gameDays(game) === 1 ? "" : "s"}</span></div>
+    <div class="card">
+      <div class="standings-head">
+        <span class="grow">Player</span>
+        ${standings.days.map((d) => `<span class="day">${esc(d.slice(5))}</span>`).join("")}
+        <span class="total">Total</span>
+      </div>
+      ${standings.players.map((p) => `<div class="standings-row">
+        <span class="grow"><span class="name">${p.place}. ${esc(p.name)}</span></span>
+        ${standings.days.map((d) => {
+          const played = p.byDay[d];
+          return `<span class="day">${played
+            ? (standings.rankedOnNet && played.net != null ? played.net : played.gross)
+            : "—"}</span>`;
+        }).join("")}
+        <span class="total">${standings.rankedOnNet ? p.totalNet : p.totalGross}</span>
+      </div>`).join("")}
+    </div>
+    <p class="hint">${standings.rankedOnNet
+      ? "Net scores, day by day, with the running total. Lowest total leads."
+      : "Gross scores — somebody has no handicap yet, so the standing cannot use net."}${standings.days.length < model.gameDays(game) ? " More days still to play." : ""}</p>
+  </section>` : ""}
+
   ${board.length ? `<section class="panel">
-    <div class="panel-head"><h2 class="panel-title">Leaderboard</h2><span class="panel-count">${board.length}</span></div>
+    <div class="panel-head"><h2 class="panel-title">${multiDay ? "Every round" : "Leaderboard"}</h2><span class="panel-count">${board.length}</span></div>
     <div class="card">
       <div class="list">
         ${[...board]
           .sort((a, b) => (a.net != null && b.net != null) ? a.netPlace - b.netPlace : a.grossPlace - b.grossPlace)
           .map((r) => `<div class="list-row">
-            <span class="grow"><span class="name">${r.net != null ? `${r.netPlace}. ` : ""}${esc(r.name)}</span><br>
-              <span class="sub">gross ${r.gross}${r.net != null ? ` · net ${r.net}` : " · no handicap yet"}</span></span>
+            <span class="grow"><span class="name">${r.net != null && !multiDay ? `${r.netPlace}. ` : ""}${esc(r.name)}</span><br>
+              <span class="sub">${multiDay ? `${esc((played.find((x) => x.id === r.roundId) || {}).date || "")} · ` : ""}gross ${r.gross}${r.net != null ? ` · net ${r.net}` : " · no handicap yet"}</span></span>
             ${db.canManage() ? `<button class="rowbtn warn" data-drop-round="${esc(r.roundId)}">Remove</button>` : ""}
           </div>`).join("")}
       </div>
@@ -843,6 +934,28 @@ function gameShareText(gameId, withNet) {
     `${game.name || courseName(game.courseId)} — ${model.gameSpanLabel(game)}`,
     courseName(game.courseId),
   ];
+
+  /* A multi-day event is shared as a standing, not a pile of rounds — the
+     day-by-day columns and the running total are the whole point of it. */
+  const spans = !!(game.endDate && game.endDate !== game.date);
+  if (spans) {
+    const standing = model.gameStandings(rounds.filter((r) => r.gameId === gameId), allGolfers, game);
+    if (standing.players.length) {
+      const total = model.gameDays(game);
+      lines.push("", `Standing after ${standing.days.length} of ${total} day${total === 1 ? "" : "s"}${standing.rankedOnNet ? " (net)" : " (gross — somebody has no handicap yet)"}:`);
+      standing.players.forEach((p) => {
+        const perDay = standing.days
+          .map((d) => {
+            const r = p.byDay[d];
+            return r ? (standing.rankedOnNet && r.net != null ? r.net : r.gross) : "—";
+          })
+          .join(" + ");
+        lines.push(`${p.place}. ${p.name} ${standing.rankedOnNet ? p.totalNet : p.totalGross}  (${perDay})`);
+      });
+      lines.push("", "Posted with The Scorecard");
+      return lines.join("\n");
+    }
+  }
 
   if (includeNet) {
     const withScores = board.filter((r) => r.net != null).sort((a, b) => a.netPlace - b.netPlace);
@@ -954,7 +1067,12 @@ function screenManage() {
             <span class="grow"><span class="name">${esc(g.name)}</span><br>
               <span class="sub">${g.handicapIndex == null ? "no index yet" : `index ${(+g.handicapIndex).toFixed(1)}`} · ${g.roundCount || 0} round${g.roundCount === 1 ? "" : "s"}</span></span>
             <button class="rowbtn" data-rename="${g.id}">Rename</button>
-            <button class="rowbtn" data-set-index="${g.id}">Index</button>
+            ${g.linkedUid
+              ? `<button class="rowbtn" disabled title="Already using the app">Invited</button>`
+              : `<button class="rowbtn" data-invite-golfer="${g.id}">Invite</button>`}
+            ${indexSource(g) === "rounds"
+              ? `<button class="rowbtn" disabled title="Their index now comes from their own rounds">Index</button>`
+              : `<button class="rowbtn" data-set-index="${g.id}">Index</button>`}
             <button class="rowbtn warn" data-del-golfer="${g.id}">Remove</button>
           </div>`;
         }).join("")}
@@ -968,6 +1086,7 @@ function screenManage() {
       </div>
     </div>
     <p class="hint">Rename changes that person in every group. Remove takes them off this group's roster only — their rounds and handicap stay.</p>
+    <p class="hint"><b>Index</b> sets a starting handicap for somebody who has not played three rounds with you yet. It greys out once their own rounds take over.</p>
   </section>
 
   <section class="panel">
@@ -1505,14 +1624,13 @@ let busyStarted = 0;
 
 function paintBusy() {
   const bar = document.getElementById("busy");
+  const what = document.getElementById("busyWhat");
+  if (what && busyWhat) what.textContent = `${busyWhat}…`;
   if (!bar) return;
-  if (busyDepth > 0) {
-    bar.hidden = false;
-    bar.innerHTML = `<span class="spinner"></span> ${esc(busyWhat || "Working")}…`;
-  } else {
-    bar.hidden = true;
-    bar.innerHTML = "";
-  }
+  /* Only the text changes. The card's markup lives in index.html and is never
+     rewritten — rebuilding it would restart the spinner animation on every
+     call and throw away the element the screen reader is announcing. */
+  bar.hidden = busyDepth === 0;
 }
 
 function busy(what) {
@@ -1844,7 +1962,13 @@ view.addEventListener("click", async (e) => {
     return;
   }
 
-  const t = e.target.closest("[data-act],[data-tee],[data-go],[data-edit],[data-del],[data-confirm-del],[data-unfilter],[data-drill],[data-golfer-index],[data-del-golfer],[data-rename],[data-course],[data-pick],[data-rm-tee],[data-game],[data-role]");
+  /* Every clickable attribute must be listed here or the tap never arrives.
+   *
+   * This hand-maintained list is a trap: data-set-index was added to a button
+   * and given a handler, but omitted here, so the Index button did nothing at
+   * all. The test below (test/handlers.test.mjs) now checks that every
+   * data-* attribute used on a button in this file appears in this selector. */
+  const t = e.target.closest(CLICKABLE);
   if (!t) return;
   const d = t.dataset;
 
@@ -1867,6 +1991,32 @@ view.addEventListener("click", async (e) => {
     else if (!drill.month) drill.month = d.drill;
     else { filter = { golferId: d.drill, year: drill.year, month: drill.month, courseId: "" }; tab = "history"; }
     return render();
+  }
+  if (d.inviteGolfer) {
+    const golfer = golferById(d.inviteGolfer);
+    if (!golfer) return;
+    sheetEl.hidden = false;
+    sheetEl.innerHTML = `<div class="sheet-body">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <h2>Invite ${esc(golfer.name)}</h2><button class="rowbtn" data-close="1">Close</button></div>
+      <p class="hint">The link names them, so they tap it once and they are in — nothing to type, and no chance of a misspelled second record.</p>
+
+      <label class="lbl">They join as</label>
+      <label class="checkline">
+        <input type="radio" name="invite-role" value="member" checked>
+        <span><b>Guest</b> — posts their own rounds, sees results. No password.</span>
+      </label>
+      <label class="checkline">
+        <input type="radio" name="invite-role" value="admin">
+        <span><b>Admin</b> — also manages the roster and posts for anybody. Sets a password.</span>
+      </label>
+      <p class="hint">A guest link keeps working for that same person on another device. An admin link works once.</p>
+
+      <div class="inline-actions stacked">
+        <button class="btn" data-invite="send" data-golfer="${esc(golfer.id)}">Choose how to send it</button>
+      </div>
+    </div>`;
+    return;
   }
   if (d.setIndex) { editingIndex = d.setIndex; return render(); }
   if (d.rename) { editingGolfer = d.rename; return render(); }
@@ -1966,11 +2116,59 @@ view.addEventListener("click", async (e) => {
     case "reset-password": {
       const address = ((view.querySelector('[name="email"]') || {}).value || authForm.email).trim();
       if (!address) { flashMsg("Type your email address first"); return; }
+      busy("Sending the reset link");
       try { await db.sendPasswordReset(address); flashMsg(`Reset link sent to ${address}`); }
-      catch { flashMsg("Couldn't send the reset link."); }
+      catch { flashMsg("Couldn't send the reset link. Check the email address."); }
+      finally { idleAll(); }
       return;
     }
     case "accept-invite": return acceptInvite();
+    case "not-me": {
+      /* Fall back to typing a name, rather than joining as the wrong person. */
+      invitedGolfer = null;
+      flashMsg("Type the name you play under instead.");
+      return render();
+    }
+    case "accept-named": {
+      const link = db.readJoinLink();
+      if (!link || !link.golferId) return;
+      joining = true;
+      busy("Joining the group");
+      render();
+      try {
+        const role = await db.roleForCode(link.associationId, link.code);
+        const result = await db.acceptNamedInvite({
+          associationId: link.associationId, code: link.code,
+          golferId: link.golferId, role,
+        });
+        joining = false;
+        if (!result.ok) {
+          idleAll();
+          openProblem({
+            title: result.reason === "USED"
+              ? "This invitation has already been used"
+              : "This invitation belongs to somebody else",
+            detail: result.reason === "USED"
+              ? "An admin invitation works once only. Ask for a fresh one."
+              : "Somebody has already joined with this link. Ask whoever runs the group to send you your own.",
+            advice: "Nothing was changed.",
+          });
+          return render();
+        }
+        db.clearJoinLink();
+        await start(link.associationId);
+        tab = "enter";
+        idleAll();
+        flashMsg(role === "admin"
+          ? "You're in as an admin. Set a password under Admin so this works on your other devices."
+          : "You're in. Post your round on the Enter tab.");
+      } catch {
+        joining = false;
+        idleAll();
+        flashMsg("Couldn't join — the message above says why.");
+      }
+      return render();
+    }
     case "join-by-code": return joinByCode();
     case "skip-import": skipImport = true; return render();
     /* Named apart from the Admin tab's "show-code" on purpose: both lived in
@@ -2008,7 +2206,7 @@ view.addEventListener("click", async (e) => {
       const name = (field ? field.value : "").trim();
       if (!name) { flashMsg("Give the group a name"); return; }
       newGroupDraft = false;
-      flashMsg("Creating…");
+      busy(`Creating ${name}`);
       try {
         const me = members.find((m) => m.uid === db.status().uid);
         const box = view.querySelector('[name="new-owner-plays"]');
@@ -2018,7 +2216,9 @@ view.addEventListener("click", async (e) => {
         });
         await start(created.id);
         flashMsg(`${name} created. You are its owner.`);
-      } catch { flashMsg("Couldn't create it — the red bar above says why."); render(); }
+      } catch { flashMsg("Couldn't create it — the message above says why."); }
+      finally { idleAll(); }
+      render();
       return;
     }
     case "cancel-new-group": newGroupDraft = false; return render();
@@ -2039,7 +2239,27 @@ view.addEventListener("click", async (e) => {
     case "make-multiday": gameDraft.multiDay = true; return render();
     case "cancel-game": gameDraft = null; return render();
     case "save-game": return saveGame();
-    case "close-game": openGame = null; return render();
+    case "close-game": openGame = null; editingGame = false; return render();
+    case "edit-game": editingGame = !editingGame; return render();
+    case "save-game-edit": {
+      const name = (view.querySelector('[name="edit-game-name"]') || {}).value || "";
+      const date = (view.querySelector('[name="edit-game-date"]') || {}).value || "";
+      const end = (view.querySelector('[name="edit-game-end"]') || {}).value || "";
+      const courseId = (view.querySelector('[name="edit-game-course"]') || {}).value || "";
+      if (!date) { flashMsg("A game needs a first day"); return; }
+      if (end && end < date) { flashMsg("The last day cannot come before the first"); return; }
+
+      busy("Saving the game");
+      try {
+        await db.updateGameDetails(openGame, {
+          name: name.trim(), date, endDate: end || null, courseId,
+        });
+        editingGame = false;
+        flashMsg("Saved.");
+      } catch { flashMsg("Couldn't save it — the message above says why."); }
+      finally { idleAll(); }
+      return render();
+    }
     case "add-to-game": {
       const ids = [...view.querySelectorAll('[name="add-round"]:checked')].map((b) => b.value);
       if (!ids.length) { flashMsg("Nothing ticked"); return; }
@@ -2159,24 +2379,31 @@ sheetEl.addEventListener("click", async (e) => {
   if (inviting) {
     const chosen = sheetEl.querySelector('[name="invite-role"]:checked');
     const role = chosen ? chosen.value : "member";
+    const golferId = inviting.dataset.golfer || null;
+    const named = golferId ? golferById(golferId) : null;
     sheetEl.hidden = true;
     busy("Preparing the invitation");
     try {
       if (role === "admin") await db.ensureAdminCode();
-      const link = db.inviteLink(role);
+      const link = db.inviteLink(role, golferId);
       if (!link) { flashMsg("Could not build the invitation link."); return; }
 
       const guide = `${location.origin}${location.pathname}quick-start.html`;
       const text = [
-        `${association ? association.name : "Our golf group"} — you are invited to keep your handicap with us.`,
+        named
+          ? `${named.name} — you are invited to keep your handicap with ${association ? association.name : "our golf group"}.`
+          : `${association ? association.name : "Our golf group"} — you are invited to keep your handicap with us.`,
         "",
         `Join here: ${link}`,
         "",
         `How it works, in one page: ${guide}`,
         "",
-        role === "admin"
-          ? "This link makes you an admin — you can add courses and post rounds for anybody."
+        named
+          ? "Tap the link and it will greet you by name. One button and you are in — nothing to type."
           : "Tap the link, type the name you play under, and you are in. No account, no password.",
+        role === "admin"
+          ? "This makes you an admin, so you will be asked to set a password. It works once, so keep it to yourself."
+          : "No account and no password needed.",
       ].join("\n");
 
       openShare(text, role === "admin" ? "Admin invitation" : "Invitation");
@@ -2579,19 +2806,22 @@ function openSignInProblem(error, email) {
 }
 
 async function acceptInvite() {
+  /* Every path that waits on Firebase raises the veil, without exception. */
   const invite = db.readJoinLink();
   const name = ((view.querySelector('[name="join-name"]') || {}).value || joinForm.name).trim();
   if (!name) { flashMsg("Type the name you play under"); return; }
   joining = true;
-  flashMsg("Joining…");
+  busy("Joining the group");
+  render();
   const result = await db.joinAssociation({ associationId: invite.associationId, code: invite.code, displayName: name });
   if (result.ok) {
     db.clearJoinLink();
     await db.linkGolferForMember(name);
     await start(invite.associationId);
     joining = false;
+    idleAll();
     flashMsg("You're in. Post your round on the Enter tab.");
-  } else { joining = false; render(); }
+  } else { joining = false; idleAll(); render(); }
 }
 
 async function joinByCode() {
@@ -2601,10 +2831,12 @@ async function joinByCode() {
   if (!code) { flashMsg("Type the group code"); return; }
 
   joining = true;
-  flashMsg("Checking the code…");
+  busy("Checking the code");
+  render();
   const assocId = await db.findAssociationByCode(code);
   if (!assocId) {
     joining = false;
+    idleAll();
     flashMsg("No group has that code. Codes are six characters — check it, or ask for the invitation link instead.");
     return render();
   }
@@ -2613,15 +2845,17 @@ async function joinByCode() {
     await db.linkGolferForMember(name);
     await start(assocId);
     joining = false;
+    idleAll();
     flashMsg("You're in. Post your round on the Enter tab.");
-  } else { joining = false; render(); }
+  } else { joining = false; idleAll(); render(); }
 }
 
 async function createGroup(name, groupName) {
   const box = view.querySelector('[name="owner-plays"]');
   const playing = box ? box.checked : joinForm.ownerPlays;
   joining = true;
-  flashMsg("Setting up…");
+  busy("Setting up your group");
+  render();
   try {
     const created = await db.createAssociation({ name: groupName, displayName: name });
     /* Only if they said they play. An organiser who does not play should not
@@ -2630,12 +2864,14 @@ async function createGroup(name, groupName) {
     if (playing) await db.linkGolferForMember(name);
     await start(created.id);
     joining = false;
+    idleAll();
     flashMsg(playing
       ? "Ready. Add the rest of your golfers under Manage, or invite them from Admin."
       : "Ready. Add your golfers under Manage — you are organising, not on the roster.");
   } catch {
     joining = false;
-    flashMsg("Couldn't set up the group — the red bar above says why.");
+    idleAll();
+    flashMsg("Couldn't set up the group — the message above says why.");
     render();
   }
 }
@@ -2643,17 +2879,19 @@ async function createGroup(name, groupName) {
 async function importHere() {
   if (!legacy) return;
   importing = true;
-  flash = "Importing. This can take a moment — do not close the app.";
+  busy("Bringing your rounds across");
   render();
   try {
     const result = await db.importLegacyIntoCurrentGroup({ v1: legacy.v1 });
     importing = false;
+    idleAll();
     const ok = result.check.rounds.ok && result.check.golfers.ok;
     flashMsg(ok
       ? `Brought across and checked: ${result.check.golfers.found} golfers, ${result.check.rounds.found} rounds. Your version 1 scorecard is untouched.`
       : `Brought across ${result.check.golfers.found} of ${result.check.golfers.expected} golfers. Nothing was lost — tap again to finish.`);
   } catch (e) {
     importing = false;
+    idleAll();
     const code = String((e && (e.code || e.message)) || "");
     flashMsg(code.includes("permission")
       ? "Firebase refused it — the rules in the console are older than this version. Publish firestore.rules and try again."
@@ -2667,12 +2905,12 @@ async function importHere() {
  * Typing a name again is what creates a second person with a split handicap.
  * This adds the SAME golfer, so their rounds and index come with them. */
 async function openOtherGroupPicker() {
-  sheetEl.hidden = false;
-  sheetEl.innerHTML = `<div class="sheet-body"><h2>Looking…</h2></div>`;
-
+  busy("Looking through your other groups");
   let people = [];
   try { people = await db.golfersInMyOtherGroups(); }
   catch {
+    idleAll();
+    sheetEl.hidden = false;
     sheetEl.innerHTML = `<div class="sheet-body">
       <div style="display:flex;justify-content:space-between;align-items:center">
         <h2>Could not look</h2><button class="rowbtn" data-close="1">Close</button></div>
@@ -2680,6 +2918,9 @@ async function openOtherGroupPicker() {
     </div>`;
     return;
   }
+
+  idleAll();
+  sheetEl.hidden = false;
 
   if (!people.length) {
     sheetEl.innerHTML = `<div class="sheet-body">
@@ -2713,12 +2954,22 @@ async function addGolfer() {
   const name = (input ? input.value : "").trim();
   if (!name) { flashMsg("Type a name first"); return; }
   if (golfers.some((g) => g.name.toLowerCase() === name.toLowerCase())) { flashMsg(`${name} is already in this group`); return; }
+
+  /* The veil goes up FIRST and blocks the screen, so a second tap is
+     impossible while this is in flight. Four copies of one golfer were created
+     because this took several seconds and showed nothing. */
+  busy(`Adding ${name}`);
   try {
     const { golfer, reused } = await db.addGolfer({ name });
     flashMsg(reused
       ? `${golfer.name} added — same person as in your other group, so their handicap comes with them.`
       : `${golfer.name} added`);
-  } catch { flashMsg("Couldn't add them — the red bar above says why."); }
+  } catch (e) {
+    const code = String((e && (e.code || e.message)) || "");
+    flashMsg(code.includes("already")
+      ? `${name} already exists. Use "Add from my other groups" to bring them in with their rounds.`
+      : "Couldn't add them — the message above says why.");
+  } finally { idleAll(); }
   render();
 }
 
@@ -2858,6 +3109,9 @@ async function settleGroup(preferred) {
 }
 
 async function settleGroupInner(preferred) {
+  /* No veil here on purpose: the boot card is already on screen at this point,
+     and stacking a second waiting state on top of it would flicker. The veil is
+     for actions somebody has just taken, not for opening the app. */
   const mine = await db.loadMyGroups();
 
   if (preferred && await db.amMemberOf(preferred)) {
@@ -2891,6 +3145,14 @@ db.onChange((s) => { sync = s; render(); });
   /* Look for a version 1 scorecard whether or not there is already a group.
      Somebody who created one first still needs a way to bring their data in. */
   legacy = await db.readLegacyV1();
+
+  /* If the link names somebody, fetch them so the screen can greet them. */
+  const link = db.readJoinLink();
+  if (link && link.golferId) {
+    invitedGolfer = await db.golferNamedInLink(link.golferId);
+    const group = await db.loadAssociation(link.associationId);
+    invitedGroupName = group ? group.name : "";
+  }
 
   ready = true;
   render();
