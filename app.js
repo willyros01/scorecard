@@ -25,6 +25,7 @@ let skipImport = false;
 let confirmDeleteGroup = false;
 let confirmSignOut = false;
 let shareGameNet = true;
+let shareGameGross = true;
 let settling = false;
 let bootMessage = "Opening your scorecard…";
 let authForm = { email: "", password: "" };
@@ -937,11 +938,15 @@ function gameDetail(gameId) {
 /* withNet defaults to false when anybody in the game has no index — a result
    listing half the field with a blank net column looks broken, and reads as
    though those golfers did badly rather than simply not having a handicap yet. */
-function gameShareText(gameId, withNet) {
+function gameShareText(gameId, withNet, withGross) {
   const game = games.find((g) => g.id === gameId);
   const board = model.gameLeaderboard(rounds.filter((r) => r.gameId === gameId), golfers);
   const everyoneHasNet = board.length > 0 && board.every((r) => r.net != null);
   const includeNet = withNet == null ? everyoneHasNet : withNet;
+  /* Gross is on by default and independent of net. It used to disappear
+     entirely from a multi-day share, because that path returned before the
+     gross section was ever reached. */
+  const includeGross = withGross == null ? true : withGross;
 
   const lines = [
     `${game.name || courseName(game.courseId)} — ${model.gameSpanLabel(game)}`,
@@ -955,16 +960,41 @@ function gameShareText(gameId, withNet) {
     const standing = model.gameStandings(rounds.filter((r) => r.gameId === gameId), allGolfers, game);
     if (standing.players.length) {
       const total = model.gameDays(game);
-      lines.push("", `Standing after ${standing.days.length} of ${total} day${total === 1 ? "" : "s"}${standing.rankedOnNet ? " (net)" : " (gross — somebody has no handicap yet)"}:`);
-      standing.players.forEach((p) => {
-        const perDay = standing.days
-          .map((d) => {
-            const r = p.byDay[d];
-            return r ? (standing.rankedOnNet && r.net != null ? r.net : r.gross) : "—";
-          })
-          .join(" + ");
-        lines.push(`${p.place}. ${p.name} ${standing.rankedOnNet ? p.totalNet : p.totalGross}  (${perDay})`);
-      });
+      const useNet = includeNet && standing.rankedOnNet;
+
+      if (useNet) {
+        lines.push("", `Net standing after ${standing.days.length} of ${total} day${total === 1 ? "" : "s"}:`);
+        standing.players.forEach((p) => {
+          const perDay = standing.days
+            .map((d) => { const r = p.byDay[d]; return r && r.net != null ? r.net : "—"; })
+            .join(" + ");
+          lines.push(`${p.place}. ${p.name} ${p.totalNet}  (${perDay})`);
+        });
+      }
+
+      if (includeGross) {
+        /* Ranked on gross in its own right, not left in net order. */
+        const byGross = [...standing.players].sort((a, b) => a.totalGross - b.totalGross);
+        let place = 0, seen = 0, previous = null;
+        byGross.forEach((p) => {
+          seen++;
+          if (p.totalGross !== previous) { place = seen; previous = p.totalGross; }
+          p.grossPlace = place;
+        });
+
+        lines.push("", `Gross standing after ${standing.days.length} of ${total} day${total === 1 ? "" : "s"}:`);
+        byGross.forEach((p) => {
+          const perDay = standing.days
+            .map((d) => { const r = p.byDay[d]; return r ? r.gross : "—"; })
+            .join(" + ");
+          lines.push(`${p.grossPlace}. ${p.name} ${p.totalGross}  (${perDay})`);
+        });
+      }
+
+      if (includeNet && !standing.rankedOnNet) {
+        lines.push("", "No net standing — somebody has no handicap yet.");
+      }
+
       lines.push("", "Posted with The Scorecard");
       return lines.join("\n");
     }
@@ -979,8 +1009,10 @@ function gameShareText(gameId, withNet) {
     }
   }
 
-  const grossOrder = [...board].sort((a, b) => a.grossPlace - b.grossPlace);
-  lines.push("", "Gross:", ...grossOrder.map((r) => `${r.grossPlace}. ${r.name} ${r.gross}`));
+  if (includeGross) {
+    const grossOrder = [...board].sort((a, b) => a.grossPlace - b.grossPlace);
+    lines.push("", "Gross:", ...grossOrder.map((r) => `${r.grossPlace}. ${r.name} ${r.gross}`));
+  }
   lines.push("", `Posted with The Scorecard`);
   return lines.join("\n");
 }
@@ -1023,16 +1055,32 @@ function rankingShareText() {
   return lines.join("\n");
 }
 
+/* Net and gross are independent choices — a group may want either, both, or
+   the gross alone when somebody is still unrated. */
+function openGameShare(everyoneHasNet) {
+  openShare(gameShareText(openGame, shareGameNet, shareGameGross), "Game result", {
+    toggles: [
+      {
+        key: "net",
+        on: shareGameNet,
+        label: "Include net scores",
+        hint: everyoneHasNet ? "" : "Some players have no handicap yet, so their net score would be blank.",
+      },
+      { key: "gross", on: shareGameGross, label: "Include gross scores" },
+    ],
+  });
+}
+
 function openShare(text, title, options = {}) {
   const toggle = options.toggle;
   sheetEl.hidden = false;
   sheetEl.innerHTML = `<div class="sheet-body">
     <div style="display:flex;justify-content:space-between;align-items:center"><h2>${esc(title)}</h2>
       <button class="rowbtn" data-close="1">Close</button></div>
-    ${toggle ? `<label class="checkline">
-      <input type="checkbox" data-share-toggle="1" ${toggle.on ? "checked" : ""}>
-      <span>${esc(toggle.label)}</span>
-    </label>${toggle.hint ? `<p class="hint" style="margin-top:0">${esc(toggle.hint)}</p>` : ""}` : ""}
+    ${(options.toggles || (toggle ? [toggle] : [])).map((t) => `<label class="checkline">
+      <input type="checkbox" data-share-toggle="${esc(t.key || "net")}" ${t.on ? "checked" : ""}>
+      <span>${esc(t.label)}</span>
+    </label>${t.hint ? `<p class="hint" style="margin-top:0">${esc(t.hint)}</p>` : ""}`).join("")}
     <pre class="msg">${esc(text)}</pre>
     <div class="share-grid" style="margin-top:1rem">
       <button class="btn" data-send="whatsapp">WhatsApp</button>
@@ -2343,16 +2391,11 @@ view.addEventListener("click", async (e) => {
     }
     case "delete-game": db.deleteGame(openGame); openGame = null; flashMsg("Game deleted"); return render();
     case "share-game": {
-      const board = model.gameLeaderboard(rounds.filter((r) => r.gameId === openGame), golfers);
+      const board = model.gameLeaderboard(rounds.filter((r) => r.gameId === openGame), allGolfers);
       const everyoneHasNet = board.length > 0 && board.every((r) => r.net != null);
       shareGameNet = everyoneHasNet;
-      return openShare(gameShareText(openGame, shareGameNet), "Game result", {
-        toggle: {
-          on: shareGameNet,
-          label: "Include net scores",
-          hint: everyoneHasNet ? "" : "Some players have no handicap yet, so their net score would be blank.",
-        },
-      });
+      shareGameGross = true;
+      return openGameShare(everyoneHasNet);
     }
     case "share-ranking": return openShare(rankingShareText(), "Rankings");
     case "share-indexes": return openShare(indexShareText(), "Handicap indexes");
@@ -2629,18 +2672,20 @@ sheetEl.addEventListener("click", async (e) => {
 
   const toggling = e.target.closest("[data-share-toggle]");
   if (toggling) {
-    /* Redraw the preview in place so the effect of the choice is visible before
-       anything is sent. */
-    shareGameNet = toggling.checked;
-    const board = model.gameLeaderboard(rounds.filter((r) => r.gameId === openGame), golfers);
-    const everyoneHasNet = board.length > 0 && board.every((r) => r.net != null);
-    openShare(gameShareText(openGame, shareGameNet), "Game result", {
-      toggle: {
-        on: shareGameNet,
-        label: "Include net scores",
-        hint: everyoneHasNet ? "" : "Some players have no handicap yet, so their net score would be blank.",
-      },
-    });
+    /* Redraw the preview in place so the effect of each choice is visible
+       before anything is sent. */
+    if (toggling.dataset.shareToggle === "gross") shareGameGross = toggling.checked;
+    else shareGameNet = toggling.checked;
+
+    if (!shareGameNet && !shareGameGross) {
+      /* Both off leaves nothing to send, so the last one turned off comes back. */
+      if (toggling.dataset.shareToggle === "gross") shareGameGross = true;
+      else shareGameNet = true;
+      flashMsg("A result needs at least one of net or gross.");
+    }
+
+    const board = model.gameLeaderboard(rounds.filter((r) => r.gameId === openGame), allGolfers);
+    openGameShare(board.length > 0 && board.every((r) => r.net != null));
     return;
   }
 
