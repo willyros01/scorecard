@@ -673,6 +673,14 @@ export async function sendPasswordReset(email) {
 /* Whether this account can already be signed into with a password. A Google
    account cannot, until one is added — which is the whole point of the panel
    that uses this. */
+/* An admin or owner running on an anonymous account.
+ *
+ * Their role is real and the rules granted it properly — but without an account
+ * it lives in one browser only. Clear the data and it is gone, and nothing ties
+ * those actions to a person rather than a device. Anybody in this state is
+ * asked to set a password; their access keeps working meanwhile. */
+export const needsPassword = () => canManage() && !hasPassword();
+
 export const hasPassword = () => {
   const user = fb && fb.auth && fb.auth.currentUser;
   return !!(user && user.providerData

@@ -1106,6 +1106,12 @@ function screenManage() {
   if (!db.canManage()) return empty("Manage is for organisers", "Your group's organiser looks after the roster and courses. You can post rounds on the Enter tab.");
 
   return `${flashBar()}
+  ${db.needsPassword() ? `<section class="panel">
+    <div class="card padded" style="border:2px solid var(--pencil)">
+      <div class="name">Set a password</div>
+      <p class="hint">You can manage this group, but only from this browser. Go to <b>Admin</b> and set an email and password so your role follows you to your other devices.</p>
+    </div>
+  </section>` : ""}
   <section class="panel">
     <div class="panel-head"><h2 class="panel-title">Golfers in this group</h2><span class="panel-count">${golfers.length || ""}</span></div>
     <div class="card">
@@ -1238,6 +1244,7 @@ function screenAdmin() {
   if (!db.isOwner()) return empty("Not your area", "Only the group owner manages people and settings.");
 
   return `${flashBar()}
+  ${safe("Set a password", passwordPrompt)}
   ${safe("People", peopleSection)}
   ${safe("Group", groupSection)}
   ${safe("Import", importSection)}
@@ -1262,6 +1269,33 @@ function importSection() {
       <div class="inline-actions stacked">
         <button class="btn" data-act="import-here" ${importing ? "disabled" : ""}>${importing ? "Importing…" : "Bring it into this group"}</button>
       </div>
+    </div>
+  </section>`;
+}
+
+/* Shown to an admin or owner who has no account yet.
+ *
+ * Deliberately at the top of Admin and repeated on Manage: their role works
+ * today, but it is tied to this browser alone, which is not a safe place for
+ * the ability to edit everybody's rounds. */
+function passwordPrompt() {
+  if (!db.needsPassword()) return "";
+  const role = db.myRole();
+  return `<section class="panel">
+    <div class="card padded" style="border:2px solid var(--pencil)">
+      <div class="name">You are ${role === "owner" ? "the owner" : "an admin"} on this device only</div>
+      <p class="hint">Your role works, but it lives in this browser alone. Clear its data and it is gone — and nothing connects what you do here to you rather than to this device. Set an email and password and it follows you everywhere.</p>
+
+      <label class="lbl">Email</label>
+      <input class="field" name="promote-email" type="email" placeholder="you@example.com"
+             autocomplete="username" autocapitalize="none" value="${esc(authForm.email)}">
+      <label class="lbl">Password for this app</label>
+      <input class="field" name="promote-password" type="password"
+             placeholder="Invent one, at least 6 characters" autocomplete="new-password">
+      <div class="inline-actions stacked">
+        <button class="btn" data-act="set-admin-password">Set my password</button>
+      </div>
+      <p class="hint"><b>Not the password for your email account.</b> A new one, for this app only.</p>
     </div>
   </section>`;
 }
@@ -1542,8 +1576,9 @@ function accountSection() {
   return `<section class="panel">
     <div class="panel-head"><h2 class="panel-title">Account</h2></div>
     <div class="card padded">
-      <div class="name">This device only</div>
+      <div class="name">This device only${db.canManage() ? " — and you are " + (db.myRole() === "owner" ? "the owner" : "an admin") : ""}</div>
       <p class="hint">Right now this device is not tied to any account. That means Safari and the home-screen app count as two different people, each with their own groups. Signing in fixes that.</p>
+      ${db.canManage() ? `<div class="note"><b>Worth doing today.</b> Your role is real and works properly, but it exists only in this browser. Without an account it cannot follow you to another device, and it disappears if this browser's data is cleared.</div>` : ""}
 
       <div class="note tip"><b>If you have version 1 data, do this in order.</b> Tap the Google button first — it can only work here in Safari — then come back and set a password. Setting a password without that step would create a separate, empty account.</div>
 
@@ -1768,7 +1803,10 @@ function openProblem({ title, detail, advice, fatal = false }) {
     `Version: ${VERSION}`,
     `Screen: ${tab}`,
     `Group: ${association ? association.name : "none"}`,
-    `Account: ${db.currentEmail() || "this device only"}`,
+    /* The role matters as much as the account: "this device only" plus "admin"
+       says an anonymous user holds a real role, which changes what they are
+       allowed to READ and is exactly what one report turned on. */
+    `Account: ${db.currentEmail() || "this device only (anonymous)"}${db.myRole() ? ` · role ${db.myRole()}` : " · no role"}`,
     `Sync: ${sync.text}`,
     `When: ${new Date().toISOString()}`,
     `Device: ${navigator.userAgent}`,
@@ -1964,14 +2002,25 @@ document.getElementById("statusBtn").onclick = () => {
     <div style="display:flex;justify-content:space-between;align-items:center">
       <h2>This device</h2><button class="rowbtn" data-close="1">Close</button></div>
     <div class="card padded">
-      <div class="name">${esc(email || "Not signed in")}</div>
-      <div class="sub">${esc(sync.text)}${association ? ` · ${esc(association.name)}` : ""}</div>
+      <div class="name">${esc(email || "No account — this device only")}</div>
+      <div class="sub">${esc(sync.text)}${association ? ` · ${esc(association.name)}` : ""}${db.myRole() ? ` · ${esc(db.myRole())}` : ""}</div>
     </div>
+
+    ${!email && db.canManage() ? `<div class="note warn">
+      <b>You are signed in, but without an account.</b> It said "not signed in", which was wrong —
+      your ${esc(db.myRole() === "owner" ? "owner" : "admin")} role is real and this device holds it.
+      What it does not have is an account, so the role cannot follow you to another device and is
+      lost if this browser's data is cleared. Set a password on the Admin tab.
+    </div>` : ""}
+
+    ${!email && !db.canManage() ? `<p class="hint">You are signed in without an account, which is all a guest needs. Your rounds are saved to the group, not to this device.</p>` : ""}
+
     <div class="inline-actions stacked">
       <button class="btn ghost" data-quick="backup">Back up my data</button>
-      ${email ? `<button class="btn ghost warn" data-quick="signout">Sign out of this device</button>` : ""}
+      ${!email && db.canManage() ? `<button class="btn" data-quick="setpassword">Set a password</button>` : ""}
+      <button class="btn ghost warn" data-quick="signout">Sign out of this device</button>
     </div>
-    <p class="hint">Signing out deletes nothing. It returns this device to the first screen.</p>
+    <p class="hint">Signing out deletes nothing. It returns this device to the first screen.${email ? "" : " Without an account, you will need your invitation link to come back."}</p>
   </div>`;
 };
 
@@ -2174,6 +2223,23 @@ view.addEventListener("click", async (e) => {
 
     case "begin": return begin();
     case "sign-in": return signIn();
+    case "set-admin-password": {
+      const email = ((view.querySelector('[name="promote-email"]') || {}).value || "").trim();
+      const password = (view.querySelector('[name="promote-password"]') || {}).value || "";
+      if (!email) { flashMsg("Type your email address"); return render(); }
+      if (password.length < 6) { flashMsg("The password needs at least six characters"); return render(); }
+
+      busy("Setting your password");
+      try {
+        await db.signInWithEmail({ email, password });
+        flashMsg(`Done. Sign in with ${email} and this password on your other devices.`);
+      } catch (err) {
+        idleAll();
+        openSignInProblem(err, email);
+        return render();
+      } finally { idleAll(); }
+      return render();
+    }
     case "set-password": {
       const field = view.querySelector('[name="password"]');
       const secret = field ? field.value : "";
@@ -2252,9 +2318,19 @@ view.addEventListener("click", async (e) => {
         await start(link.associationId);
         tab = "enter";
         idleAll();
-        flashMsg(role === "admin"
-          ? "You're in as an admin. Set a password under Admin so this works on your other devices."
-          : "You're in. Post your round on the Enter tab.");
+        if (role === "admin") {
+          /* Said properly rather than as a passing message. An admin without an
+             account can manage everything, but only from this browser — they
+             need to understand that before they walk away from it. */
+          tab = "admin";
+          openProblem({
+            title: "You're in as an admin",
+            detail: "One thing left: set an email and password. Your role works right now, but it exists only in this browser — it cannot follow you to another device, and it disappears if this browser's data is cleared.",
+            advice: "The form is waiting at the top of the Admin tab.",
+          });
+        } else {
+          flashMsg("You're in. Post your round on the Enter tab.");
+        }
       } catch (err) {
         joining = false;
         idleAll();
@@ -2705,6 +2781,13 @@ sheetEl.addEventListener("click", async (e) => {
   if (quick) {
     const what = quick.dataset.quick;
     if (what === "backup") { sheetEl.hidden = true; return openBackupSheet(); }
+    if (what === "setpassword") {
+      sheetEl.hidden = true;
+      tab = "admin";
+      render();
+      return;
+    }
+
     if (what === "signout") {
       sheetEl.hidden = true;
       /* Say what is actually happening. The page reloads on sign-out, and the
