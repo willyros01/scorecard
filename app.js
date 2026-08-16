@@ -51,7 +51,7 @@ const CLICKABLE = [
   "data-act", "data-tee", "data-go", "data-edit", "data-del", "data-confirm-del",
   "data-unfilter", "data-drill", "data-golfer-index", "data-del-golfer", "data-rename",
   "data-set-index", "data-course", "data-pick", "data-rm-tee", "data-game", "data-role",
-  "data-invite-golfer",
+  "data-invite-golfer", "data-reinvite",
   "data-drop-round", "data-goto-group", "data-forget-group",
 ].map((name) => `[${name}]`).join(",");
 let courseDraft = null;
@@ -1106,12 +1106,7 @@ function screenManage() {
   if (!db.canManage()) return empty("Manage is for organisers", "Your group's organiser looks after the roster and courses. You can post rounds on the Enter tab.");
 
   return `${flashBar()}
-  ${db.needsPassword() ? `<section class="panel">
-    <div class="card padded" style="border:2px solid var(--pencil)">
-      <div class="name">Set a password</div>
-      <p class="hint">You can manage this group, but only from this browser. Go to <b>Admin</b> and set an email and password so your role follows you to your other devices.</p>
-    </div>
-  </section>` : ""}
+  ${safe("Set a password", passwordPrompt)}
   <section class="panel">
     <div class="panel-head"><h2 class="panel-title">Golfers in this group</h2><span class="panel-count">${golfers.length || ""}</span></div>
     <div class="card">
@@ -1158,7 +1153,9 @@ function screenManage() {
               <span class="sub">${g.handicapIndex == null ? "no index yet" : `index ${(+g.handicapIndex).toFixed(1)}`} · ${g.roundCount || 0} round${g.roundCount === 1 ? "" : "s"}</span></span>
             <button class="rowbtn" data-rename="${g.id}">Rename</button>
             ${g.linkedUid
-              ? `<button class="rowbtn" disabled title="Already using the app">Invited</button>`
+              ? (db.isOwner()
+                  ? `<button class="rowbtn" data-reinvite="${g.id}" title="Let them join again — use this if they signed out and were locked out">Invited</button>`
+                  : `<button class="rowbtn" disabled title="Already using the app">Invited</button>`)
               : `<button class="rowbtn" data-invite-golfer="${g.id}">Invite</button>`}
             ${indexSource(g) === "rounds"
               ? `<button class="rowbtn" disabled title="Their index now comes from their own rounds">Index</button>`
@@ -1241,7 +1238,18 @@ function groupSwitcher() {
 }
 
 function screenAdmin() {
-  if (!db.isOwner()) return empty("Not your area", "Only the group owner manages people and settings.");
+  /* An admin without an account still needs the password form, and the rest of
+     this tab is the owner's. So the form is shown here on its own rather than
+     turning them away with nothing — being told "not your area" while holding
+     a real admin role is exactly what looked like a broken button. */
+  if (!db.isOwner()) {
+    if (db.needsPassword()) {
+      return `${flashBar()}
+        ${safe("Set a password", passwordPrompt)}
+        ${versionBlock()}`;
+    }
+    return empty("Not your area", "Only the group owner manages people and settings.");
+  }
 
   return `${flashBar()}
   ${safe("Set a password", passwordPrompt)}
@@ -2131,6 +2139,25 @@ view.addEventListener("click", async (e) => {
     else { filter = { golferId: d.drill, year: drill.year, month: drill.month, courseId: "" }; tab = "history"; }
     return render();
   }
+  if (d.reinvite) {
+    const golfer = golferById(d.reinvite);
+    if (!golfer) return;
+    sheetEl.hidden = false;
+    sheetEl.innerHTML = `<div class="sheet-body">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <h2>${esc(golfer.name)} has already joined</h2>
+        <button class="rowbtn" data-close="1">Close</button></div>
+      <p class="hint">Their invitation has been used, so the link will not work again.</p>
+      <div class="note"><b>Locked out?</b> Somebody who joined without setting a password loses their
+      access if they sign out — an account with no password cannot be signed back into. Letting them
+      join again clears the old invitation so you can send a fresh link.</div>
+      <p class="hint">Their rounds and handicap are untouched either way.</p>
+      <div class="inline-actions stacked">
+        <button class="btn" data-reset-invite="${esc(golfer.id)}">Let them join again</button>
+      </div>
+    </div>`;
+    return;
+  }
   if (d.inviteGolfer) {
     const golfer = golferById(d.inviteGolfer);
     if (!golfer) return;
@@ -2518,6 +2545,19 @@ view.addEventListener("click", async (e) => {
          A small line of text is easy to miss, so the first tap looked like
          nothing happening and the second like a button that needed hitting
          twice. Now the button says what the next tap will do. */
+      /* An account with no password cannot be signed back into — signing out
+         destroys it. Somebody who joined by invitation and has not set a
+         password would be locked out entirely, and their invitation is spent.
+         That deserves more than a confirmation. */
+      if (!db.hasPassword()) {
+        confirmSignOut = false;
+        return openProblem({
+          title: "Set a password first",
+          detail: "This device has no account yet, so there is nothing to sign back in with. Signing out now would lock you out, and your invitation link will not work a second time.",
+          advice: "Set an email and password above, then sign out whenever you like. If you are certain, whoever runs the group can send you a fresh invitation afterwards.",
+        });
+      }
+
       if (!confirmSignOut) {
         confirmSignOut = true;
         setTimeout(() => {
@@ -2605,6 +2645,21 @@ sheetEl.addEventListener("click", async (e) => {
      belong to, and does not depend on the group still existing. That is why it
      is here — a stale entry kept coming back after every sign-in, and nothing
      that tried to be clever about it ever worked. */
+  const reopening = e.target.closest("[data-reset-invite]");
+  if (reopening) {
+    const id = reopening.dataset.resetInvite;
+    const golfer = golferById(id);
+    sheetEl.hidden = true;
+    busy("Clearing the old invitation");
+    try {
+      await db.resetInvitation(id);
+      flashMsg(`${(golfer || {}).name || "They"} can be invited again. Send them a fresh link.`);
+    } catch { flashMsg("Couldn't clear it — the message above says why."); }
+    finally { idleAll(); }
+    render();
+    return;
+  }
+
   const recalc = e.target.closest("[data-recalc]");
   if (recalc) {
     sheetEl.hidden = true;
@@ -2789,6 +2844,16 @@ sheetEl.addEventListener("click", async (e) => {
     }
 
     if (what === "signout") {
+      if (!db.hasPassword()) {
+        sheetEl.hidden = true;
+        return openProblem({
+          title: "Set a password first",
+          detail: "This device has no account yet, so there is nothing to sign back in with. Signing out now would lock you out, and an invitation link only works once.",
+          advice: db.canManage()
+            ? "The form is on the Manage tab. Set a password, then sign out whenever you like."
+            : "Ask whoever runs the group for a fresh link if you have already signed out.",
+        });
+      }
       sheetEl.hidden = true;
       /* Say what is actually happening. The page reloads on sign-out, and the
          boot screen used to announce "Opening your scorecard" — the opposite of

@@ -1555,6 +1555,26 @@ export async function recalculateGameHandicaps(gameId, { preview = false } = {})
   return { changes, applied: changes.length };
 }
 
+/* Lets an invitation be used again.
+ *
+ * Signing out of an anonymous account destroys it — there is no password to
+ * come back with. If that happens to somebody who joined by a single-use admin
+ * link, the claim still names their old account and the link is spent, so they
+ * are locked out with no way back. This clears the claim and unlinks the
+ * golfer, so a fresh invitation works.
+ *
+ * Owner only, because it is the ability to re-open somebody else's invitation. */
+export async function resetInvitation(golferId) {
+  if (!isOwner()) throw new Error("Only the owner can reset an invitation.");
+
+  const writes = [
+    { op: "delete", path: ["associations", assocId, "invites", golferId] },
+    { op: "update", path: ["golfers", golferId], data: { linkedUid: null } },
+  ];
+  await commitTogether(writes, "reset invitation");
+  return { ok: true };
+}
+
 /* A starting handicap for somebody with no rounds here yet. Passing null
    clears it. Real rounds always take precedence once there are three. */
 export function setManualIndex(golferId, index) {
