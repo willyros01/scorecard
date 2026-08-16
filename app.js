@@ -1978,7 +1978,60 @@ function renderTabs() {
     `<button data-tab="${id}" class="${tab === id ? "on" : ""}" role="tab"><span class="ico">${icon}</span>${label}</button>`).join("");
 }
 
-function render() {
+/* A redraw is postponed while a date field is open.
+ *
+ * render() rewrites the whole panel, which destroys the native date input the
+ * picker is attached to. On iOS the calendar is then orphaned: the month and
+ * year wheels still move, but the day grid never draws, and the only way out is
+ * to leave the field and come back — which is exactly how this was reported.
+ *
+ * The trigger is not the user's own typing; it is a live update arriving from
+ * the database mid-interaction, and several arrive while a group syncs. So the
+ * redraw is held until the field is closed, then run once. */
+let redrawWanted = false;
+
+function dateFieldIsOpen() {
+  const active = document.activeElement;
+  return !!(active
+    && active.tagName === "INPUT"
+    && active.type === "date"
+    && view.contains(active));
+}
+
+function render({ force = false } = {}) {
+  if (!force && dateFieldIsOpen()) {
+    redrawWanted = true;
+    /* Update only what can be changed without touching the panel, so the
+       screen is not stale while the picker is up. */
+    try {
+      const btn = document.getElementById("statusBtn");
+      const sync = db.status();
+      if (btn) {
+        btn.textContent = sync.text;
+        btn.classList.toggle("alert", !!sync.alert);
+      }
+      paintBusy();
+      paintAlert();
+    } catch { /* cosmetic only */ }
+    return;
+  }
+  redrawWanted = false;
+  return renderNow();
+}
+
+/* Whenever a date field loses focus, catch up on anything held back. */
+document.addEventListener("focusout", (e) => {
+  if (!(e.target && e.target.tagName === "INPUT" && e.target.type === "date")) return;
+  /* A tick later, so the browser has finished moving focus. */
+  setTimeout(() => {
+    if (redrawWanted && !dateFieldIsOpen()) {
+      redrawWanted = false;
+      renderNow();
+    }
+  }, 0);
+}, true);
+
+function renderNow() {
   try {
     if (!ready || settling) {
       view.innerHTML = `<div class="boot">${esc(bootMessage)}</div>`;
@@ -2050,6 +2103,9 @@ document.getElementById("alert").addEventListener("click", (e) => {
 /* ================= events ================= */
 
 tabsEl.addEventListener("click", (e) => {
+  /* Switching tab always draws. Anything holding a redraw back is irrelevant
+     once the person has left the screen it belonged to. */
+  if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
   const b = e.target.closest("button[data-tab]");
   if (!b) return;
   tab = b.dataset.tab;
@@ -2311,7 +2367,11 @@ view.addEventListener("click", async (e) => {
       updateEnterHints();
       return render();
     }
-    case "post": return postRound();
+    case "post":
+      /* Close the picker first, so the panel is free to redraw — otherwise a
+         posted round appears not to have gone anywhere. */
+      if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+      return postRound();
 
     case "begin": return begin();
     case "sign-in": return signIn();
