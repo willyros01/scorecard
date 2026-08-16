@@ -679,6 +679,48 @@ export async function sendPasswordReset(email) {
  * it lives in one browser only. Clear the data and it is gone, and nothing ties
  * those actions to a person rather than a device. Anybody in this state is
  * asked to set a password; their access keeps working meanwhile. */
+/* Set or change the password on whatever account this device is using.
+ *
+ * Three cases, and the app must not have to know which it is in:
+ *   anonymous      — link a password so the account survives sign-out
+ *   another method — add a password to the SAME account, never make a new one
+ *   has one        — replace it
+ *
+ * The middle case matters most: signing in fresh with an email would create a
+ * DIFFERENT account, and everything belonging to the old one — role, groups,
+ * rounds — would be invisible. Present but unreachable. */
+export async function setMyPassword({ email, password }) {
+  if (!fb) throw new Error("Firebase has not loaded yet.");
+  const { EmailAuthProvider, linkWithCredential, updatePassword } = fb.mod.auth;
+
+  const address = String(email || "").trim();
+  const secret = String(password || "");
+  if (!address) throw new Error("auth/invalid-email");
+  if (secret.length < 6) throw new Error("auth/weak-password");
+
+  const current = fb.auth.currentUser;
+  if (!current) throw new Error("auth/no-current-user");
+
+  if (hasPassword()) {
+    await updatePassword(current, secret);
+    clearError();
+    return { ok: true, outcome: "changed" };
+  }
+
+  /* Anonymous, or signed in another way. Either is a link onto the SAME
+     account, so nothing is stranded. */
+  const owned = String(current.email || "").toLowerCase();
+  if (owned && owned !== address.toLowerCase()) {
+    throw new Error(`auth/wrong-email:${current.email}`);
+  }
+
+  await linkWithCredential(current, EmailAuthProvider.credential(current.email || address, secret));
+  try { await fb.auth.currentUser.reload(); } catch {}
+  uid = fb.auth.currentUser.uid;
+  clearError();
+  return { ok: true, outcome: "added" };
+}
+
 export const needsPassword = () => canManage() && !hasPassword();
 
 export const hasPassword = () => {

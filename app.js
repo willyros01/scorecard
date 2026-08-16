@@ -1802,6 +1802,66 @@ function note(what) {
   if (trail.length > 25) trail.shift();
 }
 
+/* Good news, in the same shape as the problem dialog but without any of the
+ * error machinery.
+ *
+ * Using openProblem for something that had gone RIGHT titled it "That did not
+ * work", labelled the report "BUG", and offered to send it — so a successful
+ * admin join arrived as a bug report. Anything informational belongs here. */
+/* Setting or changing the password, available to anybody signed in, at any
+   time, from the account bubble. No conditions. */
+function openPasswordSheet({ heading, because, allowLater = false } = {}) {
+  const email = db.currentEmail();
+  const has = db.hasPassword();
+  sheetEl.hidden = false;
+  sheetEl.innerHTML = `<div class="sheet-body">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <h2>${esc(heading || (has ? "Change your password" : "Set a password"))}</h2>
+      ${allowLater ? "" : `<button class="rowbtn" data-close="1">Close</button>`}</div>
+
+    ${because ? `<div class="note tip">${esc(because)}</div>` : ""}
+
+    ${has
+      ? `<p class="hint">This account already signs in with a password. Setting a new one replaces it.</p>`
+      : email
+        ? `<p class="hint">This account signs in another way, with no password of its own. Adding one means you can sign in with an email address and password anywhere.</p>`
+        : `<p class="hint">This device has no account. Adding an email and password keeps your role and your groups when you change browser or device.</p>`}
+
+    <label class="lbl">Email</label>
+    <input class="field" name="pw-email" type="email" value="${esc(email || "")}"
+           placeholder="you@example.com" autocomplete="username" autocapitalize="none"
+           ${email ? "readonly" : ""}>
+    ${email ? `<p class="hint">This is the account you are signed in as. The password will belong to it.</p>` : ""}
+
+    <label class="lbl">${has ? "New password" : "Password for this app"}</label>
+    <input class="field" name="pw-secret" type="password" autocomplete="new-password"
+           placeholder="At least 6 characters">
+
+    <div class="inline-actions stacked">
+      <button class="btn" data-pw="save">${has ? "Change it" : "Set it and finish"}</button>
+      ${allowLater ? `<button class="btn ghost" data-pw="later">Not now</button>` : ""}
+    </div>
+    <p class="hint"><b>Not the password for your email account.</b> A new one, for this app only.</p>
+  </div>`;
+}
+
+function openNotice({ title, detail, advice, action }) {
+  sheetEl.hidden = false;
+  sheetEl.dataset.report = "";
+  sheetEl.innerHTML = `<div class="sheet-body">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <h2>${esc(title)}</h2>
+      <button class="rowbtn" data-close="1">Close</button>
+    </div>
+    <div class="note tip">${esc(detail || "")}</div>
+    ${advice ? `<p class="hint"><b>Next:</b> ${esc(advice)}</p>` : ""}
+    <div class="inline-actions stacked">
+      ${action ? `<button class="btn" data-act="${esc(action.act)}">${esc(action.label)}</button>` : ""}
+      <button class="btn ${action ? "ghost" : ""}" data-close="1">Got it</button>
+    </div>
+  </div>`;
+}
+
 function openProblem({ title, detail, advice, fatal = false }) {
   note(`problem: ${title}`);
   const report = [
@@ -2012,6 +2072,11 @@ document.getElementById("statusBtn").onclick = () => {
     <div class="card padded">
       <div class="name">${esc(email || "No account — this device only")}</div>
       <div class="sub">${esc(sync.text)}${association ? ` · ${esc(association.name)}` : ""}${db.myRole() ? ` · ${esc(db.myRole())}` : ""}</div>
+      <div class="sub"><b>${db.hasPassword()
+        ? "This account has a password"
+        : email
+          ? "This account has NO password — it signs in another way"
+          : "No account, so no password"}</b></div>
     </div>
 
     ${!email && db.canManage() ? `<div class="note warn">
@@ -2025,7 +2090,7 @@ document.getElementById("statusBtn").onclick = () => {
 
     <div class="inline-actions stacked">
       <button class="btn ghost" data-quick="backup">Back up my data</button>
-      ${!email && db.canManage() ? `<button class="btn" data-quick="setpassword">Set a password</button>` : ""}
+      <button class="btn ${db.hasPassword() ? "ghost" : ""}" data-quick="setpassword">${db.hasPassword() ? "Change my password" : "Set a password"}</button>
       <button class="btn ghost warn" data-quick="signout">Sign out of this device</button>
     </div>
     <p class="hint">Signing out deletes nothing. It returns this device to the first screen.${email ? "" : " Without an account, you will need your invitation link to come back."}</p>
@@ -2349,15 +2414,13 @@ view.addEventListener("click", async (e) => {
           /* Said properly rather than as a passing message. An admin without an
              account can manage everything, but only from this browser — they
              need to understand that before they walk away from it. */
-          tab = "admin";
-          openProblem({
-            title: "You're in as an admin",
-            detail: "One thing left: set an email and password. Your role works right now, but it exists only in this browser — it cannot follow you to another device, and it disappears if this browser's data is cleared.",
-            advice: "The form is waiting at the top of the Admin tab.",
-          });
-        } else {
-          flashMsg("You're in. Post your round on the Enter tab.");
+          /* The password step happens HERE, as part of joining — not as a
+             pointer to somewhere they have to go and find. An admin who walks
+             away without one is locked out the moment this browser forgets
+             them, and their invitation is already spent. */
+          tab = "manage";
         }
+        finishJoining();
       } catch (err) {
         joining = false;
         idleAll();
@@ -2551,10 +2614,10 @@ view.addEventListener("click", async (e) => {
          That deserves more than a confirmation. */
       if (!db.hasPassword()) {
         confirmSignOut = false;
-        return openProblem({
+        return openNotice({
           title: "Set a password first",
-          detail: "This device has no account yet, so there is nothing to sign back in with. Signing out now would lock you out, and your invitation link will not work a second time.",
-          advice: "Set an email and password above, then sign out whenever you like. If you are certain, whoever runs the group can send you a fresh invitation afterwards.",
+          detail: "This device has no account yet, so there is nothing to sign back in with. Signing out now would lock you out, and an invitation link only works once.",
+          advice: "Set an email and password above, then sign out whenever you like.",
         });
       }
 
@@ -2645,6 +2708,40 @@ sheetEl.addEventListener("click", async (e) => {
      belong to, and does not depend on the group still existing. That is why it
      is here — a stale entry kept coming back after every sign-in, and nothing
      that tried to be clever about it ever worked. */
+  const savingPassword = e.target.closest("[data-pw]");
+  if (savingPassword) {
+    if (savingPassword.dataset.pw === "later") {
+      /* Allowed, but never silently — somebody who skips this can be locked
+         out, and they should hear that once, plainly, before it happens. */
+      sheetEl.hidden = true;
+      openNotice({
+        title: "You can set it later",
+        detail: "Until you do, your admin role lives only in this browser. If it forgets you, or you sign out, you will need a fresh invitation from whoever runs the group.",
+        advice: "Tap the status button at the top right whenever you want to set it.",
+      });
+      return;
+    }
+    const email = ((sheetEl.querySelector('[name="pw-email"]') || {}).value || "").trim();
+    const secret = (sheetEl.querySelector('[name="pw-secret"]') || {}).value || "";
+    if (!email) { flashMsg("Type your email address"); return; }
+    if (secret.length < 6) { flashMsg("The password needs at least six characters"); return; }
+
+    sheetEl.hidden = true;
+    busy("Saving your password");
+    try {
+      await db.setMyPassword({ email, password: secret });
+      openNotice({
+        title: "Password saved",
+        detail: `Sign in with ${email} and this password on any device, and your role and groups come with you.`,
+      });
+    } catch (err) {
+      idleAll();
+      openSignInProblem(err, email);
+    } finally { idleAll(); }
+    render();
+    return;
+  }
+
   const reopening = e.target.closest("[data-reset-invite]");
   if (reopening) {
     const id = reopening.dataset.resetInvite;
@@ -2837,16 +2934,19 @@ sheetEl.addEventListener("click", async (e) => {
     const what = quick.dataset.quick;
     if (what === "backup") { sheetEl.hidden = true; return openBackupSheet(); }
     if (what === "setpassword") {
-      sheetEl.hidden = true;
-      tab = "admin";
-      render();
+      /* Opened right here rather than sending them to a tab.
+       *
+       * Pointing at a tab failed twice: Admin turns non-owners away, and the
+       * form only appeared when the app judged it was needed. Somebody asking
+       * for it should simply get it. */
+      openPasswordSheet();
       return;
     }
 
     if (what === "signout") {
       if (!db.hasPassword()) {
         sheetEl.hidden = true;
-        return openProblem({
+        return openNotice({
           title: "Set a password first",
           detail: "This device has no account yet, so there is nothing to sign back in with. Signing out now would lock you out, and an invitation link only works once.",
           advice: db.canManage()
@@ -3149,8 +3249,24 @@ async function acceptInvite() {
     await start(invite.associationId);
     joining = false;
     idleAll();
-    flashMsg("You're in. Post your round on the Enter tab.");
+    finishJoining();
+    render();
   } else { joining = false; idleAll(); render(); }
+}
+
+/* Every route into a group ends here, so an admin is never left without the
+   password step whichever way they arrived — by named link, by open link, or
+   by typing a code. */
+function finishJoining() {
+  if (db.canManage() && !db.hasPassword()) {
+    openPasswordSheet({
+      heading: "One last step",
+      because: `You are in as ${db.myRole() === "owner" ? "the owner" : "an admin"}. Setting a password now means your role follows you to any device — without one it lives only in this browser, and cannot be recovered if it is cleared.`,
+      allowLater: true,
+    });
+    return;
+  }
+  flashMsg("You're in. Post your round on the Enter tab.");
 }
 
 async function joinByCode() {
@@ -3175,7 +3291,8 @@ async function joinByCode() {
     await start(assocId);
     joining = false;
     idleAll();
-    flashMsg("You're in. Post your round on the Enter tab.");
+    finishJoining();
+    render();
   } else { joining = false; idleAll(); render(); }
 }
 
@@ -3291,7 +3408,7 @@ async function addGolfer() {
   const already = golfers.find((g) => g.name.toLowerCase() === name.toLowerCase());
   if (already) {
     idleAll();
-    openProblem({
+    openNotice({
       title: `${already.name} is already on this roster`,
       detail: "Nothing was added. One person should appear once, or their rounds and handicap end up split between two records.",
       advice: "If you meant somebody different, give them a middle initial or surname so the two names are distinct.",
@@ -3306,10 +3423,9 @@ async function addGolfer() {
       /* Worth a proper message rather than a flash: it means the handicap and
          rounds came with them, which is exactly what somebody adding a name by
          hand is trying to avoid getting wrong. */
-      openProblem({
+      openNotice({
         title: `${golfer.name} was already known`,
         detail: `They have been added to this roster as the same person, so their rounds and handicap${golfer.handicapIndex != null ? ` (index ${Number(golfer.handicapIndex).toFixed(1)})` : ""} come with them. No second record was created.`,
-        advice: "",
       });
     } else {
       flashMsg(`${golfer.name} added`);
