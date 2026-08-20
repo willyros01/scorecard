@@ -504,3 +504,54 @@ body { font-size: 1rem; }
   background: var(--tint); border: 2px solid var(--sand); border-radius: 14px;
 }
 .invited-as .big { font-size: 1.6rem; font-weight: 700; line-height: 1.2; }
+
+/* ---- entering a round one step at a time ----
+ * The same fields as the full form, the same checks, simply larger and one at
+ * a time. Chosen per person and remembered; the full form remains the default.
+ */
+.step-head { display: flex; align-items: center; gap: 0.8rem; margin-bottom: 0.9rem; }
+.step-bar { flex: 1; height: 7px; border-radius: 4px; background: var(--rule); overflow: hidden; }
+.step-bar span { display: block; height: 100%; background: var(--pine); transition: width .25s ease; }
+[data-theme="dark"] .step-bar span { background: #7EBEA0; }
+.step-count { font-size: 0.85rem; color: var(--muted); white-space: nowrap; }
+
+.step-chosen {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.5rem;
+  padding-bottom: 0.7rem; margin-bottom: 1rem; border-bottom: 1px solid var(--rule);
+  font-size: 0.95rem;
+}
+.step-chosen .sub { color: var(--muted); }
+
+.step-body { padding: 0.4rem 0 0.6rem; }
+.step-ask { margin: 0 0 0.8rem; font-size: 1.35rem; font-weight: 700; line-height: 1.25; }
+.step-value {
+  font-size: 1.6rem; font-weight: 700; padding: 0.9rem 1rem;
+  background: var(--tint); border: 2px solid var(--sand); border-radius: 12px; text-align: center;
+}
+.field.big { font-size: 1.2rem; padding: 0.9rem 0.8rem; }
+.field.score {
+  font-family: var(--mono); font-size: 3rem; font-weight: 700; text-align: center;
+  padding: 0.7rem; border-width: 2.5px; border-color: var(--pine);
+}
+[data-theme="dark"] .field.score { border-color: #7EBEA0; }
+
+.tee-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; }
+@media (max-width: 380px) { .tee-grid { grid-template-columns: 1fr; } }
+.tee-choice {
+  text-align: left; padding: 0.8rem 0.9rem; border-radius: 12px;
+  border: 2px solid var(--rule); background: var(--paper); cursor: pointer;
+  display: flex; flex-direction: column; gap: 0.15rem; font: inherit; color: inherit;
+}
+.tee-choice .name { font-weight: 700; }
+.tee-choice .sub { font-size: 0.85rem; color: var(--muted); font-family: var(--mono); }
+.tee-choice.picked { border-color: var(--pine); background: var(--tint); }
+[data-theme="dark"] .tee-choice.picked { border-color: #7EBEA0; }
+
+.step-note {
+  margin-top: 0.6rem; font-family: var(--mono); font-size: 0.95rem; color: var(--muted);
+}
+.step-nav { display: flex; justify-content: space-between; gap: 0.8rem; margin-top: 1.2rem; }
+.step-nav .btn { flex: 1; }
+
+.style-switch { margin-top: 1.4rem; text-align: center; }
+.field.locked.warn { border-color: var(--pencil); color: var(--pencil); }

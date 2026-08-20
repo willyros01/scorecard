@@ -6,6 +6,17 @@ const VERSION = (typeof self !== "undefined" && self.APP_VERSION) || "dev";
 const SUPER_ADMIN = "willyros01@gmail.com";
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 const today = () => new Date().toISOString().slice(0, 10);
+
+/* A date a person would say out loud. Falls back to the raw value rather than
+   throwing on anything unexpected — restored rounds can carry odd dates. */
+const prettyDate = (iso) => {
+  if (typeof iso !== "string" || iso.length < 10) return iso || "No date";
+  const [y, m, d] = iso.split("-").map(Number);
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  if (!months[m - 1]) return iso;
+  return `${d} ${months[m - 1]} ${y}`;
+};
 const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
 
 /* ================= state ================= */
@@ -35,6 +46,29 @@ let sync = { text: "Starting", alert: false };
 let flash = null;
 let joinForm = { name: "", groupName: "", code: "", ownerPlays: true };
 let form = { date: today(), golferId: "", courseId: "", teeId: "", gross: "", adjusted: "", notes: "", gameId: "" };
+
+/* Two ways to enter a round, and the person chooses.
+ *
+ * "full"  — every field at once. Right for an admin typing in a whole
+ *           fourball's cards after a game.
+ * "steps" — one thing at a time, large. Right for posting your own round
+ *           standing in a car park.
+ *
+ * The FIELDS, the ORDER and every CHECK are identical in both. Only the
+ * layout differs, so nothing about what gets saved can diverge. Defaults to
+ * "full", because that is what people already know. */
+let enterStyle = (() => {
+  try { return localStorage.getItem("golf:v2:enterStyle") === "steps" ? "steps" : "full"; }
+  catch { return "full"; }
+})();
+let stepIndex = 0;
+let stepDateOpen = false;
+
+const setEnterStyle = (which) => {
+  enterStyle = which === "steps" ? "steps" : "full";
+  stepIndex = 0;
+  try { localStorage.setItem("golf:v2:enterStyle", enterStyle); } catch {}
+};
 let filter = { golferId: "", year: "", month: "", courseId: "" };
 let drill = { year: null, month: null };
 let openGame = null;
@@ -330,7 +364,134 @@ async function importV1() {
 
 /* ================= enter ================= */
 
+/* One step at a time.
+ *
+ * The same four things, in the same order, with the same checks — only shown
+ * one at a time and much larger. Post still enables on exactly the condition
+ * the full form uses, so the two cannot drift apart. */
+function enterInSteps({ course, tee, golfer, ags, diff, ch, ready2, pickableGames }) {
+  const steps = [
+    { key: "who", done: !!golfer, label: "Golfer" },
+    { key: "where", done: !!tee, label: "Course and tees" },
+    { key: "score", done: +form.gross > 0, label: "Score" },
+  ];
+  /* Land on the first thing still outstanding, unless they have moved by hand. */
+  const firstUndone = steps.findIndex((s) => !s.done);
+  const at = Math.min(Math.max(0, stepIndex), steps.length - 1);
+  const current = steps[firstUndone === -1 ? at : Math.max(at, 0)] || steps[0];
+  const showing = stepIndex === 0 && firstUndone !== -1 ? steps[firstUndone] : current;
+
+  const done = steps.filter((s) => s.done).length;
+  const chosen = [
+    prettyDate(form.date),
+    golfer ? golfer.name : null,
+    course ? course.name : null,
+    tee ? tee.name : null,
+  ].filter(Boolean).join(" · ");
+
+  const body = () => {
+    if (showing.key === "who") {
+      if (!db.canManage()) {
+        return `<div class="step-body">
+          <p class="step-ask">Posting for</p>
+          <div class="step-value">${esc(golfer ? golfer.name : "Not linked yet")}</div>
+          ${golfer ? "" : `<p class="hint">Your account is not tied to a golfer on this roster. Ask whoever runs the group for an invitation link with your name on it.</p>`}
+        </div>`;
+      }
+      return `<div class="step-body">
+        <p class="step-ask">Who played?</p>
+        <select class="field big" name="golferId">
+          <option value="">Choose the golfer…</option>
+          ${sortedGolfers().map((g) => `<option value="${g.id}" ${g.id === form.golferId ? "selected" : ""}>${esc(g.name)}</option>`).join("")}
+        </select>
+      </div>`;
+    }
+
+    if (showing.key === "where") {
+      return `<div class="step-body">
+        <p class="step-ask">Where did they play?</p>
+        <select class="field big" name="courseId">
+          <option value="">Choose the course…</option>
+          ${sortedCourses().map((c) => `<option value="${c.id}" ${c.id === form.courseId ? "selected" : ""}>${esc(c.name)}</option>`).join("")}
+        </select>
+        ${course ? `<p class="step-ask" style="margin-top:1.2rem">From which tees?</p>
+          <div class="tee-grid">
+            ${course.tees.map((t) => `<button class="tee-choice ${t.id === form.teeId ? "picked" : ""}" data-tee="${t.id}">
+              <span class="name">${esc(t.name)}</span>
+              <span class="sub">${(+t.rating).toFixed(1)} / ${t.slope} · par ${t.par}</span>
+            </button>`).join("")}
+          </div>` : ""}
+      </div>`;
+    }
+
+    return `<div class="step-body">
+      <p class="step-ask">What did they shoot?</p>
+      <input class="field score" name="gross" inputmode="numeric" value="${esc(form.gross)}" placeholder="—">
+      <p class="hint">${form.adjusted && form.adjusted !== form.gross
+        ? `Adjusted ${esc(form.adjusted)}`
+        : "Adjusted score is the same unless you set it."}</p>
+      ${ch != null ? `<div class="step-note">Course handicap ${ch}${+form.gross > 0 ? ` · net ${ags - ch}` : ""}</div>` : ""}
+      ${diff != null ? `<div class="step-note">Differential ${diff.toFixed(1)}</div>` : ""}
+      ${pickableGames.length ? `<label class="lbl" style="margin-top:1rem">Part of a game</label>
+        <select class="field" name="gameId">
+          <option value="">Not part of a game</option>
+          ${pickableGames.map((g) => `<option value="${g.id}" ${g.id === form.gameId ? "selected" : ""}>${esc(g.name || courseName(g.courseId))} — ${esc(model.gameSpanLabel(g))}</option>`).join("")}
+        </select>` : ""}
+    </div>`;
+  };
+
+  return `<div class="stack">
+    ${flashBar()}
+
+    <div class="step-head">
+      <div class="step-bar"><span style="width:${Math.round((done / steps.length) * 100)}%"></span></div>
+      <div class="step-count">Step ${steps.indexOf(showing) + 1} of ${steps.length}</div>
+    </div>
+
+    <div class="step-chosen">
+      <button class="linkbtn" data-act="step-date">${esc(prettyDate(form.date))}</button>
+      ${chosen.split(" · ").slice(1).length ? `<span class="sub">${esc(chosen.split(" · ").slice(1).join(" · "))}</span>` : ""}
+    </div>
+
+    ${stepDateOpen ? `<div class="card padded">
+      <label class="lbl">Date of the round</label>
+      <input class="field" type="date" name="date" id="round-date" value="${form.date}">
+      <div class="inline-actions">
+        <button class="btn compact" data-act="step-date-done">Done</button>
+        ${form.date === today() ? "" : `<button class="btn ghost compact" data-act="date-today">Today</button>`}
+      </div>
+    </div>` : ""}
+
+    ${body()}
+
+    <div class="step-nav">
+      ${steps.indexOf(showing) > 0 ? `<button class="btn ghost" data-act="step-back">Back</button>` : `<span></span>`}
+      ${steps.indexOf(showing) < steps.length - 1
+        ? `<button class="btn" data-act="step-next" ${showing.done ? "" : "disabled"}>Next</button>`
+        : `<button class="btn" data-act="post" ${ready2 ? "" : "disabled"}>${editingRound ? "Save changes" : "Post round"}</button>`}
+    </div>
+
+    <p class="hint" id="post-hint">${ready2 || steps.indexOf(showing) < steps.length - 1 ? "" : [
+      form.golferId ? "" : "choose the golfer",
+      course ? (tee ? "" : "choose the tees") : "choose the course",
+      +form.gross > 0 ? "" : "type the score",
+    ].filter(Boolean).join(", ").replace(/^./, (c) => c.toUpperCase()) + " to enable Post."}</p>
+
+    <div class="style-switch"><button class="linkbtn" data-act="enter-full">Show every field at once instead</button></div>
+    ${versionBlock()}
+  </div>`;
+}
+
 function screenEnter() {
+  /* A guest posts only for themselves, so their golfer is fixed — but nothing
+     ever set it, so form.golferId stayed empty, the field fell back to the word
+     "You", and Post could never enable. A guest simply could not use the app.
+     Seeding it here covers every route in, including a fresh join. */
+  if (!db.canManage() && !form.golferId) {
+    const mine = typeof db.myGolferId === "function" ? db.myGolferId(allGolfers) : "";
+    if (mine) form.golferId = mine;
+  }
+
   if (!golfers.length || !courses.length) {
     /* An empty group with a version 1 scorecard waiting is the commonest state
        to be stuck in, so the way out is offered here rather than three taps
@@ -371,9 +532,16 @@ function screenEnter() {
      and rounds silently ended up in no game — or the wrong one. */
   const pickableGames = [...games].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
 
+  /* Both layouts are built from the SAME values computed above — course, tee,
+     golfer, ready2. Nothing about what is required or what is saved differs. */
+  if (enterStyle === "steps" && !editingRound) {
+    return enterInSteps({ course, tee, golfer, ags, diff, ch, ready2, pickableGames });
+  }
+
   return `<div class="stack">
     ${flashBar()}
     ${editingRound ? `<div class="note warn">Editing a posted round <button class="linkbtn" data-act="cancel-round-edit">Cancel</button></div>` : ""}
+    ${db.canManage() ? "" : `<div class="style-switch"><button class="linkbtn" data-act="enter-steps">Switch to one step at a time</button></div>`}
 
     <div class="row">
       <div>
@@ -385,7 +553,16 @@ function screenEnter() {
         <div class="eyebrow">Golfer</div>
         ${db.canManage() ? `<select class="field" name="golferId"><option value="">Select…</option>
           ${sortedGolfers().map((g) => `<option value="${g.id}" ${g.id === form.golferId ? "selected" : ""}>${esc(g.name)}</option>`).join("")}
-        </select>` : `<div class="field locked">${esc((golferById(form.golferId) || {}).name || "You")}</div>`}
+        </select>` : (() => {
+          /* Their real name, never the word "You" — and if we genuinely cannot
+             work out who they are, say so plainly instead of leaving a dead
+             Post button with no explanation. */
+          const me = golferById(form.golferId);
+          return me
+            ? `<div class="field locked">${esc(me.name)}</div>`
+            : `<div class="field locked warn">Not linked yet</div>
+               <p class="hint">Your account is not tied to a golfer on this roster, so a round cannot be posted. Ask whoever runs the group to send you an invitation link with your name on it.</p>`;
+        })()}
       </div>
     </div>
 
@@ -437,6 +614,7 @@ function screenEnter() {
       +form.gross > 0 ? "" : "type the score",
     ].filter(Boolean).join(", ").replace(/^./, (c) => c.toUpperCase()) + " to enable Post."}</p>
     <button class="btn" data-act="post" ${ready2 ? "" : "disabled"}>${editingRound ? "Save changes" : "Post round"}</button>
+    ${db.canManage() && !editingRound ? `<div class="style-switch"><button class="linkbtn" data-act="enter-steps">Switch to one step at a time</button></div>` : ""}
   </div>`;
 }
 
@@ -2193,7 +2371,12 @@ view.addEventListener("change", (e) => {
    * grid vanished after changing the month, and why the panel used to close.
    * Read the value, update state, update the hint text. Nothing else. */
   if (n === "date") { form.date = v; updateEnterHints(); return; }
-  if (n === "golferId") { form.golferId = v; render(); }
+  if (n === "golferId") {
+    form.golferId = v;
+    /* In the walk-through, choosing moves you on — that is the point of it. */
+    if (enterStyle === "steps" && v) stepIndex = 1;
+    render();
+  }
   if (n === "gameId") { form.gameId = v; }
   if (n === "courseId") {
     const c = courseById(v);
@@ -2357,6 +2540,12 @@ view.addEventListener("click", async (e) => {
     case "clear-filters": filter = { golferId: "", year: "", month: "", courseId: "" }; return render();
     case "drill-back": drill.month ? (drill.month = null) : (drill.year = null); return render();
     case "view-scope": filter = { golferId: "", year: drill.year || "", month: drill.month || "", courseId: "" }; tab = "history"; return render();
+    case "enter-steps": setEnterStyle("steps"); return render();
+    case "enter-full": setEnterStyle("full"); return render();
+    case "step-next": stepIndex = Math.min(2, stepIndex + 1); return render();
+    case "step-back": stepIndex = Math.max(0, stepIndex - 1); return render();
+    case "step-date": stepDateOpen = !stepDateOpen; return render();
+    case "step-date-done": stepDateOpen = false; return render();
     case "date-today": {
       /* Writes the value straight into the field as well as into state. Setting
          only the state left the picker showing the old date, which is why this
