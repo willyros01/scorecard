@@ -555,3 +555,118 @@ body { font-size: 1rem; }
 
 .style-switch { margin-top: 1.4rem; text-align: center; }
 .field.locked.warn { border-color: var(--pencil); color: var(--pencil); }
+
+/* ---- our own calendar ----
+ * The native date input on iOS never draws its day grid after the month or
+ * year changes, and five workarounds all failed. This is drawn entirely by the
+ * app, so it behaves the same everywhere, and the day targets are far larger.
+ */
+.datebtn {
+  display: flex; align-items: center; justify-content: space-between;
+  width: 100%; text-align: left; font: inherit; color: inherit; cursor: pointer;
+}
+.datebtn.open { border-color: var(--pine); }
+[data-theme="dark"] .datebtn.open { border-color: #7EBEA0; }
+.datebtn-hint { color: var(--muted); margin-left: 0.6rem; }
+
+.cal {
+  margin-top: 0.6rem; padding: 0.9rem;
+  background: var(--paper); border: 2px solid var(--sand); border-radius: 14px;
+}
+.cal-head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+.cal-title { font-weight: 700; font-size: 1.05rem; }
+.cal-arrow {
+  width: 46px; height: 42px; border-radius: 10px; font-size: 1.4rem; line-height: 1;
+  border: 1.5px solid var(--rule); background: var(--card); color: var(--ink); cursor: pointer;
+}
+.cal-week, .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.cal-week { margin: 0.7rem 0 0.2rem; }
+.cal-week span { text-align: center; font-size: 0.78rem; color: var(--muted); }
+.cal-day {
+  aspect-ratio: 1; min-height: 42px; border-radius: 10px;
+  border: 1.5px solid transparent; background: var(--card);
+  font: inherit; font-size: 1rem; color: var(--ink); cursor: pointer;
+}
+.cal-day:disabled { opacity: .3; cursor: default; }
+.cal-day.today { border-color: var(--sand); font-weight: 700; }
+.cal-day.picked { background: var(--pine); color: #fff; font-weight: 700; border-color: var(--pine); }
+[data-theme="dark"] .cal-day.picked { background: #7EBEA0; color: #14261F; border-color: #7EBEA0; }
+.cal-blank { min-height: 42px; }
+.cal-foot { display: flex; gap: 0.6rem; margin-top: 0.8rem; }
+.cal-foot .btn { flex: 1; }
+
+/* ---- the roster row ----
+ * A name and four buttons will never fit across a phone; they overlapped
+ * instead. The name gets its own line, the common action is wide, and the two
+ * rare ones sit behind a menu — which also puts Remove out of accidental reach.
+ */
+.roster-row { padding: 0.85rem 0.9rem; border-bottom: 1px solid var(--rule); }
+.roster-row:last-child { border-bottom: 0; }
+.roster-name { display: flex; flex-direction: column; gap: 0.15rem; margin-bottom: 0.6rem; }
+.roster-name .name { font-weight: 700; font-size: 1.05rem; }
+.roster-actions { display: flex; gap: 0.5rem; align-items: stretch; }
+.roster-actions .rowbtn { min-height: 42px; }
+.rowbtn.wide { flex: 1; }
+.rowbtn.primary { background: var(--pine); color: #fff; border-color: var(--pine); font-weight: 700; }
+[data-theme="dark"] .rowbtn.primary { background: #7EBEA0; color: #14261F; border-color: #7EBEA0; }
+.rowbtn.more { width: 48px; letter-spacing: 1px; }
+.roster-more {
+  display: flex; gap: 0.5rem; margin-top: 0.6rem;
+  padding-top: 0.6rem; border-top: 1px dashed var(--rule);
+}
+.roster-more .rowbtn { flex: 1; min-height: 42px; }
+
+/* ---- the opening screen ----
+ * A checklist rather than a sentence: four named steps, each ticking as it
+ * genuinely completes. When it takes longer than expected you can see WHICH
+ * step is slow, which a spinner never tells you.
+ */
+.boot-card {
+  max-width: 22rem; margin: 12vh auto 0; padding: 2rem 1.8rem;
+  background: var(--paper); border: 1px solid var(--rule); border-radius: 18px;
+  box-shadow: 0 12px 40px rgba(20,38,31,.10);
+}
+[data-theme="dark"] .boot-card { background: #16241E; border-color: #2C4A3C; }
+.boot-brand {
+  font-size: 0.72rem; letter-spacing: .2em; text-transform: uppercase;
+  color: var(--muted); margin-bottom: 0.5rem;
+}
+.boot-title { font-family: var(--display); font-size: 1.5rem; margin-bottom: 1.4rem; }
+.boot-steps { list-style: none; margin: 0 0 1.4rem; padding: 0; }
+.boot-steps li {
+  display: flex; align-items: center; gap: 0.7rem;
+  padding: 0.45rem 0; font-size: 1rem; color: var(--muted);
+}
+.boot-steps li .mark { width: 1.2rem; text-align: center; font-size: 1.05rem; }
+.boot-steps li.done, .boot-steps li.now { color: var(--ink); }
+.boot-steps li.now { font-weight: 700; }
+.boot-steps li.done .mark, .boot-steps li.now .mark { color: var(--pine); }
+[data-theme="dark"] .boot-steps li.done,
+[data-theme="dark"] .boot-steps li.now { color: #EAF3EE; }
+[data-theme="dark"] .boot-steps li.done .mark,
+[data-theme="dark"] .boot-steps li.now .mark { color: #7EBEA0; }
+.boot-bar { height: 7px; border-radius: 4px; background: var(--rule); overflow: hidden; }
+.boot-bar span { display: block; height: 100%; background: var(--pine); transition: width .3s ease; }
+[data-theme="dark"] .boot-bar span { background: #7EBEA0; }
+
+/* your own index, first and large, and named */
+.my-index {
+  display: grid; grid-template-columns: 1fr auto; gap: 0.15rem 0.8rem;
+  width: 100%; text-align: left; padding: 1rem 1.1rem; border-radius: 14px;
+  background: var(--pine); color: #fff; border: 0; cursor: pointer; font: inherit;
+}
+[data-theme="dark"] .my-index { background: #1B3A2E; }
+.my-index .label {
+  grid-column: 1 / -1; font-size: 0.72rem; letter-spacing: .14em;
+  text-transform: uppercase; opacity: .75;
+}
+.my-index .who { font-family: var(--display); font-size: 1.25rem; align-self: end; }
+.my-index .figure {
+  grid-column: 1; font-family: var(--mono); font-size: 2.6rem; font-weight: 700; line-height: 1.05;
+}
+.my-index .from { grid-column: 2; align-self: end; font-size: 0.85rem; opacity: .8; }
+
+/* whether an invitation has been taken up */
+.invite-state.joined { color: var(--pine); font-weight: 700; }
+.invite-state.waiting { color: var(--pencil); font-weight: 700; }
+[data-theme="dark"] .invite-state.joined { color: #7EBEA0; }

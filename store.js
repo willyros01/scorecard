@@ -154,13 +154,29 @@ export async function flush() {
   setStatus("Syncing");
   const result = await outbox.flush(writeOperation);
 
-  if (result.remaining === 0) { clearError(); setStatus("Synced"); }
-  else {
+  /* Anything given up on must be SAID. A round that quietly failed to upload
+     and then vanished from the queue is the worst outcome there is — worse than
+     an error, because nobody knows to re-enter it. */
+  if (result.failed) {
+    setError(
+      `${result.failed} change${result.failed === 1 ? "" : "s"} could not be saved`,
+      "The database refused them, usually because the rules in the console are older than this version, or because you no longer have permission for that change. Nothing else was affected — publish the latest firestore.rules and re-enter anything missing."
+    );
+  }
+
+  if (result.remaining === 0) {
+    if (!result.failed) clearError();
+    setStatus(result.failed ? "Synced, with problems" : "Synced");
+  } else {
     setStatus(`Saved on device (${result.remaining} waiting)`, true);
     if (result.stoppedOn) report(new Error(result.stoppedOn.error));
   }
   return result;
 }
+
+/* Writes the queue gave up on, so a screen can show what was lost rather than
+   leaving somebody to find a missing round weeks later. */
+export const abandonedWrites = () => outbox.abandoned();
 
 /* ---------------- associations and joining ---------------- */
 
@@ -526,7 +542,16 @@ export function addGame({ date, endDate = null, courseId, name }) {
 export function watchGolfers(callback) {
   const { onSnapshot } = fb.mod.store;
   const stop = onSnapshot(col("golfers"),
-    (snap) => { clearError(); callback(snap.docs.map((d) => d.data())); },
+    (snap) => {
+      clearError();
+      /* Archived people are filtered out HERE, at the single point every screen
+         reads from, rather than in each list separately — one place to get
+         right instead of a dozen. Hidden, never destroyed: clearing the flag
+         brings them straight back. */
+      callback(snap.docs
+        .map((d) => ({ ...d.data(), id: d.id }))
+        .filter((g) => !g.archived));
+    },
     (e) => report(e));
   unsubscribers.push(stop);
   return stop;
@@ -548,7 +573,16 @@ export function watchRounds(callback, { max = 500 } = {}) {
   const { onSnapshot, query, orderBy, limit } = fb.mod.store;
   const stop = onSnapshot(
     query(col("associations", assocId, "rounds"), orderBy("date", "desc"), limit(max)),
-    (snap) => { clearError(); callback(snap.docs.map((d) => d.data())); },
+    (snap) => {
+      clearError();
+      /* Archived people are filtered out HERE, at the single point every screen
+         reads from, rather than in each list separately — one place to get
+         right instead of a dozen. Hidden, never destroyed: clearing the flag
+         brings them straight back. */
+      callback(snap.docs
+        .map((d) => ({ ...d.data(), id: d.id }))
+        .filter((g) => !g.archived));
+    },
     (e) => report(e)
   );
   unsubscribers.push(stop);
@@ -846,6 +880,21 @@ export const joinLink = (association) =>
  * The link carries whichever secret matches the role, so the rules can VERIFY
  * the role rather than trust a label. An admin link holds a different code
  * entirely, which is why a guest cannot edit their own link into an admin one. */
+/* Records that an invitation was sent, so the People list can show who is still
+   outstanding. Written on the golfer — only the MOST RECENT invitation matters,
+   and a list of old ones was impossible to read. */
+export function noteInvitation(golferId, role) {
+  if (!golferId) return;
+  outbox.enqueue({
+    type: "update",
+    path: ["golfers", golferId],
+    data: { invitedAt: Date.now(), invitedAs: role === "admin" ? "admin" : "member",
+            editedIn: assocId },
+    opId: `golfer-invited-${golferId}`,
+  });
+  flush();
+}
+
 export function inviteLink(role = "member", golferId = null) {
   const group = currentAssociationDoc();
   if (!group) return "";
@@ -1092,7 +1141,9 @@ export async function renameGolfer(golferId, name) {
      failure in the middle left a name claimed by nobody, so it could never be
      used again. */
   const writes = [
-    { op: "set", path: ["golfers", golferId], data: { name: tidy, nameKey: key } },
+    /* editedIn is what lets the rules confirm this rename is legitimate —
+       see the golfers block in firestore.rules. */
+    { op: "set", path: ["golfers", golferId], data: { name: tidy, nameKey: key, editedIn: assocId } },
     { op: "set", path: ["golferNames", key], data: { golferId, name: tidy } },
   ];
   if (beforeKey) writes.push({ op: "delete", path: ["golferNames", beforeKey] });
@@ -1623,7 +1674,14 @@ export function setManualIndex(golferId, index) {
   outbox.enqueue({
     type: "update",
     path: ["golfers", golferId],
-    data: { manualIndex: index == null ? null : model.clampIndex(index) },
+    /* editedIn names the group this change is made on behalf of. The rules
+       verify it — that you really are an admin there and that this golfer is
+       really on that roster — so it is a claim they can check, not one they
+       have to trust. Without it the write is refused. */
+    data: {
+      manualIndex: index == null ? null : model.clampIndex(index),
+      editedIn: assocId,
+    },
     opId: `golfer-manual-${golferId}-${Date.now()}`,
   });
   flush();
@@ -1657,7 +1715,7 @@ export async function golfersInMyOtherGroups() {
       if (seen.has(id)) { seen.get(id).groups.push(group.name); continue; }
       try {
         const person = await getDoc_(id);
-        if (person) seen.set(id, { ...person, groups: [group.name] });
+        if (person && !person.archived) seen.set(id, { ...person, groups: [group.name] });
       } catch {}
     }
   }

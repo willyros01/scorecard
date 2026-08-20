@@ -73,7 +73,19 @@
   </div>
   <div id="alert" class="alert" role="alert" hidden></div>
 
-  <main id="view" aria-live="polite"><div class="boot">Opening your scorecard…</div></main>
+  <main id="view" aria-live="polite">
+    <div class="boot-card">
+      <div class="boot-brand">The Scorecard</div>
+      <div class="boot-title">Opening your scorecard</div>
+      <ul class="boot-steps">
+        <li class="now"><span class="mark">◉</span><span>Checking your access</span></li>
+        <li class="todo"><span class="mark">○</span><span>Loading your group</span></li>
+        <li class="todo"><span class="mark">○</span><span>Loading recent scores</span></li>
+        <li class="todo"><span class="mark">○</span><span>Almost ready</span></li>
+      </ul>
+      <div class="boot-bar"><span style="width:0%"></span></div>
+    </div>
+  </main>
 
   <nav class="tabs" id="tabs" role="tablist"></nav>
   <div id="sheet" class="sheet" hidden></div>

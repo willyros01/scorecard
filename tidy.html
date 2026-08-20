@@ -122,6 +122,18 @@ async function inspect() {
     try { members = (await getDocs(collection(db, "associations", doc.id, "members"))).size; } catch {}
     groups.push({ id: doc.id, name: data.name || "Unnamed", members });
   }
+  /* OWNER ONLY. This corrects handicaps, archives people and removes empty
+     groups across every group the account owns — the owner's business. The
+     query above returns only groups where ownerUid matches, so an empty result
+     means exactly one thing: this account owns nothing. */
+  if (!groups.length) {
+    say("This page is for group owners", true);
+    say("You are signed in, but this account does not own a group. Ask whoever set the group up to run it.");
+    plan = null;
+    paint();
+    return;
+  }
+
   const reachable = new Set(groups.map((g) => g.id));
 
   /* Every round in every reachable group, and the golfers they belong to. */
@@ -388,13 +400,20 @@ async function repair() {
       for (let i = 0; i < plan.removable.length; i += 200) {
         const batch = writeBatch(db);
         for (const g of plan.removable.slice(i, i + 200)) {
-          batch.delete(doc(db, "golfers", g.id));
+          /* ARCHIVED, not deleted. A delete carries no data, so the rules can
+             check nothing about it — which is why deleting a golfer had to be
+             closed off entirely. An update IS checkable, so an unused golfer is
+             marked archived and hidden everywhere instead, and their name is
+             released for reuse. Nothing is destroyed. */
+          batch.set(doc(db, "golfers", g.id),
+            { archived: true, archivedAt: Date.now(), nameKey: null, editedIn: (groups[0] || {}).id || "" },
+            { merge: true });
           if (g.nameKey) batch.delete(doc(db, "golferNames", g.nameKey));
         }
         await batch.commit();
       }
       fixed += plan.removable.length;
-      say(`${plan.removable.length} unused golfer${plan.removable.length === 1 ? "" : "s"} removed, and their names freed`);
+      say(`${plan.removable.length} unused golfer${plan.removable.length === 1 ? "" : "s"} archived, and their names freed`);
     } catch (e) {
       say(`Could not remove the unused golfers — ${(e && e.code) || "refused"}`, true);
     }

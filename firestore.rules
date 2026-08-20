@@ -45,6 +45,27 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/associations/$(assocId)).data;
     }
 
+    /* The golfer this account is linked to. A member may only touch their own
+       rounds; anything wider is an admin's job. Costs one document read per
+       write, which is the price of the rules being able to answer "is this
+       yours?" at all. */
+    function myGolfer(golferId) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/golfers/$(golferId))
+        && get(/databases/$(database)/documents/golfers/$(golferId)).data.linkedUid == request.auth.uid;
+    }
+
+    /* Rules cannot run a query, so they cannot ask "is this person an admin of
+       ANY group holding this golfer?". The write therefore SAYS which group it
+       acts for, in `editedIn`, and the rules verify the claim: you really are an
+       admin there, and the golfer really is on that roster. A false claim fails
+       both checks. */
+    function editingAsAdmin(golferId) {
+      return request.resource.data.editedIn is string
+        && isAdmin(request.resource.data.editedIn)
+        && exists(/databases/$(database)/documents/associations/$(request.resource.data.editedIn)/roster/$(golferId));
+    }
+
     /* The edit window runs from entry time, not the date played, and is
        measured against request.time — the server's clock, not the device's. */
     function withinEditWindow() {
@@ -174,21 +195,30 @@ service cloud.firestore {
         /* enteredBy cannot be forged, and enteredAt must be the server's
            timestamp — otherwise a device could set it in the future and give
            itself an indefinite edit window. */
+        /* Admins post for anybody. A guest posts only for themselves — the
+           screen already enforces this, but a screen is not a safeguard. */
         allow create: if isMember(assocId)
           && request.resource.data.enteredBy == request.auth.uid
           && request.resource.data.enteredAt == request.time
-          && request.resource.data.assocId == assocId;
+          && request.resource.data.assocId == assocId
+          && (isAdmin(assocId) || myGolfer(request.resource.data.golferId));
 
         /* Any member may correct any round for 24 hours after it was entered.
            This follows from "anyone can post for everybody" — the same people
            who can enter a score can fix it. Admins are not time limited. */
+        /* A member may correct their OWN round for 24 hours. Not anybody
+           else's — that was far too wide, and meant one careless guest could
+           edit the whole group's scores. Admins remain unrestricted, because
+           entering and fixing other people's cards is their job. */
         allow update: if isAdmin(assocId)
           || (isMember(assocId) && withinEditWindow()
+              && myGolfer(resource.data.golferId)
+              && request.resource.data.golferId == resource.data.golferId
               && request.resource.data.enteredAt == resource.data.enteredAt
               && request.resource.data.enteredBy == resource.data.enteredBy);
 
         allow delete: if isAdmin(assocId)
-          || (isMember(assocId) && withinEditWindow());
+          || (isMember(assocId) && withinEditWindow() && myGolfer(resource.data.golferId));
       }
 
       /* ---------------- games ---------------- */
@@ -218,19 +248,39 @@ service cloud.firestore {
      * be in a group you are not. Deleting is not permitted from the app —
      * rounds reference golfers, and an orphaned round has no owner. */
     match /golfers/{golferId} {
+      /* Readable by anyone signed in. A golfer is shared across groups, and an
+         invitation must show somebody their own name before they belong to
+         anything. */
       allow read: if signedIn();
-      allow create, update: if signedIn();
 
-      /* Permitted, but only ever from the tidy page, and only for somebody who
-       * has no rounds, no roster place and no account linked to them — the page
-       * checks all three and shows you the list before removing anything.
-       *
-       * The rules cannot verify "has no rounds" without a query, which rules
-       * cannot do. So this is deliberately a trusted operation guarded by the
-       * page rather than by the database: the alternative is leaving every test
-       * golfer in the database for ever, which the user rightly objected to. */
-      allow delete: if signedIn();
+      /* Creating is an everyday act — adding a person to a roster. The name
+         index below stops duplicates. */
+      allow create: if signedIn();
+
+      /* Updating WAS open to any signed-in account anywhere, which meant
+         somebody in an unrelated group — or an anonymous session belonging to
+         no group at all — could rename or overwrite any golfer in the whole
+         database. Three legitimate cases now:
+           1. it is your own linked golfer;
+           2. you are claiming an unlinked golfer as yourself, which is how
+              accepting a named invitation works;
+           3. you administer a group this golfer plays in, and you say which. */
+      allow update: if signedIn() && (
+        resource.data.linkedUid == request.auth.uid
+        || (resource.data.linkedUid == null
+            && request.resource.data.linkedUid == request.auth.uid)
+        || (request.resource.data.linkedUid == resource.data.linkedUid
+            && editingAsAdmin(golferId))
+      );
+
+      /* CLOSED, deliberately. A delete carries no data, so the rules have
+         nothing to check beyond "somebody is signed in" — exactly the hole that
+         let any account remove any golfer in the database. There is no way to
+         make it safe, so tidy.html ARCHIVES an unused golfer instead: an
+         update, which the rules above can verify properly. */
+      allow delete: if false;
     }
+
 
     /* Name uniqueness. One document per name, so two people cannot both be
        "Willy Rosales" and rounds can never be filed against the wrong one.

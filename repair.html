@@ -78,6 +78,14 @@ async function connect() {
 async function findGroups() {
   const { collection, getDocs, query, where } = mod;
   const found = await getDocs(query(collection(db, "associations"), where("ownerUid", "==", uid)));
+
+  /* OWNER ONLY, for the same reason as tidy.html: this writes groups back onto
+     an account. Nothing found means this account owns nothing. */
+  if (found.empty) {
+    say("This page is for group owners", true);
+    say("You are signed in, but this account does not own a group. Ask whoever set the group up to run it.");
+    return;
+  }
   const results = [];
   for (const doc of found.docs) {
     const data = doc.data();

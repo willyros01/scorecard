@@ -22,6 +22,22 @@
 const KEY = "golf:v2:outbox";
 const MAX_ATTEMPTS = 50;
 
+/* Errors that will NEVER succeed however long we wait.
+ *
+ * Retrying these fifty times achieved nothing except keeping the queue stuck —
+ * and because a failure stopped the whole flush, one refused write held every
+ * later one behind it. That is what left a red "2 waiting" on a phone with a
+ * perfectly good connection. */
+const PERMANENT = [
+  "permission-denied", "insufficient permissions", "not-found",
+  "invalid-argument", "failed-precondition", "unauthenticated",
+];
+
+const isPermanent = (error) => {
+  const text = String((error && (error.code || error.message)) || "").toLowerCase();
+  return PERMANENT.some((code) => text.includes(code));
+};
+
 const read = () => {
   try { return JSON.parse(localStorage.getItem(KEY) || "[]"); } catch { return []; }
 };
@@ -64,6 +80,16 @@ export function enqueueOrMerge(operation) {
   const key = operation.path.join("/");
   const existing = [...ops].reverse().find((o) => o.path && o.path.join("/") === key);
 
+  /* A document created and then deleted while still offline never needs to
+     reach the database at all. Sending both meant the create was refused or the
+     delete arrived for something that did not exist yet — and either way the
+     queue jammed. Cancelling the pair locally is correct AND saves a round
+     trip. */
+  if (operation.type === "delete" && existing && existing.type === "set") {
+    write(ops.filter((o) => o.opId !== existing.opId));
+    return { opId: existing.opId, cancelled: true };
+  }
+
   if (existing && operation.type === "update" && (existing.type === "set" || existing.type === "update")) {
     existing.data = { ...(existing.data || {}), ...(operation.data || {}) };
     write(ops);
@@ -105,13 +131,20 @@ export async function flush(writer) {
       sent++;
     } catch (error) {
       op.attempts = (op.attempts || 0) + 1;
-      if (op.attempts >= MAX_ATTEMPTS) {
-        /* Permanently rejected — a deleted parent, or a rule that will never
-           allow it. Set it aside so the rest of the queue can drain. */
-        abandoned.push({ ...op, error: String(error && error.message) });
+
+      /* Give up at once on something that can never succeed, rather than fifty
+         times over — and carry on with the rest of the queue instead of letting
+         one refused write block everything behind it. */
+      if (isPermanent(error) || op.attempts >= MAX_ATTEMPTS) {
+        abandoned.push({
+          ...op,
+          error: String((error && (error.code || error.message)) || error),
+          permanent: isPermanent(error),
+        });
         remove(op.opId);
         continue;
       }
+
       write(ops);
       stoppedOn = { opId: op.opId, attempts: op.attempts, error: String(error && error.message) };
       break;

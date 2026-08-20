@@ -7,16 +7,75 @@ const SUPER_ADMIN = "willyros01@gmail.com";
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 const today = () => new Date().toISOString().slice(0, 10);
 
-/* A date a person would say out loud. Falls back to the raw value rather than
-   throwing on anything unexpected — restored rounds can carry odd dates. */
 const prettyDate = (iso) => {
   if (typeof iso !== "string" || iso.length < 10) return iso || "No date";
   const [y, m, d] = iso.split("-").map(Number);
-  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
-                  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
   if (!months[m - 1]) return iso;
   return `${d} ${months[m - 1]} ${y}`;
 };
+
+/* ---- our own calendar ----
+ * The iPad's native date input has defeated five attempts: change the month or
+ * year and the day grid never draws. Rather than a sixth guess, we draw every
+ * part of it ourselves, so it behaves identically everywhere. */
+let calendarOpen = false;
+let calendarMonth = null;
+
+const monthNames = ["January","February","March","April","May","June",
+  "July","August","September","October","November","December"];
+
+function shiftMonth(ym, by) {
+  const [y, m] = ym.split("-").map(Number);
+  const total = y * 12 + (m - 1) + by;
+  return `${Math.floor(total / 12)}-${String((total % 12) + 1).padStart(2, "0")}`;
+}
+
+function dayGrid(ym) {
+  const [y, m] = ym.split("-").map(Number);
+  const first = new Date(Date.UTC(y, m - 1, 1));
+  const days = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const lead = (first.getUTCDay() + 6) % 7;   /* Monday first */
+  const cells = [];
+  for (let i = 0; i < lead; i++) cells.push(null);
+  for (let d = 1; d <= days; d++) cells.push(d);
+  return cells;
+}
+
+function calendarPanel(value) {
+  const showing = calendarMonth
+    || (typeof value === "string" && value.length >= 7 ? value.slice(0, 7) : today().slice(0, 7));
+  const now = today();
+  return `<div class="cal">
+    <div class="cal-head">
+      <button class="cal-arrow" data-cal="prev" aria-label="Previous month">‹</button>
+      <div class="cal-title">${monthNames[Number(showing.slice(5, 7)) - 1]} ${showing.slice(0, 4)}</div>
+      <button class="cal-arrow" data-cal="next" aria-label="Next month">›</button>
+    </div>
+    <div class="cal-week">${["M","T","W","T","F","S","S"].map((d) => `<span>${d}</span>`).join("")}</div>
+    <div class="cal-grid">
+      ${dayGrid(showing).map((d) => {
+        if (d === null) return `<span class="cal-blank"></span>`;
+        const iso = `${showing}-${String(d).padStart(2, "0")}`;
+        return `<button class="cal-day ${iso === value ? "picked" : ""} ${iso === now ? "today" : ""}"
+          data-cal-day="${iso}" ${iso > now ? "disabled" : ""}>${d}</button>`;
+      }).join("")}
+    </div>
+    <div class="cal-foot">
+      <button class="btn ghost compact" data-cal="today">Today</button>
+      <button class="btn compact" data-cal="close">Use this date</button>
+    </div>
+  </div>`;
+}
+
+function dateField(value) {
+  return `<button class="field datebtn ${calendarOpen ? "open" : ""}" data-act="open-calendar">
+      <span>${esc(prettyDate(value))}</span>
+      <span class="datebtn-hint">${calendarOpen ? "▲" : "▾"}</span>
+    </button>
+    ${calendarOpen ? calendarPanel(value) : ""}`;
+}
+
 const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
 
 /* ================= state ================= */
@@ -39,6 +98,45 @@ let shareGameNet = true;
 let shareGameGross = true;
 let settling = false;
 let bootMessage = "Opening your scorecard…";
+
+/* The opening screen, as a checklist rather than a sentence. One line tells you
+   nothing when it takes longer than expected; four named steps show where it
+   has got to — and which one is slow if something is wrong. */
+const bootSteps = [
+  { key: "auth", label: "Checking your access" },
+  { key: "group", label: "Loading your group" },
+  { key: "data", label: "Loading recent scores" },
+  { key: "ready", label: "Almost ready" },
+];
+let bootAt = 0;
+
+function markBoot(key) {
+  const i = bootSteps.findIndex((s) => s.key === key);
+  if (i >= 0 && i > bootAt) { bootAt = i; paintBoot(); }
+}
+
+function bootCard() {
+  const done = Math.min(bootAt, bootSteps.length);
+  return `<div class="boot-card">
+    <div class="boot-brand">The Scorecard</div>
+    <div class="boot-title">${esc(bootMessage.replace(/…$/, ""))}</div>
+    <ul class="boot-steps">
+      ${bootSteps.map((step, i) => {
+        const state = i < done ? "done" : i === done ? "now" : "todo";
+        return `<li class="${state}"><span class="mark">${
+          state === "done" ? "✓" : state === "now" ? "◉" : "○"
+        }</span><span>${esc(step.label)}</span></li>`;
+      }).join("")}
+    </ul>
+    <div class="boot-bar"><span style="width:${Math.round((done / bootSteps.length) * 100)}%"></span></div>
+  </div>`;
+}
+
+function paintBoot() {
+  if (ready) return;
+  const host = document.getElementById("view");
+  if (host) host.innerHTML = bootCard();
+}
 let authForm = { email: "", password: "" };
 
 let tab = "enter";
@@ -57,10 +155,21 @@ let form = { date: today(), golferId: "", courseId: "", teeId: "", gross: "", ad
  * The FIELDS, the ORDER and every CHECK are identical in both. Only the
  * layout differs, so nothing about what gets saved can diverge. Defaults to
  * "full", because that is what people already know. */
-let enterStyle = (() => {
-  try { return localStorage.getItem("golf:v2:enterStyle") === "steps" ? "steps" : "full"; }
-  catch { return "full"; }
-})();
+let enterStyle = null;   /* decided on first use, by role */
+
+/* The right default differs by who you are, so it is chosen the first time
+   rather than fixed for everybody: a regular member posts one round for
+   themselves — the walk-through; an admin or owner types in a whole fourball —
+   every field at once. Remembered afterwards, and either can switch. */
+function currentEnterStyle() {
+  if (enterStyle) return enterStyle;
+  try {
+    const saved = localStorage.getItem("golf:v2:enterStyle");
+    if (saved === "steps" || saved === "full") { enterStyle = saved; return enterStyle; }
+  } catch { /* fall through to the role default */ }
+  enterStyle = db.canManage() ? "full" : "steps";
+  return enterStyle;
+}
 let stepIndex = 0;
 let stepDateOpen = false;
 
@@ -75,6 +184,7 @@ let openGame = null;
 let openCourse = null;
 let editingGolfer = null;
 let editingIndex = null;
+let moreOpen = null;
 let editingGame = false;
 let invitedGolfer = null;
 let invitedGroupName = "";
@@ -85,7 +195,7 @@ const CLICKABLE = [
   "data-act", "data-tee", "data-go", "data-edit", "data-del", "data-confirm-del",
   "data-unfilter", "data-drill", "data-golfer-index", "data-del-golfer", "data-rename",
   "data-set-index", "data-course", "data-pick", "data-rm-tee", "data-game", "data-role",
-  "data-invite-golfer", "data-reinvite",
+  "data-invite-golfer", "data-reinvite", "data-cal", "data-cal-day", "data-more",
   "data-drop-round", "data-goto-group", "data-forget-group",
 ].map((name) => `[${name}]`).join(",");
 let courseDraft = null;
@@ -449,18 +559,11 @@ function enterInSteps({ course, tee, golfer, ags, diff, ch, ready2, pickableGame
     </div>
 
     <div class="step-chosen">
-      <button class="linkbtn" data-act="step-date">${esc(prettyDate(form.date))}</button>
+      <button class="linkbtn" data-act="open-calendar">${esc(prettyDate(form.date))} ▾</button>
       ${chosen.split(" · ").slice(1).length ? `<span class="sub">${esc(chosen.split(" · ").slice(1).join(" · "))}</span>` : ""}
     </div>
 
-    ${stepDateOpen ? `<div class="card padded">
-      <label class="lbl">Date of the round</label>
-      <input class="field" type="date" name="date" id="round-date" value="${form.date}">
-      <div class="inline-actions">
-        <button class="btn compact" data-act="step-date-done">Done</button>
-        ${form.date === today() ? "" : `<button class="btn ghost compact" data-act="date-today">Today</button>`}
-      </div>
-    </div>` : ""}
+    ${calendarOpen ? `<div class="card padded">${calendarPanel(form.date)}</div>` : ""}
 
     ${body()}
 
@@ -534,7 +637,7 @@ function screenEnter() {
 
   /* Both layouts are built from the SAME values computed above — course, tee,
      golfer, ready2. Nothing about what is required or what is saved differs. */
-  if (enterStyle === "steps" && !editingRound) {
+  if (currentEnterStyle() === "steps" && !editingRound) {
     return enterInSteps({ course, tee, golfer, ags, diff, ch, ready2, pickableGames });
   }
 
@@ -546,8 +649,7 @@ function screenEnter() {
     <div class="row">
       <div>
         <div class="eyebrow">Date</div>
-        <input class="field" type="date" name="date" id="round-date" value="${form.date}">
-        ${form.date === today() ? "" : `<button class="linkbtn" data-act="date-today" style="margin-top:0.4rem">Back to today</button>`}
+        ${dateField(form.date)}
       </div>
       <div>
         <div class="eyebrow">Golfer</div>
@@ -872,7 +974,28 @@ function screenSummary() {
   <section class="panel">
     <div class="panel-head"><h2 class="panel-title">Handicap Index</h2>
       <button class="linkbtn" data-act="share-indexes">Share</button></div>
-    <div class="indexes">${sortedGolfers().filter((g) => rounds.some((r) => r.golferId === g.id)).map((g) => {
+
+    ${(() => {
+      /* Your own number, first and large — it is what most people open the app
+         to see. NAMED, not just "yours": a screenshot still makes sense once it
+         has been shared, and an admin can see whose device they are looking at. */
+      const me = golferById(db.myGolferId(allGolfers));
+      const mine = me ? shownIndex(me) : null;
+      if (!me || mine == null) return "";
+      const played = rounds.filter((r) => r.golferId === me.id).length;
+      return `<button class="my-index" data-golfer-index="${me.id}">
+        <span class="label">Your handicap index</span>
+        <span class="who">${esc(me.name)}</span>
+        <span class="figure">${mine.toFixed(1)}</span>
+        <span class="from">from ${played} round${played === 1 ? "" : "s"}</span>
+      </button>
+      <div class="eyebrow" style="margin:1rem 0 0.4rem">Everyone else</div>`;
+    })()}
+
+    <div class="indexes">${sortedGolfers()
+      .filter((g) => rounds.some((r) => r.golferId === g.id))
+      .filter((g) => g.id !== db.myGolferId(allGolfers) || shownIndex(g) == null)
+      .map((g) => {
       const n = rounds.filter((r) => r.golferId === g.id).length;
       return `<button class="idx" data-golfer-index="${g.id}">
         <div class="name truncate">${esc(g.name)}</div>
@@ -1326,19 +1449,30 @@ function screenManage() {
               </div></div>`;
           }
           const used = rounds.some((r) => r.golferId === g.id);
-          return `<div class="list-row">
-            <span class="grow"><span class="name">${esc(g.name)}</span><br>
-              <span class="sub">${g.handicapIndex == null ? "no index yet" : `index ${(+g.handicapIndex).toFixed(1)}`} · ${g.roundCount || 0} round${g.roundCount === 1 ? "" : "s"}</span></span>
-            <button class="rowbtn" data-rename="${g.id}">Rename</button>
+          /* The name gets its own line, and the two rare actions — Rename and
+             Remove — move behind a menu. Four buttons beside a long name will
+             never fit a phone; they overlapped it instead. This also puts
+             Remove out of accidental reach. */
+          return `<div class="roster-row">
+            <div class="roster-name">
+              <span class="name">${esc(g.name)}</span>
+              <span class="sub">${g.handicapIndex == null ? "no index yet" : `index ${(+g.handicapIndex).toFixed(1)}`} · ${g.roundCount || 0} round${g.roundCount === 1 ? "" : "s"}</span>
+            </div>
+            <div class="roster-actions">
             ${g.linkedUid
               ? (db.isOwner()
-                  ? `<button class="rowbtn" data-reinvite="${g.id}" title="Let them join again — use this if they signed out and were locked out">Invited</button>`
-                  : `<button class="rowbtn" disabled title="Already using the app">Invited</button>`)
-              : `<button class="rowbtn" data-invite-golfer="${g.id}">Invite</button>`}
+                  ? `<button class="rowbtn wide" data-reinvite="${g.id}" title="Let them join again">Invited ✓</button>`
+                  : `<button class="rowbtn wide" disabled>Invited ✓</button>`)
+              : `<button class="rowbtn wide primary" data-invite-golfer="${g.id}">Invite</button>`}
             ${indexSource(g) === "rounds"
               ? `<button class="rowbtn" disabled title="Their index now comes from their own rounds">Index</button>`
               : `<button class="rowbtn" data-set-index="${g.id}">Index</button>`}
-            <button class="rowbtn warn" data-del-golfer="${g.id}">Remove</button>
+              <button class="rowbtn more" data-more="${g.id}" aria-label="More for ${esc(g.name)}">···</button>
+            </div>
+            ${moreOpen === g.id ? `<div class="roster-more">
+              <button class="rowbtn" data-rename="${g.id}">Rename</button>
+              <button class="rowbtn warn" data-del-golfer="${g.id}">Remove from this group</button>
+            </div>` : ""}
           </div>`;
         }).join("")}
       </div>` : `<p class="blank">Nobody on the roster yet.</p>`}
@@ -1487,23 +1621,55 @@ function passwordPrompt() {
 }
 
 function peopleSection() {
+  /* ONE row per person, never a history.
+   *
+   * Somebody invited three times appeared three times, with nothing to say
+   * which entry was current — impossible to read. Members are keyed by account,
+   * so each appears once, and outstanding invitations are folded in beside them
+   * with a plain used / not-yet-used marker. */
+  const mine = db.status().uid;
+  const claimed = new Set(members.map((m) => m.golferId).filter(Boolean));
+
+  const people = [
+    ...members.map((m) => ({
+      key: m.uid, name: m.displayName || "Unnamed", role: m.role,
+      you: m.uid === mine, state: "joined",
+    })),
+    ...sortedGolfers()
+      .filter((g) => g.invitedAt && !g.linkedUid && !claimed.has(g.id))
+      .map((g) => ({
+        key: `g:${g.id}`, name: g.name,
+        role: g.invitedAs === "admin" ? "admin" : "member",
+        you: false, state: "waiting", golferId: g.id,
+      })),
+  ];
+
   return `<section class="panel">
-    <div class="panel-head"><h2 class="panel-title">People</h2><span class="panel-count">${members.length || ""}</span></div>
+    <div class="panel-head"><h2 class="panel-title">People</h2>
+      <span class="panel-count">${people.length || ""}</span></div>
     <div class="card">
       <div class="list">
-        ${members.map((m) => {
-          const you = m.uid === db.status().uid;
-          return `<div class="list-row">
-            <span class="grow"><span class="name">${esc(m.displayName || "Unnamed")}</span><br>
-              <span class="sub">${roleLabel(m.role)}${you ? " · you" : ""}</span></span>
-            ${m.role === "owner" ? "" : `<button class="rowbtn" data-role="${m.uid}:${m.role === "admin" ? "member" : "admin"}">${m.role === "admin" ? "Make guest" : "Make admin"}</button>`}
-          </div>`;
-        }).join("")}
+        ${people.length ? people.map((p) => `<div class="list-row">
+          <span class="grow"><span class="name">${esc(p.name)}</span><br>
+            <span class="sub">${roleLabel(p.role)}${p.you ? " · you" : ""} ·
+              <span class="invite-state ${p.state}">${p.state === "joined" ? "invitation used" : "not used yet"}</span>
+            </span></span>
+          ${p.state === "joined" && p.role !== "owner"
+            ? `<button class="rowbtn" data-role="${p.key}:${p.role === "admin" ? "member" : "admin"}">${p.role === "admin" ? "Make guest" : "Make admin"}</button>`
+            : p.state === "waiting"
+              ? `<button class="rowbtn" data-invite-golfer="${esc(p.golferId)}">Send again</button>`
+              : ""}
+        </div>`).join("") : `<p class="blank" style="padding:1rem">Nobody yet.</p>`}
       </div>
+
       <div class="inline-form bordered">
-        <p class="hint" style="margin:0 0 0.7rem">Send this link to add somebody. They tap it, type their name, and they are in as a guest.</p>
+        <p class="hint" style="margin:0 0 0.7rem">Invitations for people who play are on the
+        <b>Manage</b> tab, beside each name — that way the link carries their name and ties them to
+        their existing rounds.</p>
+        <p class="hint" style="margin:0 0 0.7rem"><b>An administrator who does not play?</b> This adds
+        the role only — no golfer, no place on the roster.</p>
         <div class="inline-actions">
-          <button class="btn compact" data-act="share-invite">Send an invitation</button>
+          <button class="btn compact" data-act="invite-nonplayer">Invite an admin who doesn't play</button>
           <button class="btn ghost compact" data-act="show-code">Show the code</button>
         </div>
       </div>
@@ -2212,7 +2378,7 @@ document.addEventListener("focusout", (e) => {
 function renderNow() {
   try {
     if (!ready || settling) {
-      view.innerHTML = `<div class="boot">${esc(bootMessage)}</div>`;
+      view.innerHTML = bootCard();
     } else if (!db.currentAssociation()) {
       tabsEl.innerHTML = "";
       view.innerHTML = screenJoin();
@@ -2374,7 +2540,7 @@ view.addEventListener("change", (e) => {
   if (n === "golferId") {
     form.golferId = v;
     /* In the walk-through, choosing moves you on — that is the point of it. */
-    if (enterStyle === "steps" && v) stepIndex = 1;
+    if (currentEnterStyle() === "steps" && v) stepIndex = 1;
     render();
   }
   if (n === "gameId") { form.gameId = v; }
@@ -2443,6 +2609,7 @@ view.addEventListener("click", async (e) => {
     else { filter = { golferId: d.drill, year: drill.year, month: drill.month, courseId: "" }; tab = "history"; }
     return render();
   }
+  if (d.more) { moreOpen = moreOpen === d.more ? null : d.more; return render(); }
   if (d.reinvite) {
     const golfer = golferById(d.reinvite);
     if (!golfer) return;
@@ -2546,6 +2713,10 @@ view.addEventListener("click", async (e) => {
     case "step-back": stepIndex = Math.max(0, stepIndex - 1); return render();
     case "step-date": stepDateOpen = !stepDateOpen; return render();
     case "step-date-done": stepDateOpen = false; return render();
+    case "open-calendar":
+      calendarOpen = !calendarOpen;
+      calendarMonth = calendarOpen ? form.date.slice(0, 7) : null;
+      return render();
     case "date-today": {
       /* Writes the value straight into the field as well as into state. Setting
          only the state left the picker showing the old date, which is why this
@@ -3030,6 +3201,7 @@ sheetEl.addEventListener("click", async (e) => {
     try {
       if (role === "admin") await db.ensureAdminCode();
       const link = db.inviteLink(role, golferId);
+      if (golferId) db.noteInvitation(golferId, role);
       if (!link) {
         /* This used to flashMsg and return without redrawing, so the button
            looked completely dead. Say it properly instead. */
@@ -3064,6 +3236,29 @@ sheetEl.addEventListener("click", async (e) => {
     } catch {
       flashMsg("Couldn't prepare it — the message above says why.");
     } finally { idleAll(); }
+    return;
+  }
+
+  const calNav = e.target.closest("[data-cal]");
+  if (calNav) {
+    const what = calNav.dataset.cal;
+    const showing = calendarMonth || form.date.slice(0, 7);
+    if (what === "prev") calendarMonth = shiftMonth(showing, -1);
+    else if (what === "next") calendarMonth = shiftMonth(showing, 1);
+    else if (what === "today") { form.date = today(); calendarMonth = form.date.slice(0, 7); }
+    else if (what === "close") { calendarOpen = false; calendarMonth = null; }
+    render();
+    updateEnterHints();
+    return;
+  }
+
+  const calDay = e.target.closest("[data-cal-day]");
+  if (calDay) {
+    form.date = calDay.dataset.calDay;
+    calendarOpen = false;
+    calendarMonth = null;
+    render();
+    updateEnterHints();
     return;
   }
 
@@ -3856,11 +4051,13 @@ db.onChange((s) => { sync = s; render(); });
 (async function boot() {
   render();
   await db.init();
+  markBoot("group");
 
   const invite = db.readJoinLink();
   const remembered = db.recallAssociation();
 
   await settleGroup(remembered);
+  markBoot("data");
 
   /* Look for a version 1 scorecard whether or not there is already a group.
      Somebody who created one first still needs a way to bring their data in. */
@@ -3876,6 +4073,7 @@ db.onChange((s) => { sync = s; render(); });
     invitedGroupName = group ? group.name : "";
   }
 
+  markBoot("ready");
   ready = true;
   render();
 })();
