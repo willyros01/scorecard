@@ -760,7 +760,53 @@ export async function setMyPassword({ email, password }) {
     throw new Error(`auth/wrong-email:${current.email}`);
   }
 
-  await linkWithCredential(current, EmailAuthProvider.credential(current.email || address, secret));
+  /* The email may ALREADY have an account, from an earlier sign-in or an
+     earlier round of testing. Linking then fails with "already in use", and
+     signing in afterwards lands on a DIFFERENT account — one that knows
+     nothing about the membership just written for the anonymous session. That
+     is exactly the "something went wrong, retry, asked again" loop.
+
+     So: sign in to the existing account, then rebuild the membership under it.
+     The role is preserved rather than stranded on an account nobody returns
+     to. */
+  const wasAnonymous = !!current.isAnonymous;
+  const previousUid = current.uid;
+  const memberBefore = myMember ? { ...myMember } : null;
+  const groupBefore = assocId;
+
+  try {
+    await linkWithCredential(current, EmailAuthProvider.credential(current.email || address, secret));
+  } catch (e) {
+    const code = String((e && (e.code || e.message)) || "").toLowerCase();
+    const taken = code.includes("already-in-use") || code.includes("email-already");
+    if (!taken || !wasAnonymous) throw e;
+
+    const { signInWithEmailAndPassword } = fb.mod.auth;
+    await signInWithEmailAndPassword(fb.auth, address, secret);
+    uid = fb.auth.currentUser.uid;
+
+    /* Carry the membership across, unless that account already belongs here. */
+    if (groupBefore && memberBefore && uid !== previousUid) {
+      const { setDoc, getDoc } = fb.mod.store;
+      const already = await getDoc(ref("associations", groupBefore, "members", uid));
+      if (!already.exists()) {
+        await setDoc(ref("associations", groupBefore, "members", uid), {
+          ...memberBefore,
+          uid,
+          joinedAt: serverTimestampValue(),
+        });
+      }
+      await setDoc(ref("userGroups", uid, "groups", groupBefore), {
+        assocId: groupBefore, name: (cachedAssociation && cachedAssociation.name) || "Group",
+        at: Date.now(),
+      });
+      myMember = await loadMembership(groupBefore);
+    }
+
+    clearError();
+    return { ok: true, outcome: "signed-in-existing" };
+  }
+
   try { await fb.auth.currentUser.reload(); } catch {}
   uid = fb.auth.currentUser.uid;
   clearError();
@@ -1704,6 +1750,24 @@ export async function removeMemberships(uids) {
     "remove older sign-ins"
   );
   return { removed: list.length };
+}
+
+/* Claims an UNLINKED golfer as this account.
+ *
+ * The rules permit exactly this — "resource.linkedUid == null && the write sets
+ * it to me" — so no editedIn is needed. It exists because anyone who joined by
+ * CODE never got a link, and without one the rules do not recognise their own
+ * rounds as theirs: they could post but not delete. Guarded so it can never
+ * overwrite somebody else's link. */
+export function claimGolfer(golferId) {
+  if (!golferId || !uid) return;
+  outbox.enqueue({
+    type: "update",
+    path: ["golfers", golferId],
+    data: { linkedUid: uid },
+    opId: `golfer-claim-${golferId}`,
+  });
+  flush();
 }
 
 export function setManualIndex(golferId, index) {

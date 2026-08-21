@@ -227,7 +227,7 @@ const CLICKABLE = [
   "data-act", "data-tee", "data-go", "data-edit", "data-del", "data-confirm-del",
   "data-unfilter", "data-drill", "data-golfer-index", "data-del-golfer", "data-rename",
   "data-set-index", "data-course", "data-pick", "data-rm-tee", "data-game", "data-role",
-  "data-invite-golfer", "data-reinvite", "data-cal", "data-cal-day", "data-cal-month", "data-more",
+  "data-invite-golfer", "data-reinvite", "data-cal", "data-cal-day", "data-cal-month", "data-more", "data-drop-member",
   "data-drop-round", "data-goto-group", "data-forget-group",
 ].map((name) => `[${name}]`).join(",");
 let courseDraft = null;
@@ -533,8 +533,14 @@ function enterInSteps({ course, tee, golfer, ags, diff, ch, ready2, pickableGame
    * when the walk-through opens (below), and after that the person is in
    * charge of where they are. */
   if (stepIndex == null) {
-    const firstUndone = steps.findIndex((s) => !s.done);
-    stepIndex = firstUndone === -1 ? steps.length - 1 : firstUndone;
+    /* A guest's golfer is fixed and re-seeded the moment the screen opens, so
+       "who" is ALWAYS done for them — which meant the first-unfinished rule
+       sent them straight back to the score after every round, with the course
+       unreachable. They start at the course instead, which is the first thing
+       they can actually change. An admin still starts at the golfer. */
+    const start = db.canManage() ? 0 : 1;
+    const firstUndone = steps.findIndex((s, i) => i >= start && !s.done);
+    stepIndex = firstUndone === -1 ? start : firstUndone;
   }
   const showing = steps[Math.min(Math.max(0, stepIndex), steps.length - 1)] || steps[0];
 
@@ -652,7 +658,19 @@ function screenEnter() {
       const named = me && String(me.displayName || "").trim().toLowerCase();
       if (named) {
         const match = allGolfers.find((g) => String(g.name || "").trim().toLowerCase() === named);
-        if (match) mine = match.id;
+        if (match) {
+          mine = match.id;
+
+          /* Tell the DATABASE, not just this screen.
+           *
+           * The rules decide whether a round is yours by reading
+           * golfers/{id}.linkedUid. Matching by name here made the APP agree
+           * you were that golfer while the rules still saw no link at all — so
+           * a guest could post a round and then not delete it. Claiming an
+           * unlinked golfer as yourself is explicitly permitted, so this write
+           * is allowed and it makes the two agree. */
+          if (!match.linkedUid) db.claimGolfer(match.id);
+        }
       }
     }
 
@@ -1749,7 +1767,8 @@ function peopleSection() {
                 p.extras.length ? ` · <span class="invite-state waiting">${p.extras.length} older sign-in${p.extras.length === 1 ? "" : "s"}</span>` : ""
               }</span></span>
           ${p.state === "joined" && p.role !== "owner"
-            ? `<button class="rowbtn" data-role="${p.key}:${p.role === "admin" ? "member" : "admin"}">${p.role === "admin" ? "Make guest" : "Make admin"}</button>`
+            ? `<button class="rowbtn" data-role="${p.key}:${p.role === "admin" ? "member" : "admin"}">${p.role === "admin" ? "Make guest" : "Make admin"}</button>
+               <button class="rowbtn warn" data-drop-member="${p.key}">Remove</button>`
             : p.state === "waiting"
               ? `<button class="rowbtn" data-invite-golfer="${esc(p.golferId)}">Send again</button>`
               : ""}
@@ -2775,6 +2794,26 @@ view.addEventListener("click", async (e) => {
     else { filter = { golferId: d.drill, year: drill.year, month: drill.month, courseId: "" }; tab = "history"; }
     return render();
   }
+  if (d.dropMember) {
+    /* Removes a person's access to this group. A membership is only a sign-in
+       record — their golfer, their rounds and their handicap are untouched, and
+       they can be invited again. The owner's own row never offers this. */
+    const who = members.find((m) => m.uid === d.dropMember);
+    busy("Removing them from this group");
+    try {
+      await db.removeMemberships([d.dropMember]);
+      flashMsg(`${(who && who.displayName) || "They"} no longer have access. Their rounds and handicap are untouched.`);
+    } catch {
+      idleAll();
+      openProblem({
+        title: "Could not remove them",
+        detail: "The database refused it.",
+        advice: "Nothing was changed. Send this report and it will say what refused it.",
+      });
+    } finally { idleAll(); }
+    return render();
+  }
+
   if (d.more) { moreOpen = moreOpen === d.more ? null : d.more; return render(); }
   if (d.reinvite) {
     const golfer = golferById(d.reinvite);
@@ -3417,10 +3456,14 @@ sheetEl.addEventListener("click", async (e) => {
     sheetEl.hidden = true;
     busy("Saving your password");
     try {
-      await db.setMyPassword({ email, password: secret });
+      const outcome = await db.setMyPassword({ email, password: secret });
       openNotice({
-        title: "Password saved",
-        detail: `Sign in with ${email} and this password on any device, and your role and groups come with you.`,
+        title: outcome && outcome.outcome === "signed-in-existing"
+          ? "Signed in to your existing account"
+          : "Password saved",
+        detail: outcome && outcome.outcome === "signed-in-existing"
+          ? `${email} already had an account, so you have been signed in to it and your role has been carried across. Nothing was lost.`
+          : `Sign in with ${email} and this password on any device, and your role and groups come with you.`,
       });
     } catch (err) {
       idleAll();
@@ -4219,7 +4262,11 @@ function postRound() {
    * course was still filled in from the last round there was no way to reach
    * it again. Starting at the golfer is right anyway: that is the one thing
    * that always changes between rounds. */
-  stepIndex = null;
+  /* Go back to the FIRST step they can act on, rather than letting the
+     first-unfinished rule drop them on the score again. An admin starts at the
+     golfer; a guest's golfer is fixed, so they start at the course — the thing
+     most likely to differ next time. */
+  stepIndex = db.canManage() ? 0 : 1;
   calendarOpen = false;
   calendarMonth = null;
   calPick = null;
