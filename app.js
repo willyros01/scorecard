@@ -358,9 +358,13 @@ function screenJoin() {
     return `<div class="stack">
       ${flashBar()}
       <div class="card padded">
-        <h2 class="panel-title">You have been invited</h2>
-        <p class="hint">Type the name you play under and you are in. No account, no password.</p>
-        <label class="lbl">Your name</label>
+        <h2 class="panel-title">${invite.role === "admin" && !invite.golferId
+          ? "You have been invited to help run the group"
+          : "You have been invited"}</h2>
+        <p class="hint">${invite.role === "admin" && !invite.golferId
+          ? "You will be an admin: you can add courses, manage the roster and post rounds for anybody. You are not added as a player, so no handicap is kept for you. You will be asked to set a password next."
+          : "Type the name you play under and you are in. No account, no password."}</p>
+        <label class="lbl">${invite.role === "admin" && !invite.golferId ? "Your name" : "Your name"}</label>
         <input class="field" name="join-name" value="${esc(joinForm.name)}" placeholder="e.g. Willy Rosales" autocomplete="name">
         <div class="inline-actions stacked">
           <button class="btn" data-act="accept-invite" ${joining ? "disabled" : ""}>${joining ? "Joining…" : "Join the group"}</button>
@@ -3916,7 +3920,15 @@ async function acceptInvite() {
   const result = await db.joinAssociation({ associationId: invite.associationId, code: invite.code, displayName: name });
   if (result.ok) {
     db.clearJoinLink();
-    await db.linkGolferForMember(name);
+
+    /* An admin invitation with no golfer named is somebody who RUNS the group
+       without playing in it — a club secretary or a scorer. Creating a golfer
+       for them puts a player on the roster who will never post a round, and
+       who then has to be found and removed. Only players get a golfer. */
+    if (!(invite.role === "admin" && !invite.golferId)) {
+      await db.linkGolferForMember(name);
+    }
+
     await start(invite.associationId);
     joining = false;
     idleAll();
@@ -4200,6 +4212,18 @@ function postRound() {
      clear the golfer, so the next one is never posted against the last person
      by accident. */
   form = { ...form, golferId: "", gross: "", adjusted: "", notes: "" };
+
+  /* Send the walk-through back to the beginning.
+   *
+   * Without this it stayed wherever it was — on the score — and since the
+   * course was still filled in from the last round there was no way to reach
+   * it again. Starting at the golfer is right anyway: that is the one thing
+   * that always changes between rounds. */
+  stepIndex = null;
+  calendarOpen = false;
+  calendarMonth = null;
+  calPick = null;
+
   flashMsg(`Round posted — differential ${round.differential.toFixed(1)}`);
 }
 

@@ -1,12 +1,16 @@
 rules_version = '2';
 
-/* LAST CHANGED IN APP VERSION 2.19.5
+/* LAST CHANGED IN APP VERSION 2.19.14
  *
  * This is here only so you can compare it against what is published in the
  * Firebase console if you are ever in doubt. It does NOT track the app version:
  * most releases change no rules at all, and there is nothing to republish for
  * those. The number only moves when these rules genuinely change, and Claude
  * says so at the top of the message when that happens.
+ *
+ * What changed in 2.19.14: an admin may now RELEASE a golfer's account link
+ * (set it to nothing), which is what re-inviting somebody does. Seizing a link
+ * is still refused.
  *
  * What changed in 2.19.5: members restricted to their OWN rounds; golfer edits
  * restricted (see the /golfers block); deleting a golfer closed entirely.
@@ -282,6 +286,12 @@ service cloud.firestore {
         || (resource.data.linkedUid == null
             && request.resource.data.linkedUid == request.auth.uid)
         || (request.resource.data.linkedUid == resource.data.linkedUid
+            && editingAsAdmin(golferId))
+        /* An admin may RELEASE a link — set it to nothing — which is what
+           re-inviting somebody does. Releasing grants the admin nothing, so it
+           is safe; SEIZING a link (pointing it at themselves) is still refused
+           by the branch above, which requires the link to be unchanged. */
+        || (request.resource.data.linkedUid == null
             && editingAsAdmin(golferId))
       );
 
