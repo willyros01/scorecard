@@ -1660,9 +1660,13 @@ export async function recalculateGameHandicaps(gameId, { preview = false } = {})
 export async function resetInvitation(golferId) {
   if (!isOwner()) throw new Error("Only the owner can reset an invitation.");
 
+  /* editedIn is REQUIRED here. Clearing linkedUid is a write to a golfer the
+     owner is not linked to, so the rules need the group named in order to
+     confirm the owner administers a group that golfer plays in. Without it
+     Firebase refuses the write and the button appears to do nothing. */
   const writes = [
     { op: "delete", path: ["associations", assocId, "invites", golferId] },
-    { op: "update", path: ["golfers", golferId], data: { linkedUid: null } },
+    { op: "update", path: ["golfers", golferId], data: { linkedUid: null, editedIn: assocId } },
   ];
   await commitTogether(writes, "reset invitation");
   return { ok: true };

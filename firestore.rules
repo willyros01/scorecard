@@ -1,5 +1,16 @@
 rules_version = '2';
 
+/* RULES VERSION 2.19.10 — published from The Scorecard v2.19.10
+ *
+ * If this does not match the version at the foot of the Summary tab, these
+ * rules are OLDER than the app, and writes will be refused for reasons that
+ * look like bugs. Publish the firestore.rules from the newest zip.
+ *
+ * Last actually CHANGED in 2.19.5: members restricted to their own rounds;
+ * golfer edits restricted (see the /golfers block); deleting a golfer closed
+ * entirely.
+ */
+
 /* The Scorecard — version 2 security rules.
  *
  * These are the enforcement layer. There is no server tier in this app, so
