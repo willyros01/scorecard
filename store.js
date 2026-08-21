@@ -1670,6 +1670,26 @@ export async function resetInvitation(golferId) {
 
 /* A starting handicap for somebody with no rounds here yet. Passing null
    clears it. Real rounds always take precedence once there are three. */
+/* Removes superseded membership records — the extra accounts created when one
+   person joins from several browsers.
+ *
+ * A membership is only a sign-in record. Rounds belong to the GOLFER, and the
+ * golfer document is untouched, so this loses nothing at all. Owner only, and
+ * the rules refuse the owner's own membership regardless. */
+export async function removeMemberships(uids) {
+  const list = [...new Set((uids || []).filter(Boolean))].filter((u) => u !== uid);
+  if (!list.length) return { removed: 0 };
+
+  await commitTogether(
+    list.map((memberUid) => ({
+      op: "delete",
+      path: ["associations", assocId, "members", memberUid],
+    })),
+    "remove older sign-ins"
+  );
+  return { removed: list.length };
+}
+
 export function setManualIndex(golferId, index) {
   outbox.enqueue({
     type: "update",

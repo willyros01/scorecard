@@ -1621,28 +1621,57 @@ function passwordPrompt() {
 }
 
 function peopleSection() {
-  /* ONE row per person, never a history.
+  /* ONE row per PERSON, not one per account.
    *
-   * Somebody invited three times appeared three times, with nothing to say
-   * which entry was current — impossible to read. Members are keyed by account,
-   * so each appears once, and outstanding invitations are folded in beside them
-   * with a plain used / not-yet-used marker. */
+   * Every time somebody taps an invitation in a fresh browser or a private
+   * window, an anonymous account is created and another membership written. A
+   * golfer who joined from three devices therefore appeared three times, all
+   * identical, with no way to tell which was current. They are grouped here by
+   * the golfer they belong to (falling back to the name), the most recent kept,
+   * and the older ones offered for removal.
+   *
+   * Nothing is removed automatically: a duplicate might be a real second person
+   * with the same name, and only the owner can tell. */
   const mine = db.status().uid;
   const claimed = new Set(members.map((m) => m.golferId).filter(Boolean));
 
-  const people = [
-    ...members.map((m) => ({
-      key: m.uid, name: m.displayName || "Unnamed", role: m.role,
-      you: m.uid === mine, state: "joined",
-    })),
-    ...sortedGolfers()
-      .filter((g) => g.invitedAt && !g.linkedUid && !claimed.has(g.id))
-      .map((g) => ({
-        key: `g:${g.id}`, name: g.name,
-        role: g.invitedAs === "admin" ? "admin" : "member",
-        you: false, state: "waiting", golferId: g.id,
-      })),
-  ];
+  const groups = new Map();
+  for (const m of members) {
+    const key = m.golferId || `name:${String(m.displayName || "").trim().toLowerCase()}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(m);
+  }
+
+  const joined = [...groups.values()].map((list) => {
+    /* Most recent first — the owner is always kept whatever its age, since it
+       is the account that cannot be removed. */
+    const sorted = [...list].sort((a, b) => {
+      if (a.role === "owner") return -1;
+      if (b.role === "owner") return 1;
+      const at = (m) => (m.joinedAt && m.joinedAt.seconds) || m.joinedAt || 0;
+      return at(b) - at(a);
+    });
+    const keep = sorted[0];
+    return {
+      key: keep.uid,
+      name: keep.displayName || "Unnamed",
+      role: keep.role,
+      you: sorted.some((m) => m.uid === mine),
+      state: "joined",
+      extras: sorted.slice(1).filter((m) => m.role !== "owner"),
+    };
+  });
+
+  const waiting = sortedGolfers()
+    .filter((g) => g.invitedAt && !g.linkedUid && !claimed.has(g.id))
+    .map((g) => ({
+      key: `g:${g.id}`, name: g.name,
+      role: g.invitedAs === "admin" ? "admin" : "member",
+      you: false, state: "waiting", golferId: g.id, extras: [],
+    }));
+
+  const people = [...joined, ...waiting];
+  const spare = joined.reduce((n, p) => n + p.extras.length, 0);
 
   return `<section class="panel">
     <div class="panel-head"><h2 class="panel-title">People</h2>
@@ -1652,8 +1681,9 @@ function peopleSection() {
         ${people.length ? people.map((p) => `<div class="list-row">
           <span class="grow"><span class="name">${esc(p.name)}</span><br>
             <span class="sub">${roleLabel(p.role)}${p.you ? " · you" : ""} ·
-              <span class="invite-state ${p.state}">${p.state === "joined" ? "invitation used" : "not used yet"}</span>
-            </span></span>
+              <span class="invite-state ${p.state}">${p.state === "joined" ? "invitation used" : "not used yet"}</span>${
+                p.extras.length ? ` · <span class="invite-state waiting">${p.extras.length} older sign-in${p.extras.length === 1 ? "" : "s"}</span>` : ""
+              }</span></span>
           ${p.state === "joined" && p.role !== "owner"
             ? `<button class="rowbtn" data-role="${p.key}:${p.role === "admin" ? "member" : "admin"}">${p.role === "admin" ? "Make guest" : "Make admin"}</button>`
             : p.state === "waiting"
@@ -1661,6 +1691,16 @@ function peopleSection() {
               : ""}
         </div>`).join("") : `<p class="blank" style="padding:1rem">Nobody yet.</p>`}
       </div>
+
+      ${spare ? `<div class="inline-form bordered">
+        <p class="hint" style="margin:0 0 0.7rem"><b>${spare} older sign-in${spare === 1 ? "" : "s"}</b> —
+        left behind when somebody joined again from another browser or a private window. Each one is
+        a separate account for the same person. Removing them tidies this list and takes nothing
+        away: their rounds belong to the golfer, not the sign-in.</p>
+        <div class="inline-actions">
+          <button class="btn compact" data-act="tidy-signins">Remove the older sign-ins</button>
+        </div>
+      </div>` : ""}
 
       <div class="inline-form bordered">
         <p class="hint" style="margin:0 0 0.7rem">Invitations for people who play are on the
