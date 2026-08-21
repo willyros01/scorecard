@@ -125,6 +125,25 @@ export function explain(code) {
     case "NO_MATCH": return "No course matched. Try the club name instead, or just the town.";
     case "NO_RATINGS": return "Found the course, but no rating and slope are published for it. You'll need the scorecard.";
     case "BAD_RESPONSE": return "The lookup service sent something unreadable. Enter the tees by hand.";
-    default: return "Lookup didn't work. Enter the tees by hand — nothing else is affected.";
+    default: {
+      /* NAME THE CODE.
+       *
+       * This message used to hide everything that was not on the list above —
+       * including every HTTP status the service returns. "Lookup didn't work"
+       * is true and useless: it cannot be diagnosed, only guessed at, and it
+       * cost a round trip to discover the code was never being shown. */
+      const raw = String(code);
+      if (raw.startsWith("HTTP_")) {
+        const status = raw.slice(5);
+        if (status === "404") {
+          return "The lookup service has moved or changed address (404). Enter the tees by hand; this needs fixing in the app, not by you.";
+        }
+        if (status.startsWith("5")) {
+          return `The lookup service is having trouble (${status}). Try again shortly, or enter the tees by hand.`;
+        }
+        return `The lookup service refused the request (${status}). Enter the tees by hand.`;
+      }
+      return `Lookup didn't work (${raw}). Enter the tees by hand — nothing else is affected.`;
+    }
   }
 }
