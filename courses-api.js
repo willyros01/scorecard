@@ -32,19 +32,74 @@ const num = (v) => { const n = parseFloat(v); return Number.isFinite(n) ? n : nu
 /* Providers rename fields over time, so accept any plausible spelling and
    drop anything without both a rating and a slope — those two are the only
    values the handicap math cannot work without. */
+/* Tees, whatever shape they arrive in.
+ *
+ * The provider has changed this at least twice: a flat array, then an object
+ * with `male` and `female` lists, and now something where those keys are not
+ * arrays either — which threw "forEach is not a function" and took the whole
+ * search down. We do not control this data, so nothing here assumes a shape:
+ * anything list-like is walked, anything object-like is looked inside, and a
+ * single tee on its own is accepted too. Whatever cannot be understood is
+ * skipped rather than thrown.
+ */
+function asList(value) {
+  if (Array.isArray(value)) return value;
+  if (!value || typeof value !== "object") return [];
+  /* An object that looks like ONE tee, rather than a container of them. */
+  if ("course_rating" in value || "rating" in value || "tee_name" in value) return [value];
+  /* Otherwise a container: {0: {...}, 1: {...}} or {male: [...]} and so on. */
+  return Object.values(value);
+}
+
 function teesFrom(raw) {
   const out = [];
-  const add = (list, tag) => (list || []).forEach((t) => {
-    const rating = num(t.course_rating ?? t.rating ?? t.courseRating);
-    const slope = num(t.slope_rating ?? t.slope ?? t.slopeRating);
-    if (!rating || !slope) return;
-    const par = num(t.par_total ?? t.par ?? t.total_par) || 72;
-    const name = String(t.tee_name ?? t.name ?? t.tee ?? "Tee") + (tag ? ` (${tag})` : "");
-    out.push({ name, rating, slope, par });
-  });
+
+  const add = (value, tag) => {
+    for (const t of asList(value)) {
+      if (!t || typeof t !== "object") continue;
+
+      /* Still a container one level down — e.g. male: { tees: [...] }. */
+      const rating = num(t.course_rating ?? t.rating ?? t.courseRating);
+      const slope = num(t.slope_rating ?? t.slope ?? t.slopeRating);
+      if (!rating || !slope) {
+        if (Array.isArray(t) || (t && typeof t === "object" && !("tee_name" in t))) {
+          const inner = asList(t);
+          if (inner.length && inner !== t) add(inner, tag);
+        }
+        continue;
+      }
+
+      const par = num(t.par_total ?? t.par ?? t.total_par) || 72;
+      const name = String(t.tee_name ?? t.name ?? t.tee ?? "Tee") + (tag ? ` (${tag})` : "");
+      out.push({ name, rating, slope, par });
+    }
+  };
+
   if (Array.isArray(raw)) add(raw);
-  else if (raw && typeof raw === "object") { add(raw.male, "M"); add(raw.female, "W"); }
-  return out;
+  else if (raw && typeof raw === "object"
+           && ("course_rating" in raw || "rating" in raw || "tee_name" in raw)) {
+    /* One tee on its own, not a container. */
+    add([raw]);
+  }
+  else if (raw && typeof raw === "object") {
+    add(raw.male, "M");
+    add(raw.female, "W");
+    /* Any other keys — the provider has used `mens`, `womens` and plain lists
+       at different times, so take whatever else is there without naming it. */
+    for (const [key, value] of Object.entries(raw)) {
+      if (key === "male" || key === "female") continue;
+      add(value, /wom|female|ladies/i.test(key) ? "W" : /men|male/i.test(key) ? "M" : "");
+    }
+  }
+
+  /* The same tee can arrive under two keys; keep the first of each. */
+  const seen = new Set();
+  return out.filter((t) => {
+    const key = `${t.name}|${t.rating}|${t.slope}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function normalize(c) {

@@ -1,0 +1,150 @@
+THE SCORECARD — PROJECT NOTES
+=============================
+
+Plain text on purpose, so it opens in any editor. This is Claude's working
+memory for the project. If Claude ever seems to have forgotten the history,
+paste this file back in and it will pick up where it left off.
+
+Kept inside every release zip from v2.19.24 onwards.
+
+
+HOW TO RESUME AFTER A BREAK
+---------------------------
+The working folder is wiped between sessions. To restore it:
+
+    mkdir -p /home/claude/v2
+    cd /home/claude/v2
+    unzip -q /mnt/user-data/outputs/scorecard-v<latest>.zip
+
+The newest zip is the only thing that survives. It now contains the source,
+the tests, and this file.
+
+Four habits, each learned the hard way:
+
+  1. PACKAGE AFTER EVERY CHANGE. One change, verify, zip, next. An early
+     attempt built five things, packaged none, and lost a whole session.
+  2. RUN sh test/all.sh BEFORE PACKAGING. Never skip it.
+  3. ASSERT EVERY EDIT LANDS. Several edits have silently failed to apply by
+     matching text that had already changed. Check before and after.
+  4. KEEP test/ AND THIS FILE IN THE ZIP.
+
+
+THE APP
+-------
+Vanilla ES modules, no build step, GitHub Pages, Cloud Firestore.
+
+  index.html      the shell
+  app.js          every screen, and the render loop
+  model.js        handicap maths, games, standings
+  store.js        Firestore and sign-in
+  outbox.js       the offline write queue
+  courses-api.js  course lookup by name
+  firestore.rules the security rules — the only enforcement layer
+
+  reset / cleanup / repair / tidy / rebuild .html
+                  one-time data jobs, deliberately kept OUT of the app
+
+World Handicap System:
+  differential    = (113 / slope) x (adjusted - rating)
+  index           = average of the lowest 8 of the last 20, minimum 3 rounds
+  course handicap = index x (slope / 113) + (rating - par)
+
+A NEGATIVE course handicap is legitimate. A good player on a course rated
+below par gets fewer strokes than par.
+
+Roles are stored per group: owner, admin, guest. Guests need no password;
+admins do. Somebody can be an admin of one group and a guest in another.
+
+
+THE TESTS
+---------
+Run them all:   sh test/all.sh
+
+  loads       does the app actually start
+  exports     every db.X the app calls exists in store.js
+  handlers    every button is wired, and every action has a handler
+  discipline  seven habits that each cost a release
+  foundation  the handicap maths, games, the calendar
+  outbox      offline replay, retries, refusals, batches
+  lookup      every shape the course provider has ever sent
+
+They read the source rather than mocking a browser. An earlier suite used a
+large fake DOM whose pretend closest() matched every selector, and it hid real
+faults for weeks.
+
+
+THE RULES THAT MATTER
+---------------------
+* AUTOMATE FIRST. Never hand over manual steps if code can do it. This is an
+  accessibility requirement, not a preference.
+* LARGE TEXT in every reply. No code formatting - it renders too small to read.
+* ONE-TIME DATA WORK goes in a standalone script page, never the app.
+* EVERY MULTI-DOCUMENT WRITE uses commitTogether - all or nothing. BUT never
+  batch a document together with another whose RULE depends on the first
+  existing. Firestore evaluates each write against the state BEFORE the batch.
+  This one trap caused three separate "dead button" reports.
+* NEVER DELETE ON A FAILED READ. "Cannot confirm" is not "gone". A dropped
+  connection once pruned a live group and cost a whole season of rounds.
+* SAY AT THE TOP OF THE MESSAGE whether firestore.rules changed.
+* UPDATE THE GUIDE in the same release as any change to the screens.
+* WHEN A SCREEN FAILS, ASK FOR THE "Technical detail" TEXT FIRST. Three wrong
+  fixes were shipped guessing at one crash whose cause was in that expander.
+* CLAUDE CANNOT TEST REAL FIREBASE, or the network, or an iPad. Say so plainly
+  rather than implying a release is verified.
+* NEVER REMOVE AN ESCAPE ROUTE in the same release that replaces it.
+* EVERY WRITE TO /golfers by somebody who is not that golfer must carry
+  editedIn, naming a group where they are an admin and the golfer is on the
+  roster. Exempt: { linkedUid: uid } when claiming an unlinked golfer as
+  yourself.
+
+
+WHAT TENDS TO BREAK
+-------------------
+* display:flex overrides the hidden attribute. Caused an invisible overlay that
+  swallowed every tap. Always add [hidden] { display: none !important }.
+* Number("") and Number(null) are both 0. Silently turned "no differential"
+  into zero and "no index" into scratch.
+* A missing field on a restored round, usually the date, threw and took whole
+  screens down.
+* iOS: no hover at all; the clipboard is refused unless the page has focus;
+  pop-ups are blocked in home-screen apps, so Google sign-in can never work
+  there; Safari and the home-screen icon have SEPARATE storage; the number pad
+  has no hyphen; repeat(7, 1fr) will not shrink below content size, so use
+  minmax(0, 1fr).
+* Every tap of an invitation link in a fresh browser creates a NEW anonymous
+  account, and therefore another membership for the same person.
+* The course provider has changed its data shape at least three times.
+
+
+STILL OPEN
+----------
+* Duplicate golfers on the live data - one person exists four times. tidy
+  reports duplicates but does not merge them.
+* Golfers belonging to no group are invisible to "Add from my other groups".
+* A guest promoted to admin has no password; they should be prompted.
+* Rounds live INSIDE the group, so they die with a lost group document, unlike
+  golfers and courses which are top level. This is Claude's design error and it
+  cost a season of rounds. Mitigated - deleting a group now backs the rounds up
+  first - but not architecturally fixed.
+* A whole-database backup: Firestore's own export is paid-plan only. The
+  in-app "Back up now" is the practical equivalent. Worth adding a monthly
+  reminder and keeping the last three automatically.
+
+DECIDED AGAINST: a "super admin" role. Roles are already per group and the
+group switcher has no role check, so an admin of two groups can already move
+between them. A new cross-group permission list would touch every membership
+rule, which is where most failures have come from. "Invite an admin who
+doesn't play" fills the one real gap.
+
+
+DELETING A GROUP SAFELY
+-----------------------
+Use Admin, then Delete this group. It backs up every round first and hands it
+over as a file, then removes the rounds, games, roster and memberships in the
+right order, then the group itself.
+
+GOLFERS AND COURSES SURVIVE. They belong to the account, not to any group, and
+their rounds in other groups are untouched.
+
+Do NOT delete things by hand first. That is how rounds were orphaned before.
+Afterwards, run tidy to archive any leftover test golfers.
