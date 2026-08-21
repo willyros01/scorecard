@@ -21,6 +21,7 @@ const prettyDate = (iso) => {
  * part of it ourselves, so it behaves identically everywhere. */
 let calendarOpen = false;
 let calendarMonth = null;
+let calPick = null;   /* "months" | "years" | null */
 
 const monthNames = ["January","February","March","April","May","June",
   "July","August","September","October","November","December"];
@@ -49,9 +50,33 @@ function calendarPanel(value) {
   return `<div class="cal">
     <div class="cal-head">
       <button class="cal-arrow" data-cal="prev" aria-label="Previous month">‹</button>
-      <div class="cal-title">${monthNames[Number(showing.slice(5, 7)) - 1]} ${showing.slice(0, 4)}</div>
+      <div class="cal-title">
+        <button class="cal-jump" data-cal="months">${monthNames[Number(showing.slice(5, 7)) - 1]}</button>
+        <button class="cal-jump" data-cal="years">${showing.slice(0, 4)}</button>
+      </div>
       <button class="cal-arrow" data-cal="next" aria-label="Next month">›</button>
     </div>
+    ${calPick === "months" ? `<div class="cal-pick">
+      ${monthNames.map((name, i) => {
+        const ym = `${showing.slice(0, 4)}-${String(i + 1).padStart(2, "0")}`;
+        return `<button class="cal-pick-btn ${ym === showing ? "picked" : ""}" data-cal-month="${ym}">${name.slice(0, 3)}</button>`;
+      }).join("")}
+    </div>` : ""}
+
+    ${calPick === "years" ? `<div class="cal-pick">
+      ${(() => {
+        /* Ten years back and none forward — a round cannot be played in the
+           future, and reaching 2025 from 2026 took fifteen taps of an arrow. */
+        const thisYear = Number(today().slice(0, 4));
+        const years = [];
+        for (let y = thisYear; y >= thisYear - 9; y--) years.push(y);
+        return years.map((y) => {
+          const ym = `${y}-${showing.slice(5, 7)}`;
+          return `<button class="cal-pick-btn ${String(y) === showing.slice(0, 4) ? "picked" : ""}" data-cal-month="${ym}">${y}</button>`;
+        }).join("");
+      })()}
+    </div>` : ""}
+
     <div class="cal-week">${["M","T","W","T","F","S","S"].map((d) => `<span>${d}</span>`).join("")}</div>
     <div class="cal-grid">
       ${dayGrid(showing).map((d) => {
@@ -61,6 +86,13 @@ function calendarPanel(value) {
           data-cal-day="${iso}" ${iso > now ? "disabled" : ""}>${d}</button>`;
       }).join("")}
     </div>
+    <div class="cal-typed">
+      <label class="lbl">Or type it</label>
+      <input class="field" name="typed-date" inputmode="numeric" placeholder="YYYY-MM-DD"
+             value="${esc(value || "")}" autocomplete="off">
+      <button class="btn ghost compact" data-cal="typed">Use what I typed</button>
+    </div>
+
     <div class="cal-foot">
       <button class="btn ghost compact" data-cal="today">Today</button>
       <button class="btn compact" data-cal="close">Use this date</button>
@@ -195,7 +227,7 @@ const CLICKABLE = [
   "data-act", "data-tee", "data-go", "data-edit", "data-del", "data-confirm-del",
   "data-unfilter", "data-drill", "data-golfer-index", "data-del-golfer", "data-rename",
   "data-set-index", "data-course", "data-pick", "data-rm-tee", "data-game", "data-role",
-  "data-invite-golfer", "data-reinvite", "data-cal", "data-cal-day", "data-more",
+  "data-invite-golfer", "data-reinvite", "data-cal", "data-cal-day", "data-cal-month", "data-more",
   "data-drop-round", "data-goto-group", "data-forget-group",
 ].map((name) => `[${name}]`).join(",");
 let courseDraft = null;
@@ -2607,6 +2639,56 @@ view.addEventListener("keydown", (e) => {
 });
 
 view.addEventListener("click", async (e) => {
+  /* The calendar is drawn inside the panel, so its taps arrive HERE. They were
+     attached to the pop-up sheet's listener instead, which is why every button
+     on it was dead and the date could not be changed at all. */
+  const calNav = e.target.closest("[data-cal]");
+  if (calNav) {
+    const what = calNav.dataset.cal;
+    const showing = calendarMonth || form.date.slice(0, 7);
+    if (what === "prev") { calendarMonth = shiftMonth(showing, -1); calPick = null; }
+    else if (what === "next") { calendarMonth = shiftMonth(showing, 1); calPick = null; }
+    else if (what === "months") calPick = calPick === "months" ? null : "months";
+    else if (what === "years") calPick = calPick === "years" ? null : "years";
+    else if (what === "today") { form.date = today(); calendarMonth = form.date.slice(0, 7); calPick = null; }
+    else if (what === "typed") {
+      /* Typed in by hand. Accepted only if it is a real date and not in the
+         future — otherwise the field is left alone and says why. */
+      const field = view.querySelector('[name="typed-date"]');
+      const typed = field ? field.value.trim() : "";
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(typed)) { flashMsg("Type the date as YYYY-MM-DD, for example 2025-05-18"); return render(); }
+      const [y, m, d] = typed.split("-").map(Number);
+      const real = new Date(Date.UTC(y, m - 1, d));
+      if (real.getUTCFullYear() !== y || real.getUTCMonth() !== m - 1 || real.getUTCDate() !== d) {
+        flashMsg("That is not a real date"); return render();
+      }
+      if (typed > today()) { flashMsg("A round cannot have been played in the future"); return render(); }
+      form.date = typed;
+      calendarOpen = false; calendarMonth = null; calPick = null;
+    }
+    else if (what === "close") { calendarOpen = false; calendarMonth = null; calPick = null; }
+    render();
+    updateEnterHints();
+    return;
+  }
+
+  const calMonth = e.target.closest("[data-cal-month]");
+  if (calMonth) {
+    calendarMonth = calMonth.dataset.calMonth;
+    calPick = null;
+    return render();
+  }
+
+  const calDay = e.target.closest("[data-cal-day]");
+  if (calDay) {
+    form.date = calDay.dataset.calDay;
+    calendarOpen = false;
+    calendarMonth = null;
+    render();
+    updateEnterHints();
+    return;
+  }
+
   /* A tapped dot writes into the readout without redrawing anything, so the
      chart does not flicker and the tap target stays under the finger. */
   const dot = e.target.closest("[data-round-detail]");
@@ -3050,6 +3132,65 @@ view.addEventListener("click", async (e) => {
 
     case "share-invite": return openShare(
       `Join our golf scorecard:\n${db.joinLink(association)}\n\nOne tap, enter your name, done.`, "Invitation");
+    case "tidy-signins": {
+      /* Removes only SUPERSEDED memberships — never the newest for any person,
+         never the owner, never your own. A membership is just a sign-in record;
+         rounds belong to the golfer, so nothing is lost. */
+      const byPerson = new Map();
+      for (const m of members) {
+        const key = m.golferId || `name:${String(m.displayName || "").trim().toLowerCase()}`;
+        if (!byPerson.has(key)) byPerson.set(key, []);
+        byPerson.get(key).push(m);
+      }
+      const spare = [];
+      for (const list of byPerson.values()) {
+        if (list.length < 2) continue;
+        const sorted = [...list].sort((a, b) => {
+          if (a.role === "owner") return -1;
+          if (b.role === "owner") return 1;
+          const at = (m) => (m.joinedAt && m.joinedAt.seconds) || m.joinedAt || 0;
+          return at(b) - at(a);
+        });
+        sorted.slice(1).filter((m) => m.role !== "owner").forEach((m) => spare.push(m));
+      }
+      if (!spare.length) { flashMsg("Nothing to tidy."); return render(); }
+
+      busy(`Removing ${spare.length} older sign-in${spare.length === 1 ? "" : "s"}`);
+      try {
+        await db.removeMemberships(spare.map((m) => m.uid));
+        flashMsg(`${spare.length} older sign-in${spare.length === 1 ? "" : "s"} removed. Everybody's rounds are untouched.`);
+      } catch { flashMsg("Couldn't remove them — the message above says why."); }
+      finally { idleAll(); }
+      return render();
+    }
+
+    case "invite-nonplayer": {
+      /* The role and nothing else — no golfer, no roster place. For a club
+         secretary or scorer who runs the group without playing in it. */
+      busy("Preparing the invitation");
+      try {
+        await db.ensureAdminCode();
+        const link = db.inviteLink("admin");
+        if (!link) {
+          idleAll();
+          return openProblem({
+            title: "The invitation link could not be built",
+            detail: "The group's details have not finished loading yet.",
+            advice: "Wait a moment and try again.",
+          });
+        }
+        const guide = `${location.origin}${location.pathname}quick-start.html`;
+        openShare([
+          `${association ? association.name : "Our golf group"} — you are invited to help run the group.`,
+          "", `Join here: ${link}`, "", `How it works, in one page: ${guide}`, "",
+          "This makes you an admin: you can add courses, manage the roster and post rounds for anybody. You are not added as a player, so no handicap is kept for you.",
+          "You will be asked to set a password as you join. The link works once, so keep it to yourself.",
+        ].join("\n"), "Admin invitation");
+      } catch { flashMsg("Couldn't prepare it — the message above says why."); }
+      finally { idleAll(); }
+      return render();
+    }
+
     case "show-code": {
       if (!association) return;
       sheetEl.hidden = false;
@@ -3160,7 +3301,18 @@ view.addEventListener("click", async (e) => {
 });
 
 sheetEl.addEventListener("click", async (e) => {
-  if (e.target === sheetEl || e.target.closest("[data-close]")) { sheetEl.hidden = true; return; }
+  /* Actions are checked BEFORE the close guard.
+   *
+   * The guard used to run first, and any button sitting inside markup that also
+   * carried a close marker was read as "close the dialog" — which is why "Let
+   * them join again" did nothing at all. An action button is never a close
+   * button, so it must be allowed through. */
+  const ACTIONS = "[data-pw],[data-reset-invite],[data-recalc],[data-invite],[data-pick],[data-paste],[data-problem],[data-send],[data-quick],[data-share-toggle]";
+  if (!e.target.closest(ACTIONS)
+      && (e.target === sheetEl || e.target.closest("[data-close]"))) {
+    sheetEl.hidden = true;
+    return;
+  }
 
   /* Forget removes a group from THIS account's list and this device, without
      touching the group itself. It is the one action that cannot fail: it does
@@ -3276,29 +3428,6 @@ sheetEl.addEventListener("click", async (e) => {
     } catch {
       flashMsg("Couldn't prepare it — the message above says why.");
     } finally { idleAll(); }
-    return;
-  }
-
-  const calNav = e.target.closest("[data-cal]");
-  if (calNav) {
-    const what = calNav.dataset.cal;
-    const showing = calendarMonth || form.date.slice(0, 7);
-    if (what === "prev") calendarMonth = shiftMonth(showing, -1);
-    else if (what === "next") calendarMonth = shiftMonth(showing, 1);
-    else if (what === "today") { form.date = today(); calendarMonth = form.date.slice(0, 7); }
-    else if (what === "close") { calendarOpen = false; calendarMonth = null; }
-    render();
-    updateEnterHints();
-    return;
-  }
-
-  const calDay = e.target.closest("[data-cal-day]");
-  if (calDay) {
-    form.date = calDay.dataset.calDay;
-    calendarOpen = false;
-    calendarMonth = null;
-    render();
-    updateEnterHints();
     return;
   }
 

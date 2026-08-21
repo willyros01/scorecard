@@ -670,3 +670,24 @@ body { font-size: 1rem; }
 .invite-state.joined { color: var(--pine); font-weight: 700; }
 .invite-state.waiting { color: var(--pencil); font-weight: 700; }
 [data-theme="dark"] .invite-state.joined { color: #7EBEA0; }
+
+/* month and year as jump buttons — arrows alone meant fifteen taps to reach
+   last May, which was worse than the picker this replaced */
+.cal-title { display: flex; gap: 0.4rem; align-items: center; }
+.cal-jump {
+  font: inherit; font-weight: 700; font-size: 1.05rem; color: var(--ink);
+  background: none; border: 0; border-bottom: 2px dashed var(--sand);
+  padding: 2px 4px; cursor: pointer;
+}
+.cal-pick {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px;
+  margin: 0.8rem 0 0.2rem;
+}
+.cal-pick-btn {
+  min-height: 44px; border-radius: 10px; font: inherit;
+  border: 1.5px solid var(--rule); background: var(--card); color: var(--ink); cursor: pointer;
+}
+.cal-pick-btn.picked { background: var(--pine); color: #fff; border-color: var(--pine); font-weight: 700; }
+[data-theme="dark"] .cal-pick-btn.picked { background: #7EBEA0; color: #14261F; }
+.cal-typed { margin-top: 0.9rem; padding-top: 0.8rem; border-top: 1px dashed var(--rule); }
+.cal-typed .btn { width: 100%; margin-top: 0.5rem; }
