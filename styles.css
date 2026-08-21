@@ -579,11 +579,17 @@ body { font-size: 1rem; }
   width: 46px; height: 42px; border-radius: 10px; font-size: 1.4rem; line-height: 1;
   border: 1.5px solid var(--rule); background: var(--card); color: var(--ink); cursor: pointer;
 }
-.cal-week, .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+/* minmax(0, 1fr) is what keeps the weekday letters over their columns.
+   A plain 1fr will not shrink below the content's minimum size, so the 42px
+   day cells forced the grid wider than the header on a narrow phone and the
+   two rows drifted apart. */
+.cal-week, .cal-grid {
+  display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px;
+}
 .cal-week { margin: 0.7rem 0 0.2rem; }
-.cal-week span { text-align: center; font-size: 0.78rem; color: var(--muted); }
+.cal-week span { text-align: center; font-size: 0.78rem; color: var(--muted); min-width: 0; }
 .cal-day {
-  aspect-ratio: 1; min-height: 42px; border-radius: 10px;
+  aspect-ratio: 1; min-width: 0; border-radius: 10px;
   border: 1.5px solid transparent; background: var(--card);
   font: inherit; font-size: 1rem; color: var(--ink); cursor: pointer;
 }
@@ -591,7 +597,7 @@ body { font-size: 1rem; }
 .cal-day.today { border-color: var(--sand); font-weight: 700; }
 .cal-day.picked { background: var(--pine); color: #fff; font-weight: 700; border-color: var(--pine); }
 [data-theme="dark"] .cal-day.picked { background: #7EBEA0; color: #14261F; border-color: #7EBEA0; }
-.cal-blank { min-height: 42px; }
+.cal-blank { min-width: 0; aspect-ratio: 1; }
 .cal-foot { display: flex; gap: 0.6rem; margin-top: 0.8rem; }
 .cal-foot .btn { flex: 1; }
 

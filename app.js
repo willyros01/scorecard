@@ -88,7 +88,7 @@ function calendarPanel(value) {
     </div>
     <div class="cal-typed">
       <label class="lbl">Or type it</label>
-      <input class="field" name="typed-date" inputmode="numeric" placeholder="YYYY-MM-DD"
+      <input class="field" name="typed-date" inputmode="text" placeholder="2025-05-18"
              value="${esc(value || "")}" autocomplete="off">
       <button class="btn ghost compact" data-cal="typed">Use what I typed</button>
     </div>
@@ -623,7 +623,24 @@ function screenEnter() {
      "You", and Post could never enable. A guest simply could not use the app.
      Seeding it here covers every route in, including a fresh join. */
   if (!db.canManage() && !form.golferId) {
-    const mine = typeof db.myGolferId === "function" ? db.myGolferId(allGolfers) : "";
+    let mine = typeof db.myGolferId === "function" ? db.myGolferId(allGolfers) : "";
+
+    /* Fall back to matching on the name they joined under.
+     *
+     * myGolferId relies on the golfer carrying linkedUid, which is only set
+     * when somebody accepts a NAMED invitation. Anyone who joined by typing a
+     * code, or before named invitations existed, has no link at all — and was
+     * left staring at "Not linked yet" with Post disabled. Matching the name
+     * on their membership recovers them. */
+    if (!mine) {
+      const me = members.find((m) => m.uid === db.status().uid);
+      const named = me && String(me.displayName || "").trim().toLowerCase();
+      if (named) {
+        const match = allGolfers.find((g) => String(g.name || "").trim().toLowerCase() === named);
+        if (match) mine = match.id;
+      }
+    }
+
     if (mine) form.golferId = mine;
   }
 
@@ -2655,8 +2672,20 @@ view.addEventListener("click", async (e) => {
       /* Typed in by hand. Accepted only if it is a real date and not in the
          future — otherwise the field is left alone and says why. */
       const field = view.querySelector('[name="typed-date"]');
-      const typed = field ? field.value.trim() : "";
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(typed)) { flashMsg("Type the date as YYYY-MM-DD, for example 2025-05-18"); return render(); }
+      const raw = field ? field.value.trim() : "";
+      /* The iPhone's number pad has no hyphen at all, so any separator is
+         accepted — slash, dot, space — and plain digits too. Insisting on one
+         punctuation mark the keyboard cannot produce is not a validation rule,
+         it is a trap. */
+      const digits = raw.replace(/\D/g, "");
+      let typed = "";
+      if (digits.length === 8) {
+        typed = `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6, 8)}`;
+      }
+      if (!typed) {
+        flashMsg("Type the date as year, month, day — for example 2025 05 18");
+        return render();
+      }
       const [y, m, d] = typed.split("-").map(Number);
       const real = new Date(Date.UTC(y, m - 1, d));
       if (real.getUTCFullYear() !== y || real.getUTCMonth() !== m - 1 || real.getUTCDate() !== d) {

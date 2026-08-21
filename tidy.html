@@ -140,6 +140,9 @@ async function inspect() {
   const roundsByGolfer = new Map();
   const roundIds = new Set();
   const rosterIds = new Set();
+  /* Which group each golfer plays in — the rules need one named when the owner
+     corrects somebody else's golfer record. */
+  const homeGroupOf = new Map();
   let totalRounds = 0;
 
   for (const group of groups) {
@@ -156,7 +159,10 @@ async function inspect() {
       });
     });
     try {
-      (await getDocs(collection(db, "associations", group.id, "roster"))).forEach((d) => rosterIds.add(d.id));
+      (await getDocs(collection(db, "associations", group.id, "roster"))).forEach((d) => {
+        rosterIds.add(d.id);
+        if (!homeGroupOf.has(d.id)) homeGroupOf.set(d.id, group.id);
+      });
     } catch {}
   }
 
@@ -191,6 +197,7 @@ async function inspect() {
         realCount: real.length, storedCount,
         correctIndex, storedIndex, staleEntries: stale.length,
         window,
+        homeGroup: homeGroupOf.get(golfer.id) || "",
       });
     }
 
@@ -221,8 +228,13 @@ async function inspect() {
 
       const right = Math.round(+golfer.handicapIndex * (+r.slope / 113) + (+r.rating - +r.par));
       const stored = r.courseHandicap;
-      /* Only obviously wrong ones: negative, or more than 5 strokes out. */
-      if (stored != null && (stored < 0 || Math.abs(stored - right) > 5)) {
+      /* A NEGATIVE course handicap is perfectly legitimate — a low-handicap
+         player on a course rated below par genuinely gets fewer strokes than
+         par. Treating negative as "wrong" flagged correct rounds, rewrote them
+         to the same value, and flagged them again on the next run: an endless
+         loop that made this page look broken and the data look corrupt.
+         The only real fault is a stored value that DIFFERS from the right one. */
+      if (stored != null && stored !== right) {
         staleHandicaps.push({ groupId: group.id, id: d.id, name: golfer.name, date: r.date, stored, right });
       }
     });
@@ -362,10 +374,17 @@ async function repair() {
 
   for (const g of plan.golferFixes) {
     try {
+      /* editedIn names a group the owner administers AND that holds this
+         golfer, which is what the rules check before allowing a write to
+         somebody else's golfer record. Without it the write is refused and
+         the page reports "permission-denied" for a correction it could
+         otherwise make. g.homeGroup is set when the fix is worked out, so it
+         is always a group this golfer really plays in. */
       await setDoc(doc(db, "golfers", g.id), {
         recentWindow: g.window,
         handicapIndex: g.correctIndex,
         roundCount: g.realCount,
+        editedIn: g.homeGroup || (groups[0] || {}).id || "",
       }, { merge: true });
       fixed++;
       say(`${g.name}: ${g.realCount} round${g.realCount === 1 ? "" : "s"}, index ${g.correctIndex == null ? "not established" : g.correctIndex.toFixed(1)}`);
