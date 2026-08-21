@@ -275,8 +275,20 @@ export async function roleForCode(associationId, code) {
 
 export async function joinAssociation({ associationId, code, displayName }) {
   const { setDoc, serverTimestamp } = fb.mod.store;
+  /* The role comes from the LINK, not a hardcoded "member".
+   *
+   * An admin invitation carries the admin code and `as=admin`. Asking for the
+   * "member" role while presenting the admin code fails the rules — role
+   * member requires the GUEST code — so every non-playing admin invitation was
+   * refused with "That code was not accepted". The rules still verify the code
+   * against the group, so this is a claim they check, not one they trust. */
+  const fromLink = readJoinLink();
+  const role = (fromLink && fromLink.associationId === associationId && fromLink.role === "admin")
+    ? "admin"
+    : "member";
+
   const member = model.buildMember({
-    uid, displayName, role: "member", joinCode: model.normalizeJoinCode(code),
+    uid, displayName, role, joinCode: model.normalizeJoinCode(code),
   });
   try {
     /* Membership and the pointer on your account go together. Written apart,

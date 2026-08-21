@@ -202,7 +202,7 @@ function currentEnterStyle() {
   enterStyle = db.canManage() ? "full" : "steps";
   return enterStyle;
 }
-let stepIndex = 0;
+let stepIndex = null;   /* null = let the walk-through choose where to start */
 let stepDateOpen = false;
 
 const setEnterStyle = (which) => {
@@ -517,11 +517,22 @@ function enterInSteps({ course, tee, golfer, ags, diff, ch, ready2, pickableGame
     { key: "where", done: !!tee, label: "Course and tees" },
     { key: "score", done: +form.gross > 0, label: "Score" },
   ];
-  /* Land on the first thing still outstanding, unless they have moved by hand. */
-  const firstUndone = steps.findIndex((s) => !s.done);
-  const at = Math.min(Math.max(0, stepIndex), steps.length - 1);
-  const current = steps[firstUndone === -1 ? at : Math.max(at, 0)] || steps[0];
-  const showing = stepIndex === 0 && firstUndone !== -1 ? steps[firstUndone] : current;
+  /* Which step to show.
+   *
+   * This was a trap. It jumped to the first UNFINISHED step whenever stepIndex
+   * was 0 — so after posting a round, with the golfer and course still filled
+   * in, it landed on the score and Back could not escape: Back set stepIndex to
+   * 0, and 0 meant "jump to the first unfinished step" all over again. The
+   * course could never be changed for the next round.
+   *
+   * Now stepIndex is simply obeyed. It is set to the first unfinished step ONCE
+   * when the walk-through opens (below), and after that the person is in
+   * charge of where they are. */
+  if (stepIndex == null) {
+    const firstUndone = steps.findIndex((s) => !s.done);
+    stepIndex = firstUndone === -1 ? steps.length - 1 : firstUndone;
+  }
+  const showing = steps[Math.min(Math.max(0, stepIndex), steps.length - 1)] || steps[0];
 
   const done = steps.filter((s) => s.done).length;
   const chosen = [
@@ -2858,10 +2869,10 @@ view.addEventListener("click", async (e) => {
     case "clear-filters": filter = { golferId: "", year: "", month: "", courseId: "" }; return render();
     case "drill-back": drill.month ? (drill.month = null) : (drill.year = null); return render();
     case "view-scope": filter = { golferId: "", year: drill.year || "", month: drill.month || "", courseId: "" }; tab = "history"; return render();
-    case "enter-steps": setEnterStyle("steps"); return render();
+    case "enter-steps": setEnterStyle("steps"); stepIndex = null; return render();
     case "enter-full": setEnterStyle("full"); return render();
-    case "step-next": stepIndex = Math.min(2, stepIndex + 1); return render();
-    case "step-back": stepIndex = Math.max(0, stepIndex - 1); return render();
+    case "step-next": stepIndex = Math.min(2, (stepIndex ?? 0) + 1); return render();
+    case "step-back": stepIndex = Math.max(0, (stepIndex ?? 0) - 1); return render();
     case "step-date": stepDateOpen = !stepDateOpen; return render();
     case "step-date-done": stepDateOpen = false; return render();
     case "open-calendar":
@@ -3330,6 +3341,38 @@ view.addEventListener("click", async (e) => {
 });
 
 sheetEl.addEventListener("click", async (e) => {
+  /* FIRST, before any guard at all.
+   *
+   * This button has been reported dead three times. Each fix addressed a real
+   * fault and it stayed dead, so rather than a fourth theory it now runs before
+   * anything else in this listener can intercept, close, or return. */
+  const reopening = e.target.closest("[data-reset-invite]");
+  if (reopening) {
+    const id = reopening.dataset.resetInvite;
+    const golfer = golferById(id);
+    sheetEl.hidden = true;
+    busy("Clearing the old invitation");
+    try {
+      await db.resetInvitation(id);
+      openNotice({
+        title: `${(golfer || {}).name || "They"} can be invited again`,
+        detail: "The old invitation has been cleared. Send them a fresh link from Manage.",
+      });
+    } catch (err) {
+      /* Say exactly what went wrong. A silent failure here has wasted three
+         rounds of diagnosis already. */
+      idleAll();
+      openProblem({
+        title: "Could not clear the invitation",
+        detail: String((err && (err.code || err.message)) || err) || "No detail was given.",
+        advice: "Nothing was changed. Send this report and it will say what refused it.",
+      });
+    }
+    finally { idleAll(); }
+    render();
+    return;
+  }
+
   /* Actions are checked BEFORE the close guard.
    *
    * The guard used to run first, and any button sitting inside markup that also
@@ -3383,20 +3426,6 @@ sheetEl.addEventListener("click", async (e) => {
     return;
   }
 
-  const reopening = e.target.closest("[data-reset-invite]");
-  if (reopening) {
-    const id = reopening.dataset.resetInvite;
-    const golfer = golferById(id);
-    sheetEl.hidden = true;
-    busy("Clearing the old invitation");
-    try {
-      await db.resetInvitation(id);
-      flashMsg(`${(golfer || {}).name || "They"} can be invited again. Send them a fresh link.`);
-    } catch { flashMsg("Couldn't clear it — the message above says why."); }
-    finally { idleAll(); }
-    render();
-    return;
-  }
 
   const recalc = e.target.closest("[data-recalc]");
   if (recalc) {
