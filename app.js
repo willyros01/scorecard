@@ -420,7 +420,11 @@ function screenJoin() {
         still missing, ask whoever runs the group to send you a fresh invitation link.</p>
         <div class="inline-actions stacked">
           <button class="btn" data-act="look-again">Look for my groups again</button>
+          <button class="btn ghost" data-act="enter-code">I have a code for my group</button>
         </div>
+        <p class="hint">The code is six characters. Whoever runs the group can read it out — Admin,
+        then <b>Show the code</b>. Joining by code always works, even when the search cannot find
+        you.</p>
       </div>
 
       <div class="card padded">
@@ -1233,7 +1237,11 @@ function fastEntryPanel(game) {
   const teeId = fastEntry.teeId || (tees[0] && tees[0].id) || "";
   const tee = tees.find((t) => t.id === teeId);
 
-  const filled = playing.filter((g) => +(fastEntry.scores[g.id] || 0) > 0).length;
+  /* Counted from what has been TYPED, which the panel tracks as it goes.
+     Reading it from state at render time meant the count was always zero: the
+     panel is deliberately not redrawn on every keystroke, so the state never
+     caught up and the button stayed disabled for ever. */
+  const filled = Object.values(fastEntry.scores).filter((v) => +v > 0).length;
 
   return `<section class="panel">
     <div class="panel-head">
@@ -1284,8 +1292,8 @@ function fastEntryPanel(game) {
     </div>
 
     <div class="inline-actions stacked" style="margin-top:0.9rem">
-      <button class="btn" data-act="fast-post" ${filled ? "" : "disabled"}>
-        ${filled ? `Post ${filled} round${filled === 1 ? "" : "s"} into this game` : "Type at least one score"}
+      <button class="btn" data-act="fast-post" id="fast-post">
+        ${filled ? `Post ${filled} round${filled === 1 ? "" : "s"} into this game` : "Post the scores"}
       </button>
     </div>
     <p class="hint">Only golfers with a score are posted. Leave the rest blank — nothing happens to them.
@@ -2809,6 +2817,33 @@ view.addEventListener("change", (e) => {
    * Read the value, update state, update the hint text. Nothing else. */
   if (n === "date") { form.date = v; updateEnterHints(); return; }
   if (n === "fast-tee") { if (fastEntry) fastEntry.teeId = v; return render(); }
+
+  /* Typed into the fast-entry grid. The value is remembered and the button
+     label updated IN PLACE — redrawing here would move the keyboard and lose
+     the cursor between every digit. */
+  if (n.startsWith("fast-score-") || n.startsWith("fast-index-")) {
+    if (!fastEntry) return;
+    /* Digits only, and a single decimal point for an index. Typing a letter
+       into a score should simply not appear. */
+    const digitsOnly = n.startsWith("fast-score-");
+    const cleaned = digitsOnly
+      ? v.replace(/[^0-9]/g, "").slice(0, 3)
+      : v.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1").slice(0, 4);
+    if (cleaned !== v && e.target) e.target.value = cleaned;
+
+    const id = n.replace(/^fast-(score|index)-/, "");
+    if (digitsOnly) fastEntry.scores[id] = cleaned;
+    else fastEntry.indexes[id] = cleaned;
+
+    const button = document.getElementById("fast-post");
+    if (button) {
+      const count = Object.values(fastEntry.scores).filter((x) => +x > 0).length;
+      button.textContent = count
+        ? `Post ${count} round${count === 1 ? "" : "s"} into this game`
+        : "Post the scores";
+    }
+    return;
+  }
   if (n === "golferId") {
     form.golferId = v;
     /* In the walk-through, choosing moves you on — that is the point of it. */
@@ -3100,11 +3135,24 @@ view.addEventListener("click", async (e) => {
           return render();
         }
         idleAll();
-        openNotice({
-          title: "No groups found for this account",
-          detail: "Nothing is wrong with your rounds — they belong to the group, not to your sign-in. This account simply is not a member of one.",
-          advice: "Ask whoever runs the group for a fresh invitation link. Only create a group here if you really are starting a new one.",
-        });
+        /* Say WHY, when there is a why. A search that failed is a completely
+           different situation from an account that genuinely belongs nowhere,
+           and telling somebody the second when the first is true leaves them
+           stuck on this screen. */
+        const why = typeof db.groupLookupError === "function" ? db.groupLookupError() : "";
+        if (why) {
+          openProblem({
+            title: "The search could not be completed",
+            detail: `This is not the same as having no groups — the lookup itself failed. ${why}`,
+            advice: "Use the code instead: tap \"I have a code for my group\" above. Ask whoever runs the group to read it out from Admin.",
+          });
+        } else {
+          openNotice({
+            title: "No groups found for this account",
+            detail: "Nothing is wrong with your rounds — they belong to the group, not to your sign-in. This account simply is not a member of one.",
+            advice: "Ask whoever runs the group for a fresh invitation link, or use the code. Only create a group here if you really are starting a new one.",
+          });
+        }
       } catch {
         idleAll();
         flashMsg("Couldn't check just now. Try again in a moment.");
@@ -4197,7 +4245,14 @@ function openSignInProblem(error, email) {
   let detail = code || "No detail was given.";
   let offerReset = false;
 
-  if (code.includes("wrong-password") || code.includes("invalid-credential") || code.includes("invalid-login")) {
+  if (code.includes("no-such-account")) {
+    /* Deliberately says nothing about whether the email exists — and, more to
+       the point, no longer CREATES one. A mistyped address used to make a new
+       account and drop somebody on "Start your group". */
+    title = "That email and password did not match";
+    detail = `Nothing signed in as ${email}. Check the address for a typo, and check the password.`;
+    offerReset = true;
+  } else if (code.includes("wrong-password") || code.includes("invalid-credential") || code.includes("invalid-login")) {
     title = "That password was not right";
     detail = `The email ${email} exists, but the password does not match it.`;
     offerReset = true;

@@ -700,11 +700,21 @@ export async function signInWithEmail({ email, password }) {
       clearError();
       return { ok: true, outcome: "signed-in" };
     }
-    if (code.includes("user-not-found")) {
-      await createUserWithEmailAndPassword(fb.auth, address, secret);
-      uid = fb.auth.currentUser.uid;
-      clearError();
-      return { ok: true, outcome: "created" };
+    /* NEVER create an account from the sign-in screen.
+     *
+     * This used to fall through to createUserWithEmailAndPassword whenever the
+     * address was unknown — so a MISTYPED email did not say "no such account",
+     * it silently made one. That account belongs to no group, so the person
+     * landed on "Start your group" and was one tap from a second, empty group
+     * beside their real one. It also produced accounts nobody knew existed.
+     *
+     * Accounts are created deliberately: by accepting an invitation, or by
+     * setting a password on an account that already exists. Not by a typo. */
+    if (code.includes("user-not-found") || code.includes("invalid-credential")
+        || code.includes("invalid-email") || code.includes("wrong-password")) {
+      const wrong = new Error("auth/no-such-account");
+      wrong.code = "auth/no-such-account";
+      throw wrong;
     }
     report(e);
     throw e;
@@ -1368,6 +1378,13 @@ async function rememberGroupForAccount(id, name) {
  * produced a second empty group and split the data.
  *
  * The membership document is the truth. This asks for it directly. */
+/* Why the last search for groups came up empty, if it FAILED rather than
+   genuinely finding none. Declared before use — a `let` assigned above its
+   declaration throws, which would have replaced one silent failure with a
+   louder one. */
+let lastGroupLookupError = "";
+export const groupLookupError = () => lastGroupLookupError;
+
 export async function groupsFromMemberships() {
   if (!fb || !uid) return [];
   try {
@@ -1390,11 +1407,16 @@ export async function groupsFromMemberships() {
       groups.push({ id: assoc.id, name });
     }
     return groups;
-  } catch {
-    /* The rule or an index may be missing; the caller falls back to pointers. */
+  } catch (e) {
+    /* A collection-group query with a filter needs an index that Firestore does
+       NOT create on its own, and the failure was being swallowed — which left
+       somebody stuck on a screen offering only to create a second group.
+       Report it instead: the error carries a link that creates the index. */
+    lastGroupLookupError = String((e && (e.message || e.code)) || e);
     return [];
   }
 }
+
 
 export async function loadMyGroups() {
   if (!fb || !uid) return knownGroups();
