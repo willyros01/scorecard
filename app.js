@@ -217,6 +217,11 @@ let openCourse = null;
 let editingGolfer = null;
 let editingIndex = null;
 let moreOpen = null;
+
+/* Whether we have already told this person, on this device, that their new
+   admin role needs a password. Shown once per session rather than on every
+   redraw — a dialog that reappears is worse than one that is missed. */
+let toldAboutPromotion = false;
 let editingGame = false;
 let invitedGolfer = null;
 let invitedGroupName = "";
@@ -2465,6 +2470,43 @@ function dateFieldIsOpen() {
     && view.contains(active));
 }
 
+/* A guest who has just been made an admin has no password, and no reason to
+   visit the tab where the form lives. Tell them the moment their role changes,
+   wherever they happen to be. */
+function checkPromotion() {
+  if (toldAboutPromotion) return;
+  if (!ready) return;
+  if (typeof db.myRole !== "function" || !db.myRole()) return;
+
+  /* Remember the role even when nothing needs saying, so a later promotion is
+     recognised as a change rather than looking like it was always so. */
+  if (!db.needsPassword()) {
+    try { localStorage.setItem(`golf:v2:lastRole:${db.currentAssociation() || ""}`, db.myRole()); }
+    catch {}
+    return;
+  }
+
+  toldAboutPromotion = true;
+
+  /* Was this a PROMOTION, or have they simply always been an admin without a
+     password? The wording must not claim something that did not just happen. */
+  const roleKey = `golf:v2:lastRole:${db.currentAssociation() || ""}`;
+  let before = "";
+  try { before = localStorage.getItem(roleKey) || ""; } catch {}
+  const now = db.myRole();
+  try { localStorage.setItem(roleKey, now); } catch {}
+
+  const justPromoted = before === "member" && (now === "admin" || now === "owner");
+
+  openPasswordSheet({
+    heading: justPromoted ? "You are now an admin" : "Set a password",
+    because: justPromoted
+      ? "You can manage this group from now on. Setting a password means the role follows you to any device — without one it lives only in this browser, and cannot be recovered if it is cleared."
+      : "You can manage this group, but only from this browser. A password means the role follows you to any device, and survives the browser's data being cleared.",
+    allowLater: true,
+  });
+}
+
 function render({ force = false } = {}) {
   if (!force && dateFieldIsOpen()) {
     redrawWanted = true;
@@ -2483,7 +2525,9 @@ function render({ force = false } = {}) {
     return;
   }
   redrawWanted = false;
-  return renderNow();
+  const drawn = renderNow();
+  checkPromotion();
+  return drawn;
 }
 
 /* Whenever a date field loses focus, catch up on anything held back. */
@@ -4140,11 +4184,24 @@ async function openOtherGroupPicker() {
       <h2>Add from your other groups</h2><button class="rowbtn" data-close="1">Close</button></div>
     <p class="hint">The same person, not a copy — their rounds and handicap come with them.</p>
     <div class="card list">
-      ${people.map((p) => `<label class="checkline" style="padding:0.6rem 0.8rem">
-        <input type="checkbox" name="pick-golfer" value="${esc(p.id)}">
-        <span><span class="name">${esc(p.name || "Unnamed")}</span><br>
-          <span class="sub">${esc(p.groups.join(", "))}${p.handicapIndex != null ? ` · index ${Number(p.handicapIndex).toFixed(1)}` : " · no index yet"}</span></span>
-      </label>`).join("")}
+      ${(() => {
+        /* Two headings: people who play in another group, then anybody who
+           belongs to no group at all — usually because their group was
+           deleted. Their record and handicap survived, so they can be picked
+           straight back up. */
+        const playing = people.filter((p) => !p.orphaned);
+        const orphans = people.filter((p) => p.orphaned);
+        const row = (p) => `<label class="checkline" style="padding:0.6rem 0.8rem">
+          <input type="checkbox" name="pick-golfer" value="${esc(p.id)}">
+          <span><span class="name">${esc(p.name || "Unnamed")}</span><br>
+            <span class="sub">${p.orphaned ? "not in any group" : esc(p.groups.join(", "))}${
+              p.handicapIndex != null ? ` · index ${Number(p.handicapIndex).toFixed(1)}` : " · no index yet"
+            }</span></span>
+        </label>`;
+
+        return `${playing.length ? `<div class="eyebrow" style="padding:0.6rem 0.8rem 0.2rem">In your other groups</div>${playing.map(row).join("")}` : ""}
+          ${orphans.length ? `<div class="eyebrow" style="padding:0.9rem 0.8rem 0.2rem">Not in any group</div>${orphans.map(row).join("")}` : ""}`;
+      })()}
     </div>
     <div class="inline-actions stacked">
       <button class="btn" data-pick="all">Tick everybody</button>

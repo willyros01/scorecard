@@ -143,6 +143,10 @@ async function inspect() {
   /* Which group each golfer plays in — the rules need one named when the owner
      corrects somebody else's golfer record. */
   const homeGroupOf = new Map();
+  /* Where each golfer's rounds and roster entries actually live, so a merge
+     knows exactly what to move rather than guessing. */
+  const roundsOf = new Map();
+  const rostersOf = new Map();
   let totalRounds = 0;
 
   for (const group of groups) {
@@ -157,11 +161,16 @@ async function inspect() {
       roundsByGolfer.get(r.golferId).push({
         roundId: r.id || d.id, date: r.date, differential: Number(r.differential), assocId: group.id,
       });
+      /* The document id and its group, which is what a merge needs to move it. */
+      if (!roundsOf.has(r.golferId)) roundsOf.set(r.golferId, []);
+      roundsOf.get(r.golferId).push({ groupId: group.id, roundId: d.id });
     });
     try {
       (await getDocs(collection(db, "associations", group.id, "roster"))).forEach((d) => {
         rosterIds.add(d.id);
         if (!homeGroupOf.has(d.id)) homeGroupOf.set(d.id, group.id);
+        if (!rostersOf.has(d.id)) rostersOf.set(d.id, []);
+        rostersOf.get(d.id).push({ groupId: group.id, golferId: d.id });
       });
     } catch {}
   }
@@ -313,13 +322,46 @@ async function inspect() {
     });
   }
 
-  if (duplicates.length) {
+  /* Work out a merge for each set of duplicates.
+   *
+   * One person can end up as several records — repeated taps before the app
+   * blocked them, or the same name typed twice. Their rounds are then split
+   * between the records and every handicap is wrong.
+   *
+   * The keeper is the record with the MOST ROUNDS, since moving fewer rounds
+   * is safer. A record linked to somebody's account always wins, because that
+   * link is what lets them post and delete their own rounds. */
+  const merges = [];
+  for (const list of duplicates) {
+    const ranked = [...list].sort((a, b) => {
+      if (!!a.linkedUid !== !!b.linkedUid) return a.linkedUid ? -1 : 1;
+      return (b.roundCount || 0) - (a.roundCount || 0);
+    });
+    const keeper = ranked[0];
+    const absorb = ranked.slice(1);
+
+    /* Which rounds have to move, and where they live. */
+    const moves = [];
+    for (const spare of absorb) {
+      for (const found of (roundsOf.get(spare.id) || [])) {
+        moves.push({ groupId: found.groupId, roundId: found.roundId, to: keeper.id });
+      }
+    }
+
+    merges.push({
+      keeper, absorb, moves,
+      name: keeper.name || "Unnamed",
+      rosters: absorb.flatMap((g) => rostersOf.get(g.id) || []),
+    });
+  }
+
+  if (merges.length) {
     findings.push({
       kind: "duplicates", bad: true,
-      title: `${duplicates.length} duplicate name${duplicates.length === 1 ? "" : "s"}`,
-      detail: duplicates.map((list) =>
-        `${list[0].name} appears ${list.length} times — ${list.map((g) => `${g.roundCount || 0} rounds`).join(", ")}`
-      ).join("\n") + "\n\nNot removed automatically: which one to keep depends on where the rounds are. Remove the empty one from Manage.",
+      title: `${merges.length} person${merges.length === 1 ? "" : " or more"} recorded twice or more`,
+      detail: merges.map((m) =>
+        `${m.name} — keeping the record with ${m.keeper.roundCount || 0} round${(m.keeper.roundCount || 0) === 1 ? "" : "s"}${m.keeper.linkedUid ? " (the one signed in)" : ""}, absorbing ${m.absorb.length} other${m.absorb.length === 1 ? "" : "s"}${m.moves.length ? ` and moving ${m.moves.length} round${m.moves.length === 1 ? "" : "s"} across` : ""}`
+      ).join("\n") + "\n\nMerging keeps every round. The surplus records are archived, not destroyed, and their names are freed.",
     });
   }
 
@@ -335,7 +377,7 @@ async function inspect() {
     findings.push({ kind: "clean", bad: false, title: "Nothing needs fixing", detail: `Checked ${golfers.length} golfers and ${totalRounds} rounds across ${groups.length} group${groups.length === 1 ? "" : "s"}.` });
   }
 
-  plan = { golferFixes, emptyGroups, groups, totalRounds, staleHandicaps, removable };
+  plan = { golferFixes, emptyGroups, groups, totalRounds, staleHandicaps, removable, merges };
   return findings;
 }
 
@@ -352,7 +394,7 @@ function draw() {
   </div>`;
 
   const fixable = plan.golferFixes.length + plan.emptyGroups.length
-    + plan.staleHandicaps.length + plan.removable.length;
+    + plan.staleHandicaps.length + plan.removable.length + plan.merges.length;
   actionsEl.innerHTML = fixable
     ? `<div class="inline-actions stacked" style="margin-top:18px">
          <button class="btn" id="fix">Fix these ${fixable} thing${fixable === 1 ? "" : "s"}</button>
@@ -410,6 +452,57 @@ async function repair() {
     } catch (e) {
       say(`Could not correct the course handicaps — ${(e && e.code) || "refused"}`, true);
     }
+  }
+
+  /* Merge people recorded more than once.
+   *
+   * Order matters and is deliberate: move the ROUNDS first, then the roster
+   * places, and only then archive the surplus record. If anything fails part
+   * way, the rounds have already arrived somewhere real — the worst case is a
+   * duplicate that still exists, never a round with no owner. */
+  if (plan.merges.length) {
+    const { writeBatch } = mod;
+    for (const merge of plan.merges) {
+      try {
+        for (let i = 0; i < merge.moves.length; i += 300) {
+          const batch = writeBatch(db);
+          for (const move of merge.moves.slice(i, i + 300)) {
+            batch.set(doc(db, "associations", move.groupId, "rounds", move.roundId),
+              { golferId: move.to }, { merge: true });
+          }
+          await batch.commit();
+        }
+
+        /* The keeper takes every roster place the others held. */
+        if (merge.rosters.length) {
+          const batch = writeBatch(db);
+          for (const place of merge.rosters) {
+            batch.set(doc(db, "associations", place.groupId, "roster", merge.keeper.id),
+              { golferId: merge.keeper.id, addedAt: Date.now() }, { merge: true });
+            batch.delete(doc(db, "associations", place.groupId, "roster", place.golferId));
+          }
+          await batch.commit();
+        }
+
+        /* Archive the surplus records and free their names. Archived, not
+           deleted, so a mistake costs nothing. */
+        const tidyBatch = writeBatch(db);
+        for (const spare of merge.absorb) {
+          tidyBatch.set(doc(db, "golfers", spare.id),
+            { archived: true, archivedAt: Date.now(), nameKey: null,
+              mergedInto: merge.keeper.id, editedIn: (groups[0] || {}).id || "" },
+            { merge: true });
+          if (spare.nameKey) tidyBatch.delete(doc(db, "golferNames", spare.nameKey));
+        }
+        await tidyBatch.commit();
+
+        fixed++;
+        say(`${merge.name}: ${merge.moves.length} round${merge.moves.length === 1 ? "" : "s"} moved, ${merge.absorb.length} duplicate${merge.absorb.length === 1 ? "" : "s"} archived`);
+      } catch (e) {
+        say(`Could not merge ${merge.name} — ${(e && e.code) || "refused"}`, true);
+      }
+    }
+    say("Run this page again so the merged handicaps are recalculated.");
   }
 
   /* Remove the unused golfers, and free their names. */

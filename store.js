@@ -1819,8 +1819,37 @@ export async function golfersInMyOtherGroups() {
       } catch {}
     }
   }
-  return [...seen.values()].sort((a, b) =>
-    String(a.name || "").localeCompare(String(b.name || "")));
+  /* Golfers who belong to NO group at all.
+   *
+   * These were invisible here, because the search only walked the rosters of
+   * groups you are in — so anybody whose only group was deleted could not be
+   * picked up again, even though their record and handicap survived. They are
+   * offered under their own heading rather than mixed in, since "no group" is
+   * a meaningfully different thing from "plays in Tuesday Fourball". */
+  try {
+    const everyone = await getDocs(col("golfers"));
+    const onSomeRoster = new Set(here);
+    for (const group of groups) {
+      try {
+        (await getDocs(col("associations", group.id, "roster")))
+          .forEach((d) => onSomeRoster.add(d.id));
+      } catch {}
+    }
+
+    everyone.forEach((d) => {
+      const person = { ...d.data(), id: d.id };
+      if (person.archived) return;
+      if (onSomeRoster.has(person.id)) return;
+      if (seen.has(person.id)) return;
+      seen.set(person.id, { ...person, groups: [], orphaned: true });
+    });
+  } catch { /* cannot list them all; the rest of the picker still works */ }
+
+  return [...seen.values()].sort((a, b) => {
+    /* People who play somewhere first, then the orphans. */
+    if (!!a.orphaned !== !!b.orphaned) return a.orphaned ? 1 : -1;
+    return String(a.name || "").localeCompare(String(b.name || ""));
+  });
 }
 
 async function getDoc_(golferId) {
