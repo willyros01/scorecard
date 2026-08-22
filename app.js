@@ -1293,7 +1293,7 @@ function fastEntryPanel(game) {
 
     <div class="inline-actions stacked" style="margin-top:0.9rem">
       <button class="btn" data-act="fast-post" id="fast-post">
-        ${filled ? `Post ${filled} round${filled === 1 ? "" : "s"} into this game` : "Post the scores"}
+        ${filled ? `Post ${filled} score${filled === 1 ? "" : "s"}` : "Post the scores"}
       </button>
     </div>
     <p class="hint">Only golfers with a score are posted. Leave the rest blank — nothing happens to them.
@@ -2784,6 +2784,30 @@ document.getElementById("brandSub").onclick = () => {
 
 view.addEventListener("input", (e) => {
   const n = e.target.name;
+  /* Typed into the fast-entry grid. The value is remembered and the button
+     label updated IN PLACE — redrawing here would move the keyboard and lose
+     the cursor between every digit. */
+  if (n.startsWith("fast-score-") || n.startsWith("fast-index-")) {
+    if (!fastEntry) return;
+    /* Digits only, and a single decimal point for an index. Typing a letter
+       into a score should simply not appear. */
+    const digitsOnly = n.startsWith("fast-score-");
+    const cleaned = digitsOnly
+      ? v.replace(/[^0-9]/g, "").slice(0, 3)
+      : v.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1").slice(0, 4);
+    if (cleaned !== v && e.target) e.target.value = cleaned;
+
+    const id = n.replace(/^fast-(score|index)-/, "");
+    if (digitsOnly) fastEntry.scores[id] = cleaned;
+    else fastEntry.indexes[id] = cleaned;
+
+    const button = document.getElementById("fast-post");
+    if (button) {
+      const count = Object.values(fastEntry.scores).filter((x) => +x > 0).length;
+      button.textContent = count ? `Post ${count} score${count === 1 ? "" : "s"}` : "Post the scores";
+    }
+    return;
+  }
   if (n === "gross" || n === "adjusted") {
     form[n] = e.target.value.replace(/\D/g, "");
     e.target.value = form[n];
@@ -2818,32 +2842,6 @@ view.addEventListener("change", (e) => {
   if (n === "date") { form.date = v; updateEnterHints(); return; }
   if (n === "fast-tee") { if (fastEntry) fastEntry.teeId = v; return render(); }
 
-  /* Typed into the fast-entry grid. The value is remembered and the button
-     label updated IN PLACE — redrawing here would move the keyboard and lose
-     the cursor between every digit. */
-  if (n.startsWith("fast-score-") || n.startsWith("fast-index-")) {
-    if (!fastEntry) return;
-    /* Digits only, and a single decimal point for an index. Typing a letter
-       into a score should simply not appear. */
-    const digitsOnly = n.startsWith("fast-score-");
-    const cleaned = digitsOnly
-      ? v.replace(/[^0-9]/g, "").slice(0, 3)
-      : v.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1").slice(0, 4);
-    if (cleaned !== v && e.target) e.target.value = cleaned;
-
-    const id = n.replace(/^fast-(score|index)-/, "");
-    if (digitsOnly) fastEntry.scores[id] = cleaned;
-    else fastEntry.indexes[id] = cleaned;
-
-    const button = document.getElementById("fast-post");
-    if (button) {
-      const count = Object.values(fastEntry.scores).filter((x) => +x > 0).length;
-      button.textContent = count
-        ? `Post ${count} round${count === 1 ? "" : "s"} into this game`
-        : "Post the scores";
-    }
-    return;
-  }
   if (n === "golferId") {
     form.golferId = v;
     /* In the walk-through, choosing moves you on — that is the point of it. */
@@ -3409,14 +3407,22 @@ view.addEventListener("click", async (e) => {
 
       /* Gather what was typed, straight from the fields — the panel is not
          redrawn between keystrokes, so the DOM is the source of truth. */
+      /* Read from the REMEMBERED values, falling back to the field.
+       *
+       * Reading only the DOM lost scores: any live update from the database
+       * redraws the panel, and a redraw rebuilds it from state — so anything
+       * typed but not yet remembered simply vanished. State is now filled on
+       * every keystroke, and the field is only a backstop. */
       const entries = [];
       for (const g of sortedGolfers()) {
-        const scoreField = view.querySelector(`[name="fast-score-${g.id}"]`);
-        const gross = scoreField ? +String(scoreField.value).trim() : 0;
+        const field = view.querySelector(`[name="fast-score-${g.id}"]`);
+        const typed = String(fastEntry.scores[g.id] ?? (field ? field.value : "")).trim();
+        const gross = +typed;
         if (!(gross > 0)) continue;
 
         const indexField = view.querySelector(`[name="fast-index-${g.id}"]`);
-        const typedIndex = indexField ? model.clampIndex(indexField.value) : null;
+        const rawIndex = fastEntry.indexes[g.id] ?? (indexField ? indexField.value : "");
+        const typedIndex = model.clampIndex(rawIndex);
         entries.push({ golfer: g, gross, typedIndex });
       }
 

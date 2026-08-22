@@ -658,12 +658,48 @@ export async function signInWithEmail({ email, password }) {
 
   try {
     if (current && current.isAnonymous) {
-      /* Upgrade this device's anonymous account so anything already on it
-         comes along rather than being stranded. */
-      await linkWithCredential(current, EmailAuthProvider.credential(address, secret));
-      uid = fb.auth.currentUser.uid;
-      clearError();
-      return { ok: true, outcome: "created" };
+      /* SIGN IN FIRST, and only fall back to linking.
+       *
+       * This branch used to LINK straight away, which CREATES the account. A
+       * fresh browser always starts anonymous, so signing in there with an
+       * email that already existed — or one simply mistyped — produced a brand
+       * new account belonging to no group, and the "Start your group" screen.
+       * That is how somebody nearly ended up with a second empty group beside
+       * their real one.
+       *
+       * So: try to sign in as an existing account. Only if there genuinely is
+       * no such account do we upgrade this anonymous session, and only when
+       * this device has something worth carrying across. */
+      try {
+        await signInWithEmailAndPassword(fb.auth, address, secret);
+        uid = fb.auth.currentUser.uid;
+        clearError();
+        return { ok: true, outcome: "signed-in" };
+      } catch (first) {
+        const why = String((first && (first.code || first.message)) || "").toLowerCase();
+
+        /* A real account whose password is wrong must NEVER be turned into a
+           new one — that is exactly how a person loses their group. */
+        if (!why.includes("user-not-found")) {
+          const wrong = new Error("auth/no-such-account");
+          wrong.code = "auth/no-such-account";
+          throw wrong;
+        }
+
+        /* Genuinely no such account. Only claim this address if the person is
+           in the middle of something — a group already open — rather than
+           silently minting an identity for a typo on the sign-in screen. */
+        if (!assocId) {
+          const wrong = new Error("auth/no-such-account");
+          wrong.code = "auth/no-such-account";
+          throw wrong;
+        }
+
+        await linkWithCredential(current, EmailAuthProvider.credential(address, secret));
+        uid = fb.auth.currentUser.uid;
+        clearError();
+        return { ok: true, outcome: "created" };
+      }
     }
 
     /* Already signed in with Google and no password yet.
