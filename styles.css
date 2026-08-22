@@ -697,3 +697,31 @@ body { font-size: 1rem; }
 [data-theme="dark"] .cal-pick-btn.picked { background: #7EBEA0; color: #14261F; }
 .cal-typed { margin-top: 0.9rem; padding-top: 0.8rem; border-top: 1px dashed var(--rule); }
 .cal-typed .btn { width: 100%; margin-top: 0.5rem; }
+
+/* ---- fast entry: the whole field on one screen ----
+ * Folded into a game rather than added as a second path on Manage, so the date
+ * and course are already known and never asked for twice. Three columns only —
+ * name, index, score — because anything more becomes unreadable on a phone.
+ */
+.fast-head, .fast-row {
+  display: flex; align-items: center; gap: 0.6rem;
+  padding: 0.55rem 0.9rem; border-bottom: 1px solid var(--rule);
+}
+.fast-row:last-child { border-bottom: 0; }
+.fast-head {
+  font-size: 0.78rem; text-transform: uppercase; letter-spacing: .05em;
+  color: var(--muted); background: var(--tint);
+}
+.fast-head .grow, .fast-row .grow { flex: 1; min-width: 0; }
+.fast-idx { width: 4.4rem; text-align: right; font-size: 0.9rem; }
+.fast-score { width: 5rem; }
+.fast-row.posted { opacity: .55; }
+.field.tiny {
+  width: 100%; padding: 0.5rem 0.4rem; text-align: center;
+  font-family: var(--mono); font-size: 1rem; min-height: 42px;
+}
+.field.tiny.score { font-size: 1.25rem; font-weight: 700; }
+@media (max-width: 380px) {
+  .fast-idx { width: 3.6rem; }
+  .fast-score { width: 4.2rem; }
+}

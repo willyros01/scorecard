@@ -218,6 +218,14 @@ let editingGolfer = null;
 let editingIndex = null;
 let moreOpen = null;
 
+/* Fast entry: one screen for a whole field's scores.
+ *
+ * Deliberately folded INTO a game rather than added to Manage as a second
+ * path. The game already knows the date and the course, so asking for them
+ * again would be two extra screens for nothing — and two ways to do the same
+ * thing is how a codebase grows contradictions. */
+let fastEntry = null;   /* { scores: {golferId: "97"}, indexes: {golferId: "14.2"} } */
+
 /* Whether we have already told this person, on this device, that their new
    admin role needs a password. Shown once per session rather than on every
    redraw — a dialog that reappears is worse than one that is missed. */
@@ -405,6 +413,16 @@ function screenJoin() {
     ${flashBar()}
 
     ${signedIn ? `
+      <div class="card padded" style="border:2px solid var(--pencil)">
+        <div class="name">Expecting to see a group here?</div>
+        <p class="hint">If you already belong to one, <b>do not create another</b> — a second group
+        would sit alongside the first with none of your rounds in it. Look again first; if it is
+        still missing, ask whoever runs the group to send you a fresh invitation link.</p>
+        <div class="inline-actions stacked">
+          <button class="btn" data-act="look-again">Look for my groups again</button>
+        </div>
+      </div>
+
       <div class="card padded">
         <h2 class="panel-title">Start your group</h2>
         <p class="hint">Signed in as <b>${esc(db.currentEmail())}</b>. This is the same account on every device, so your groups follow you.</p>
@@ -1198,6 +1216,83 @@ function gameEditor() {
   </div>`;
 }
 
+/* The whole field on one screen.
+ *
+ * One row per golfer: their name, their index, and a box for the score. No
+ * date, no course, no per-golfer dialogs — the game already knows all of that,
+ * which is exactly why this belongs here and not on Manage.
+ *
+ * Somebody with no index gets a second small box to type one, because a
+ * tournament is precisely when an unrated player turns up and a net score is
+ * needed on the day. */
+function fastEntryPanel(game) {
+  const playing = sortedGolfers();
+  const already = new Set(rounds.filter((r) => r.gameId === game.id).map((r) => r.golferId));
+  const course = courses.find((c) => c.id === game.courseId);
+  const tees = course ? course.tees : [];
+  const teeId = fastEntry.teeId || (tees[0] && tees[0].id) || "";
+  const tee = tees.find((t) => t.id === teeId);
+
+  const filled = playing.filter((g) => +(fastEntry.scores[g.id] || 0) > 0).length;
+
+  return `<section class="panel">
+    <div class="panel-head">
+      <h2 class="panel-title">Scores for the field</h2>
+      <button class="linkbtn" data-act="fast-cancel">Cancel</button>
+    </div>
+
+    <div class="card padded">
+      <div class="sub">${esc(model.gameSpanLabel(game))} · ${esc(courseName(game.courseId))}</div>
+
+      ${tees.length > 1 ? `
+        <label class="lbl" style="margin-top:0.7rem">Everyone played from</label>
+        <select class="field" name="fast-tee">
+          ${tees.map((t) => `<option value="${t.id}" ${t.id === teeId ? "selected" : ""}>${esc(t.name)} — ${(+t.rating).toFixed(1)}/${t.slope}</option>`).join("")}
+        </select>
+        <p class="hint">Anyone who played different tees can be corrected afterwards from History.</p>
+      ` : tee ? `<div class="sub">${esc(tee.name)} — ${(+tee.rating).toFixed(1)}/${tee.slope}</div>` : `
+        <div class="note warn">This course has no tees yet. Add them on Manage first.</div>`}
+    </div>
+
+    ${tee ? `<div class="card" style="margin-top:0.8rem">
+      <div class="fast-head">
+        <span class="grow">Golfer</span>
+        <span class="fast-idx">Index</span>
+        <span class="fast-score">Score</span>
+      </div>
+      ${playing.map((g) => {
+        const { index, source } = model.effectiveIndex(g);
+        const posted = already.has(g.id);
+        return `<div class="fast-row ${posted ? "posted" : ""}">
+          <span class="grow">
+            <span class="name">${esc(g.name)}</span>
+            ${posted ? `<br><span class="sub">already in this game</span>` : ""}
+          </span>
+          <span class="fast-idx">
+            ${index != null
+              ? `<span class="mono">${index.toFixed(1)}</span>${source === "manual" ? `<br><span class="sub">start</span>` : ""}`
+              : `<input class="field tiny" name="fast-index-${g.id}" inputmode="decimal"
+                   value="${esc(fastEntry.indexes[g.id] || "")}" placeholder="—" aria-label="Starting index for ${esc(g.name)}">`}
+          </span>
+          <span class="fast-score">
+            <input class="field tiny score" name="fast-score-${g.id}" inputmode="numeric"
+              value="${esc(fastEntry.scores[g.id] || "")}" placeholder="—"
+              aria-label="Score for ${esc(g.name)}" ${posted ? "disabled" : ""}>
+          </span>
+        </div>`;
+      }).join("")}
+    </div>
+
+    <div class="inline-actions stacked" style="margin-top:0.9rem">
+      <button class="btn" data-act="fast-post" ${filled ? "" : "disabled"}>
+        ${filled ? `Post ${filled} round${filled === 1 ? "" : "s"} into this game` : "Type at least one score"}
+      </button>
+    </div>
+    <p class="hint">Only golfers with a score are posted. Leave the rest blank — nothing happens to them.
+    Anybody with no index who is given one keeps it until they have three rounds of their own.</p>` : ""}
+  </section>`;
+}
+
 function gameDetail(gameId) {
   const game = games.find((g) => g.id === gameId);
   if (!game) { openGame = null; return screenGames(); }
@@ -1248,7 +1343,16 @@ function gameDetail(gameId) {
     </div>` : ""}
   </section>
 
-  ${db.canManage() && candidates.length ? `<section class="panel">
+  ${db.canManage() && !fastEntry ? `<section class="panel">
+    <div class="inline-actions stacked">
+      <button class="btn" data-act="fast-entry">Enter scores for everyone</button>
+    </div>
+    <p class="hint">One screen for the whole field — tick who played, type their scores, and every round is posted into this game at once.</p>
+  </section>` : ""}
+
+  ${db.canManage() && fastEntry ? fastEntryPanel(game) : ""}
+
+    ${db.canManage() && candidates.length ? `<section class="panel">
     <div class="card padded">
       <div class="name">${candidates.length} round${candidates.length === 1 ? "" : "s"} on ${game.endDate ? "these dates" : "this date"} are not in the game</div>
       <p class="hint" style="margin:0.3rem 0 0.6rem">Untick anybody who was not playing in it.</p>
@@ -2704,6 +2808,7 @@ view.addEventListener("change", (e) => {
    * grid vanished after changing the month, and why the panel used to close.
    * Read the value, update state, update the hint text. Nothing else. */
   if (n === "date") { form.date = v; updateEnterHints(); return; }
+  if (n === "fast-tee") { if (fastEntry) fastEntry.teeId = v; return render(); }
   if (n === "golferId") {
     form.golferId = v;
     /* In the walk-through, choosing moves you on — that is the point of it. */
@@ -2981,6 +3086,31 @@ view.addEventListener("click", async (e) => {
   }
 
   switch (d.act) {
+    case "look-again": {
+      /* A membership can exist while its pointer is missing, so this searches
+         the memberships themselves rather than the pointer list — and repairs
+         the pointer if it finds one. */
+      busy("Looking for your groups");
+      try {
+        const mine = await db.loadMyGroups();
+        if (mine.length) {
+          await settleGroup(mine[0].id);
+          idleAll();
+          flashMsg(`Found ${mine.length} group${mine.length === 1 ? "" : "s"}. You are back in.`);
+          return render();
+        }
+        idleAll();
+        openNotice({
+          title: "No groups found for this account",
+          detail: "Nothing is wrong with your rounds — they belong to the group, not to your sign-in. This account simply is not a member of one.",
+          advice: "Ask whoever runs the group for a fresh invitation link. Only create a group here if you really are starting a new one.",
+        });
+      } catch {
+        idleAll();
+        flashMsg("Couldn't check just now. Try again in a moment.");
+      } finally { idleAll(); }
+      return render();
+    }
     case "recover": tab = "enter"; openGame = null; return render();
     case "dismiss-alert": return;
     case "cancel-del": confirmId = null; return render();
@@ -3212,6 +3342,80 @@ view.addEventListener("click", async (e) => {
     case "save-game": return saveGame();
     case "close-game": openGame = null; editingGame = false; return render();
     case "edit-game": editingGame = !editingGame; return render();
+    case "fast-entry":
+      fastEntry = { scores: {}, indexes: {}, teeId: "" };
+      return render();
+
+    case "fast-cancel":
+      fastEntry = null;
+      return render();
+
+    case "fast-post": {
+      const game = games.find((g) => g.id === openGame);
+      if (!game || !fastEntry) return;
+
+      const course = courses.find((c) => c.id === game.courseId);
+      const tees = course ? course.tees : [];
+      const tee = tees.find((t) => t.id === fastEntry.teeId) || tees[0];
+      if (!tee) { flashMsg("This course has no tees yet."); return render(); }
+
+      /* Gather what was typed, straight from the fields — the panel is not
+         redrawn between keystrokes, so the DOM is the source of truth. */
+      const entries = [];
+      for (const g of sortedGolfers()) {
+        const scoreField = view.querySelector(`[name="fast-score-${g.id}"]`);
+        const gross = scoreField ? +String(scoreField.value).trim() : 0;
+        if (!(gross > 0)) continue;
+
+        const indexField = view.querySelector(`[name="fast-index-${g.id}"]`);
+        const typedIndex = indexField ? model.clampIndex(indexField.value) : null;
+        entries.push({ golfer: g, gross, typedIndex });
+      }
+
+      if (!entries.length) { flashMsg("No scores typed in yet."); return render(); }
+
+      busy(`Posting ${entries.length} round${entries.length === 1 ? "" : "s"}`);
+      let posted = 0;
+      const failed = [];
+      try {
+        for (const entry of entries) {
+          try {
+            /* A starting index has to be saved BEFORE the round, or the round
+               freezes a course handicap worked out from nothing. */
+            if (entry.typedIndex != null && model.effectiveIndex(entry.golfer).index == null) {
+              db.setManualIndex(entry.golfer.id, entry.typedIndex);
+              entry.golfer = { ...entry.golfer, manualIndex: entry.typedIndex };
+            }
+
+            db.postRound({
+              golfer: entry.golfer,
+              course, tee,
+              date: game.date,
+              gross: String(entry.gross),
+              adjusted: "",
+              notes: "",
+              gameId: game.id,
+            });
+            posted++;
+          } catch {
+            failed.push(entry.golfer.name);
+          }
+        }
+      } finally { idleAll(); }
+
+      fastEntry = null;
+      if (failed.length) {
+        openProblem({
+          title: `${posted} posted, ${failed.length} did not`,
+          detail: `These were refused: ${failed.join(", ")}.`,
+          advice: "The rest went through. Post the missing ones from the Enter tab.",
+        });
+      } else {
+        flashMsg(`${posted} round${posted === 1 ? "" : "s"} posted into this game.`);
+      }
+      return render();
+    }
+
     case "recalc-game": {
       busy("Working out the handicaps");
       let preview;

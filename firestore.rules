@@ -1,12 +1,16 @@
 rules_version = '2';
 
-/* LAST CHANGED IN APP VERSION 2.19.14
+/* LAST CHANGED IN APP VERSION 2.21.0
  *
  * This is here only so you can compare it against what is published in the
  * Firebase console if you are ever in doubt. It does NOT track the app version:
  * most releases change no rules at all, and there is nothing to republish for
  * those. The number only moves when these rules genuinely change, and Claude
  * says so at the top of the message when that happens.
+ *
+ * What changed in 2.21.0: an account may read its OWN membership documents
+ * wherever they are, so it can find its groups when the pointer list is
+ * missing. Read only, and only your own.
  *
  * What changed in 2.19.14: an admin may now RELEASE a golfer's account link
  * (set it to nothing), which is what re-inviting somebody does. Seizing a link
@@ -326,6 +330,20 @@ service cloud.firestore {
      *
      * Read only, and only for a signed-in account. Nothing can be written or
      * deleted through this path. */
+    /* Lets an account find every group it belongs to, whichever group holds the
+     * membership.
+     *
+     * The app normally reads a pointer list at /userGroups/{uid}/groups. That
+     * pointer can go missing — it did, for somebody promoted to admin — and
+     * without it the app concluded they belonged to NOWHERE and offered to
+     * create a group, which would have split their data in two.
+     *
+     * This is narrow on purpose: you may read a membership document only if it
+     * is YOUR OWN, so it reveals nothing about anybody else. Read only. */
+    match /{path=**}/members/{memberUid} {
+      allow read: if signedIn() && memberUid == request.auth.uid;
+    }
+
     match /{path=**}/rounds/{roundId} {
       allow read: if signedIn();
     }

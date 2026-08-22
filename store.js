@@ -1359,6 +1359,43 @@ async function rememberGroupForAccount(id, name) {
 }
 
 /* Every group this account belongs to, read from Firebase. */
+/* Finds every group this account is a member of, by searching the memberships
+ * themselves rather than the pointer list.
+ *
+ * The pointer at /userGroups/{uid}/groups is a convenience, and it can go
+ * missing — it did, for somebody promoted to admin, who then signed in and was
+ * told they belonged to nowhere and offered to CREATE a group. That would have
+ * produced a second empty group and split the data.
+ *
+ * The membership document is the truth. This asks for it directly. */
+export async function groupsFromMemberships() {
+  if (!fb || !uid) return [];
+  try {
+    const { collectionGroup, query, where, getDocs, getDoc } = fb.mod.store;
+    const found = await getDocs(query(
+      collectionGroup(fb.db, "members"),
+      where("uid", "==", uid)
+    ));
+
+    const groups = [];
+    for (const d of found.docs) {
+      /* .../associations/{assocId}/members/{uid} — the group is the grandparent. */
+      const assoc = d.ref.parent && d.ref.parent.parent;
+      if (!assoc) continue;
+      let name = "Group";
+      try {
+        const snap = await getDoc(assoc);
+        if (snap.exists()) name = (snap.data() || {}).name || "Group";
+      } catch { /* unreadable, but the membership proves it is theirs */ }
+      groups.push({ id: assoc.id, name });
+    }
+    return groups;
+  } catch {
+    /* The rule or an index may be missing; the caller falls back to pointers. */
+    return [];
+  }
+}
+
 export async function loadMyGroups() {
   if (!fb || !uid) return knownGroups();
   try {
@@ -1391,6 +1428,30 @@ export async function loadMyGroups() {
     /* Only cache when the answer looks trustworthy. If everything came back
        missing, that is far more likely to be a bad connection than every group
        being deleted at once, so the old list is kept. */
+    /* No pointers at all? Ask the memberships directly before concluding this
+       account belongs nowhere. A missing pointer is a bookkeeping failure, not
+       evidence — and concluding "no groups" is what offered somebody the
+       create-a-group screen and nearly split their data. */
+    if (!alive.length) {
+      const real = await groupsFromMemberships();
+      if (real.length) {
+        /* Heal the pointers so this is a one-off rather than every sign-in. */
+        for (const group of real) {
+          try {
+            outbox.enqueue({
+              type: "set",
+              path: ["userGroups", uid, "groups", group.id],
+              data: { assocId: group.id, name: group.name, at: Date.now() },
+              opId: `repoint-${uid}-${group.id}`,
+            });
+          } catch {}
+        }
+        flush();
+        try { localStorage.setItem(GROUPS_KEY, JSON.stringify(real)); } catch {}
+        return real;
+      }
+    }
+
     if (alive.length || !listed.length) {
       try { localStorage.setItem(GROUPS_KEY, JSON.stringify(alive)); } catch {}
       return alive;
