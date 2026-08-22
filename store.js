@@ -282,6 +282,32 @@ export async function joinAssociation({ associationId, code, displayName }) {
    * member requires the GUEST code — so every non-playing admin invitation was
    * refused with "That code was not accepted". The rules still verify the code
    * against the group, so this is a claim they check, not one they trust. */
+  /* ALREADY A MEMBER? Then a code must change NOTHING.
+   *
+   * A code always asks for the ordinary member role, so writing it over an
+   * existing membership demotes an admin to a guest — reported Aug 22. The
+   * rules would refuse the write anyway (create only, never self-update), and
+   * the refusal was being reported as "That code was not accepted", which is
+   * wrong twice over. So look first, and if the membership is already there,
+   * simply open the group with the role it already carries. */
+  const existing = await loadMembership(associationId);
+  if (existing) {
+    const g = await loadAssociation(associationId);
+    const gname = g ? g.name : "Group";
+    try {
+      await commitTogether([{
+        op: "set",
+        path: ["userGroups", uid, "groups", associationId],
+        data: { assocId: associationId, name: gname, at: Date.now() },
+      }], "heal group pointer");
+    } catch { /* The pointer is a convenience; the membership is the truth. */ }
+    assocId = associationId;
+    rememberAssociation(associationId);
+    rememberGroup(associationId, gname);
+    clearError();
+    return { ok: true, already: true, role: existing.role };
+  }
+
   const fromLink = readJoinLink();
   const role = (fromLink && fromLink.associationId === associationId && fromLink.role === "admin")
     ? "admin"

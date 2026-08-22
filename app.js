@@ -394,6 +394,10 @@ function screenJoin() {
       <div class="card padded">
         <h2 class="panel-title">Join with a code</h2>
         <p class="hint">Six characters, like ABC234.</p>
+        <div class="note tip">A group code joins you as a <b>guest</b>. If you are already an admin
+        here, your role is kept — the code will not take it away. If you are an admin of this group
+        on <b>another device</b>, sign in with your email and password instead, or this device
+        becomes a second, separate person.</div>
         <label class="lbl">Your name</label>
         <input class="field" name="join-name" value="${esc(joinForm.name)}" placeholder="e.g. Willy" autocomplete="name">
         <label class="lbl">Group code</label>
@@ -2783,7 +2787,7 @@ document.getElementById("brandSub").onclick = () => {
 };
 
 view.addEventListener("input", (e) => {
-  const n = e.target.name;
+  const n = e.target.name || "";
   /* Typed into the fast-entry grid. The value is remembered and the button
      label updated IN PLACE — redrawing here would move the keyboard and lose
      the cursor between every digit. */
@@ -2791,6 +2795,11 @@ view.addEventListener("input", (e) => {
     if (!fastEntry) return;
     /* Digits only, and a single decimal point for an index. Typing a letter
        into a score should simply not appear. */
+    /* This block moved here from the change listener in 2.21.3 and left `v`
+       behind — it was declared there, not here. Every keystroke threw
+       ReferenceError before a single character could be filtered, which is why
+       letters still got through AND an error was logged. */
+    const v = String(e.target.value == null ? "" : e.target.value);
     const digitsOnly = n.startsWith("fast-score-");
     const cleaned = digitsOnly
       ? v.replace(/[^0-9]/g, "").slice(0, 3)
@@ -4251,45 +4260,44 @@ function openSignInProblem(error, email) {
   let detail = code || "No detail was given.";
   let offerReset = false;
 
-  if (code.includes("no-such-account")) {
-    /* Deliberately says nothing about whether the email exists — and, more to
-       the point, no longer CREATES one. A mistyped address used to make a new
-       account and drop somebody on "Start your group". */
+  if (code.includes("no-such-account")
+    || code.includes("wrong-password") || code.includes("invalid-credential") || code.includes("invalid-login")) {
+    /* ONE message for both, on purpose.
+     *
+     * Firebase's email enumeration protection returns the SAME code whether
+     * the address is unknown or the password is wrong. Naming one of them is
+     * therefore a guess, and it sends people off checking the wrong thing. */
     title = "That email and password did not match";
-    detail = `Nothing signed in as ${email}. Check the address for a typo, and check the password.`;
-    offerReset = true;
-  } else if (code.includes("wrong-password") || code.includes("invalid-credential") || code.includes("invalid-login")) {
-    title = "That password was not right";
-    detail = `The email ${email} exists, but the password does not match it.`;
+    detail = "Check both.";
     offerReset = true;
   } else if (code.includes("user-not-found")) {
+    /* Only reached when the project has enumeration protection turned off, in
+       which case Firebase really has told us the address is unknown. */
     title = "No account for that email";
-    detail = `Nothing is registered to ${email}. Check for a typo — or if this is a new address, an account will be made for you when the password is at least six characters.`;
+    detail = "Check the address for a typo.";
   } else if (code.includes("invalid-email")) {
     title = "That email does not look right";
     detail = "Check it for a typo.";
   } else if (code.includes("too-many-requests")) {
     title = "Too many attempts";
-    detail = "Firebase has paused sign-in for this device for a few minutes. Nothing is wrong with your account.";
+    detail = "Try again in a few minutes.";
     offerReset = true;
   } else if (code.includes("network") || code.includes("failed to fetch")) {
     title = "Could not reach Firebase";
-    detail = "Check your connection and try again.";
+    detail = "Check your connection.";
   } else if (code.includes("weak-password")) {
     title = "Password too short";
-    detail = "It needs at least six characters.";
+    detail = "Use at least six characters.";
   }
 
   sheetEl.hidden = false;
-  sheetEl.innerHTML = `<div class="sheet-body">
-    <div style="display:flex;justify-content:space-between;align-items:center">
-      <h2>Sign-in problem</h2><button class="rowbtn" data-close="1">Close</button></div>
-    <div class="note"><b>${esc(title)}</b><br>${esc(detail)}</div>
+  sheetEl.innerHTML = `<div class="sheet-body centred">
+    <h2>${esc(title)}</h2>
+    <p class="lead">${esc(detail)}</p>
     <div class="inline-actions stacked">
-      <button class="btn ghost" data-close="1">Try again</button>
-      ${offerReset ? `<button class="btn" data-reset-password="${esc(email)}">Reset my password</button>` : ""}
+      <button class="btn" data-close="1">Try again</button>
+      ${offerReset ? `<button class="btn ghost" data-reset-password="${esc(email)}">Reset my password</button>` : ""}
     </div>
-    ${offerReset ? `<p class="hint">A link goes to ${esc(email)}. Open it and choose a new password for this app. The password for your email account itself is not affected.</p>` : ""}
   </div>`;
 }
 
@@ -4359,6 +4367,14 @@ async function joinByCode() {
     joining = false;
     idleAll();
     finishJoining();
+    /* Being already a member is the good outcome, not a failure — and saying
+       which role they kept is the whole point after an admin was quietly
+       turned into a guest by this very screen. */
+    if (result.already) {
+      const asRole = result.role === "owner" ? "the owner"
+        : result.role === "admin" ? "an admin" : "a guest";
+      flashMsg(`You were already in this group as ${asRole}. Nothing was changed.`);
+    }
     render();
   } else { joining = false; idleAll(); render(); }
 }

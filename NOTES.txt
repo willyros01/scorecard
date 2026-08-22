@@ -116,8 +116,34 @@ WHAT TENDS TO BREAK
 * The course provider has changed its data shape at least three times.
 
 
+FIXED IN 2.21.4
+---------------
+* The fast-entry filter threw ReferenceError on every keystroke. The block was
+  moved from the change listener into the input listener in 2.21.3, but `v` was
+  declared in the listener it came FROM. So letters passed straight through and
+  an error was logged. Now declared in the block that uses it, and discipline
+  check 8 pins it for every listener.
+* Joining by code no longer overwrites an existing membership. A code always
+  asks for the ordinary member role, so a re-join demoted an admin to a guest.
+  joinAssociation now reads the membership first and, if it is there, keeps the
+  role and only heals the /userGroups pointer.
+* The sign-in failure panel is centred, with a title, one line and two buttons.
+
+FIXED IN 2.21.5
+---------------
+* The panel no longer claims WHICH of the email or the password was wrong.
+  Firebase's email enumeration protection returns the same code for an unknown
+  address and a bad password, so naming one was a guess. Both now say "That
+  email and password did not match - check both". Do not split them again
+  unless enumeration protection is deliberately turned off in the console.
+
 STILL OPEN
 ----------
+* A code joins the ACCOUNT THAT IS SIGNED IN. An admin who is anonymous on a
+  fresh device still becomes a separate guest, because the membership sits on
+  the other uid. The code screen now warns about this; the real answer is to
+  sign in with email and password on the new device.
+
 * Duplicate golfers on the live data - one person exists four times. tidy
   reports duplicates but does not merge them.
 * Golfers belonging to no group are invisible to "Add from my other groups".

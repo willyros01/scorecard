@@ -155,6 +155,14 @@ pre.msg { white-space: pre-wrap; word-break: break-word; font-family: var(--mono
   overscroll-behavior: contain;
 }
 .sheet h2 { font-family: var(--display); font-weight: 400; font-size: 18px; margin: 0 0 8px; }
+
+/* A short panel that says one thing. Centred on purpose: the sign-in failure
+   used to be a left-aligned paragraph of explanation, which read as an
+   accusation rather than a prompt. */
+.sheet-body.centred { text-align: center; padding-top: 26px; }
+.sheet-body.centred h2 { font-size: 21px; margin: 0 0 10px; }
+.sheet-body.centred .lead { margin: 0 0 20px; font-size: 15.5px; color: var(--muted); }
+.sheet-body.centred .inline-actions { max-width: 320px; margin: 0 auto; }
 textarea.field { min-height: 110px; font-family: var(--mono); font-size: 11.5px; }
 
 @media (prefers-reduced-motion: no-preference) {
