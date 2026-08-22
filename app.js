@@ -2120,7 +2120,7 @@ function courseEditor() {
     ${finder.results.length ? `<div class="results list">
       ${finder.results.map((c, i) => `<button class="list-row" data-pick="${i}">
         <span class="grow"><span class="name">${esc(c.name)}</span><br>
-          <span class="sub">${esc(c.where || "")}${c.where ? " · " : ""}${c.tees.length} rated tee${c.tees.length === 1 ? "" : "s"}</span></span>
+          <span class="sub">${esc(c.where || "")}</span></span>
         <span class="chev">›</span></button>`).join("")}
     </div>` : ""}
 
@@ -2897,10 +2897,42 @@ view.addEventListener("click", async (e) => {
     return render();
   }
   if (d.pick) {
-    const c = finder.results[+d.pick];
-    courseDraft.name = c.name;
-    courseDraft.tees = c.tees.map((t2) => ({ id: model.newId(), name: t2.name, rating: String(t2.rating), slope: String(t2.slope), par: String(t2.par) }));
-    finder = { q: "", results: [], busy: false, msg: `Filled in ${c.tees.length} tee${c.tees.length === 1 ? "" : "s"} — check them against the scorecard.` };
+    const chosen = finder.results[+d.pick];
+    if (!chosen) return;
+
+    /* The tees are NOT in the search result — the provider sends only a count
+       there and requires the course to be fetched by id for the real data.
+       So picking a course makes the second call. */
+    courseDraft.name = chosen.name;
+    finder = { ...finder, busy: true, msg: `Fetching the tees for ${chosen.name}…` };
+    render();
+
+    let full = chosen;
+    if (chosen.id) {
+      try {
+        full = await lookup.courseById(chosen.id);
+      } catch (err) {
+        finder = {
+          q: finder.q, results: finder.results, busy: false,
+          msg: lookup.explain(err && err.message),
+        };
+        /* The name is still filled in, so the tees can be typed by hand. */
+        return render();
+      }
+    }
+
+    courseDraft.name = full.name || chosen.name;
+    courseDraft.tees = full.tees.map((t2) => ({
+      id: model.newId(),
+      name: t2.name,
+      rating: String(t2.rating),
+      slope: String(t2.slope),
+      par: String(t2.par),
+    }));
+    finder = {
+      q: "", results: [], busy: false,
+      msg: `Filled in ${full.tees.length} tee${full.tees.length === 1 ? "" : "s"} — check them against the scorecard.`,
+    };
     return render();
   }
 

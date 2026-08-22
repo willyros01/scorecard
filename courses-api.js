@@ -17,7 +17,8 @@ const KEY_STORE = "golf:courselookup";
 let sharedKey = "";
 export const setSharedKey = (key) => { sharedKey = String(key || "").trim(); };
 export const usingSharedKey = () => !!sharedKey;
-const ENDPOINT = "https://api.golfcourseapi.com/v1/search?search_query=";
+const BASE = "https://api.golfcourseapi.com";
+const ENDPOINT = `${BASE}/v1/search?search_query=`;
 const AUTH = (key) => ({ Authorization: "Key " + key });
 
 const savedKey = () => { try { return localStorage.getItem(KEY_STORE) || ""; } catch { return ""; } };
@@ -108,7 +109,16 @@ function normalize(c) {
   const name = !course || course === club ? club || course : `${club} — ${course}`;
   const loc = c.location || {};
   const where = loc.address || [loc.city, loc.state, loc.country].filter(Boolean).join(", ");
-  return { name: name || "Unnamed course", where, tees: teesFrom(c.tees) };
+  return {
+    id: String(c.id || "").trim(),
+    name: name || "Unnamed course",
+    where,
+    /* Search results no longer carry tee data — only a COUNT of tee boxes per
+       grouping. This is the whole reason the lookup broke: the old code read
+       tees straight from the search and found a number where a list used to
+       be. Tees now come from the second call, by id. */
+    tees: teesFrom(c.tees),
+  };
 }
 
 /* Throws a short code the UI turns into a sentence. */
@@ -132,10 +142,48 @@ export async function search(query) {
   try { data = await res.json(); } catch { throw new Error("BAD_RESPONSE"); }
 
   const list = Array.isArray(data) ? data : data.courses || data.results || [];
-  const usable = list.map(normalize).filter((c) => c.tees.length);
   if (!list.length) throw new Error("NO_MATCH");
-  if (!usable.length) throw new Error("NO_RATINGS");   // found it, but no rating/slope published
-  return usable.slice(0, 8);
+
+  /* Everything with an id is offered. A course without tees in the search
+     result is NOT discarded any more — the tees simply are not in this
+     response, and fetching them is the second step. */
+  const found = list.map(normalize).filter((c) => c.id);
+  if (!found.length) throw new Error("NO_MATCH");
+  return found.slice(0, 12);
+}
+
+/* The second call: the full record for ONE course, tees included.
+ *
+ * The provider states plainly that search returns only a count of tee boxes,
+ * and that the individual course must be requested by id for the real data.
+ * So this is not an optimisation — it is the only way to get a rating and a
+ * slope at all. */
+export async function courseById(id) {
+  const key = getKey();
+  if (!key) throw new Error("NO_KEY");
+  if (!id) throw new Error("NO_MATCH");
+  if (!navigator.onLine) throw new Error("OFFLINE");
+
+  let res;
+  try {
+    res = await fetch(`${BASE}/v1/courses/${encodeURIComponent(String(id).trim())}`,
+      { headers: AUTH(key) });
+  } catch {
+    throw new Error("UNREACHABLE");
+  }
+  if (res.status === 401 || res.status === 403) throw new Error("BAD_KEY");
+  if (res.status === 429) throw new Error("RATE");
+  if (res.status === 404) throw new Error("NO_MATCH");
+  if (!res.ok) throw new Error("HTTP_" + res.status);
+
+  let data;
+  try { data = await res.json(); } catch { throw new Error("BAD_RESPONSE"); }
+
+  /* Some providers wrap the record; take it either way. */
+  const record = data && (data.course || data.data || data);
+  const course = normalize(record || {});
+  if (!course.tees.length) throw new Error("NO_RATINGS");
+  return course;
 }
 
 /* Providers match on exact-ish names, so a query that reads naturally to a person
