@@ -401,6 +401,19 @@ export function postRound({ golfer, course, tee, date, gross, adjusted, notes, g
           recentWindow: window,
           handicapIndex: model.displayIndex(window),
           roundCount: (golfer.roundCount || 0) + 1,
+          /* REQUIRED whenever the golfer is not the person signed in.
+           *
+           * This is a write to a shared, top-level golfer document, so the
+           * rules demand editedIn naming a group where the writer is an admin
+           * and the golfer is on the roster. It was missing, so posting for
+           * ANYBODY ELSE was refused — and because the round and the index go
+           * as one batch, the ROUND was refused with it. That is why fast
+           * entry appeared to accept scores and save none of them.
+           *
+           * Posting your own round always passed, which is why this survived:
+           * the rules let you edit your own linked golfer with no editedIn at
+           * all. Harmless to send in that case. */
+          editedIn: assocId,
         },
       },
     ],
@@ -460,6 +473,9 @@ export async function rebuildGolferIndex(golferId) {
       handicapIndex: model.displayIndex(window),
       /* Recounted here too, so deleting a round finally brings the number down. */
       roundCount: fresh.length + kept.length,
+      /* Same reason as postRound: an admin correcting somebody else's round
+         rebuilds THEIR golfer document, which the rules refuse without this. */
+      editedIn: assocId,
     },
     opId: `golfer-rebuild-${golferId}-${Date.now()}` });
   flush();

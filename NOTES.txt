@@ -137,6 +137,30 @@ FIXED IN 2.21.5
   email and password did not match - check both". Do not split them again
   unless enumeration protection is deliberately turned off in the console.
 
+FIXED IN 2.21.6 - why fast entry never saved a score
+----------------------------------------------------
+postRound writes TWO documents as one batch: the round, and the golfer's index.
+The golfer document is TOP LEVEL and shared, so the rules demand an editedIn
+field naming a group where you are an admin and that golfer is on the roster.
+postRound never sent it. So posting a round for ANYBODY ELSE was refused - and
+because it is one batch, all or nothing, the ROUND was refused with it.
+
+Posting your OWN round always worked, because the rules let you edit your own
+linked golfer with no editedIn at all. That is why this survived so long: the
+Enter tab is normally used on yourself. Fast entry posts for the whole roster,
+so it hit the refusal on nearly every row.
+
+editedIn: assocId is now sent by postRound and by rebuildGolferIndex, which had
+the same hole for an admin correcting somebody else's round.
+
+Discipline check 6 existed for exactly this and MISSED it - it matched only the
+one-line `path: [...], data: {...}` form, and postRound spans several lines. It
+now strips comments first (the word editedIn in a note is not the field) and
+scans multi-line writes. Proven by removing the field and watching it fail.
+
+Fast entry also used to announce "8 rounds posted" while the writes were still
+queued. It now waits for the flush and reports the real number.
+
 STILL OPEN
 ----------
 * A code joins the ACCOUNT THAT IS SIGNED IN. An admin who is anonymous on a

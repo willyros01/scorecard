@@ -3467,7 +3467,24 @@ view.addEventListener("click", async (e) => {
       } finally { idleAll(); }
 
       fastEntry = null;
-      if (failed.length) {
+      /* WAIT FOR THE DATABASE BEFORE CLAIMING ANYTHING.
+       *
+       * postRound only queues; the write happens later. So this used to
+       * announce "8 rounds posted" while every one of them was being refused
+       * and quietly abandoned. Flushing here means the count is real. */
+      let refused = 0;
+      try {
+        const result = await db.flush();
+        if (result && result.failed) refused = result.failed;
+      } catch { /* flush reports its own trouble in the status bar */ }
+
+      if (refused) {
+        openProblem({
+          title: `${refused} of ${posted} could not be saved`,
+          detail: "The database refused them. Nothing was lost on your side — the scores simply did not reach it.",
+          advice: "Usually the rules in the Firebase console are older than this version. Publish the latest firestore.rules, then enter the missing scores again.",
+        });
+      } else if (failed.length) {
         openProblem({
           title: `${posted} posted, ${failed.length} did not`,
           detail: `These were refused: ${failed.join(", ")}.`,
