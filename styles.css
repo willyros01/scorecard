@@ -111,6 +111,10 @@ select.field { appearance: none; background-image: linear-gradient(45deg, transp
 [data-theme="dark"] .note { color: var(--pine-ink); }
 .note.warn { background: var(--warn-tint); color: var(--pencil); }
 
+/* A hidden course, shown only while "Show hidden courses" is on. Faded rather
+   than styled differently, so it reads as present-but-put-away. */
+.dimmed { opacity: 0.55; }
+
 .indexes { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .idx { padding: 14px; text-align: left; background: var(--paper); border: 1px solid var(--rule); border-radius: 14px; }
 .idx .big { font-family: var(--mono); font-size: 34px; font-weight: 700; color: var(--pine); line-height: 1.1; }

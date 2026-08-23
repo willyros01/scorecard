@@ -577,6 +577,52 @@ export function addCourse(details) {
   return course;
 }
 
+/* Changing a course that is ALREADY THERE, keeping its id.
+ *
+ * The id is the whole point. Every round ever posted points at it, and at a
+ * tee id inside it. Save a corrected course under a new id and those rounds
+ * are cut adrift. So this is an update in place, never a create.
+ *
+ * Rounds are NOT touched and must never be: each one froze its own rating,
+ * slope and par at the moment it was posted, which is both what the handicap
+ * system requires and what stops a re-rating rewriting history. */
+export function updateCourse(course) {
+  const clean = model.buildCourse({ ...course, createdBy: course.createdBy });
+  outbox.enqueue({
+    type: "update",
+    path: ["courses", course.id],
+    /* createdBy is deliberately NOT sent. The rules compare it against the
+       stored value to decide whether this is allowed, so it must stay as it
+       is — and sending it invites a mistake that locks somebody out of their
+       own course. */
+    data: { name: clean.name, tees: clean.tees },
+    opId: `course-update-${course.id}-${Date.now()}`,
+  });
+  flush();
+  return clean;
+}
+
+/* Only whoever entered a course may change it — that is the rule in the
+   console, not a decision the app can talk its way around. Asked here so a
+   screen can hide the button rather than offer one that fails. */
+export const canEditCourse = (course) => !!(course && uid && course.createdBy === uid);
+
+/* Hiding is PER GROUP, not global.
+ *
+ * Courses are shared: the list holds every course anybody has ever entered, so
+ * one group's clutter is another group's home track. Marking the course itself
+ * hidden would take it off everyone's list. The group document carries the
+ * list of ids this group would rather not see, and nothing outside the group
+ * is affected. Nothing is ever deleted — the rules forbid it, and rounds point
+ * at courses. */
+export const hiddenCourses = () =>
+  (cachedAssociation && cachedAssociation.hiddenCourses) || [];
+
+export function setCourseHidden(courseId, hidden) {
+  const now = hiddenCourses().filter((id) => id !== courseId);
+  updateAssociation({ hiddenCourses: hidden ? [...now, courseId] : now });
+}
+
 export function addGame({ date, endDate = null, courseId, name }) {
   const game = model.buildGame({ assocId, date, endDate, courseId, name, createdBy: uid });
   outbox.enqueue({

@@ -161,6 +161,40 @@ scans multi-line writes. Proven by removing the field and watching it fail.
 Fast entry also used to announce "8 rounds posted" while the writes were still
 queued. It now waits for the flush and reports the real number.
 
+COURSES IN 2.21.7 - edit, update from search, hide
+--------------------------------------------------
+EDIT. An Edit button on each course opens the same editor used to add one.
+Only on courses YOU entered: the rules allow update solely to createdBy, and
+courses are shared across every group. On somebody else's course the button is
+replaced by a line saying why.
+
+UPDATE FROM SEARCH, NAME KEPT. Picking a search result whose name matches a
+course already on the list now UPDATES that course instead of adding a second
+copy. The course id is kept, so every round posted on it stays attached, and
+the name you already have wins over the provider's spelling. Tee ids are
+matched BY NAME and carried over - a fresh tee id would detach every round
+from the tee it was played off.
+
+A TEE WITH ROUNDS ON IT CANNOT BE REMOVED. The Remove button is replaced by a
+count. Checked again in saveCourse, because a greyed-out button is only a hint.
+
+HIDE IS PER GROUP, AND REVERSIBLE. The list of hidden ids lives on the GROUP
+document, not on the course - courses are shared, so marking one hidden would
+take it off everyone's list. Owner only, because that is who may update the
+group document. A course this group has ROUNDS on cannot be hidden: it would
+vanish from every picker and an old round could not then be edited.
+"Show N hidden courses" reveals them with an Unhide button.
+
+NO DELETE, and no rules change for any of this.
+
+RATINGS AND HISTORY. Editing a course never touches a round. Each round froze
+its own rating, slope, par, differential, index and course handicap at entry.
+Fixed here: editing an existing ROUND used to recompute its differential from
+the course AS IT IS NOW. Harmless while courses could not change; a silent
+rewriting of history the moment they could. It now reads the rating and slope
+frozen on the round, falling back to the course only for a round old enough to
+lack them.
+
 STILL OPEN
 ----------
 * A code joins the ACCOUNT THAT IS SIGNED IN. An admin who is anonymous on a

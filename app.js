@@ -242,8 +242,10 @@ const CLICKABLE = [
   "data-set-index", "data-course", "data-pick", "data-rm-tee", "data-game", "data-role",
   "data-invite-golfer", "data-reinvite", "data-cal", "data-cal-day", "data-cal-month", "data-more", "data-drop-member",
   "data-drop-round", "data-goto-group", "data-forget-group",
+  "data-edit-course", "data-hide-course", "data-unhide-course",
 ].map((name) => `[${name}]`).join(",");
 let courseDraft = null;
+let showHidden = false;   /* Courses screen: reveal the hidden ones so they can be brought back. */
 let gameDraft = null;
 let finder = { q: "", results: [], busy: false, msg: "" };
 let rankPeriod = { year: String(new Date().getFullYear()), month: "" };
@@ -259,7 +261,20 @@ const tabsEl = document.getElementById("tabs");
 const byName = (a, b) =>
   String((a && a.name) || "").localeCompare(String((b && b.name) || ""), undefined, { sensitivity: "base" });
 
-const sortedCourses = () => [...courses].sort(byName);
+/* EVERY course picker uses this, so hiding one takes it out of all of them at
+   once rather than leaving it lurking in a dropdown somewhere.
+   A course still IN USE by this group is never hidden from the pickers — that
+   would strand the rounds already posted on it and make an old round
+   uneditable. Hiding is for clutter, not for retiring a course you play. */
+const sortedCourses = () => {
+  const hidden = db.hiddenCourses();
+  return [...courses]
+    .filter((c) => c && !hidden.includes(c.id))
+    .sort(byName);
+};
+
+/* The Courses screen itself, which CAN show the hidden ones on request. */
+const allCoursesForList = () => [...courses].sort(byName);
 /* The people on this group's roster, resolved from the global golfer list. */
 const sortedGolfers = () => allGolfers
   .filter((g) => g && g.id && roster.includes(g.id))
@@ -1695,21 +1710,37 @@ function screenManage() {
     <div class="panel-head"><h2 class="panel-title">Courses</h2>
       ${courseDraft ? "" : `<button class="linkbtn" data-act="new-course">Add a course</button>`}</div>
     ${courses.length ? `<div class="card list">
-      ${sortedCourses().map((c) => {
+      ${allCoursesForList().filter((c) => showHidden || !db.hiddenCourses().includes(c.id)).map((c) => {
         const open = openCourse === c.id;
         const used = rounds.some((r) => r.courseId === c.id);
-        return `<div>
+        const hidden = db.hiddenCourses().includes(c.id);
+        const mine = db.canEditCourse(c);
+        return `<div${hidden ? ` class="dimmed"` : ""}>
           <button class="course-head" data-course="${c.id}" aria-expanded="${open}">
             <span class="grow"><span class="name">${esc(c.name)}</span><br>
-              <span class="sub">${c.tees.length} tee${c.tees.length === 1 ? "" : "s"}${used ? " · in use" : ""}</span></span>
+              <span class="sub">${c.tees.length} tee${c.tees.length === 1 ? "" : "s"}${used ? " · in use" : ""}${hidden ? " · hidden" : ""}</span></span>
             <span class="chev">${open ? "▾" : "▸"}</span>
           </button>
           ${open ? `<div class="course-body">
             ${c.tees.map((t) => `<div class="teeline"><span>${esc(t.name)}</span><span>${(+t.rating).toFixed(1)} / ${t.slope} · par ${t.par}</span></div>`).join("")}
+            ${db.canManage() ? `<div class="inline-actions">
+              ${mine ? `<button class="rowbtn" data-edit-course="${c.id}">Edit</button>`
+                : `<span class="hint">Entered by somebody else, so it cannot be edited here.</span>`}
+              ${db.isOwner()
+                ? (hidden
+                    ? `<button class="rowbtn" data-unhide-course="${c.id}">Unhide</button>`
+                    : (used
+                        ? `<span class="hint">In use by this group, so it stays on the list.</span>`
+                        : `<button class="rowbtn" data-hide-course="${c.id}">Hide</button>`))
+                : ""}
+            </div>` : ""}
           </div>` : ""}
         </div>`;
       }).join("")}
     </div>` : (courseDraft ? "" : `<div class="card"><p class="blank">No courses yet. Search for one by name, or type its rating and slope from the scorecard.</p></div>`)}
+    ${db.hiddenCourses().length ? `<div class="style-switch"><button class="linkbtn" data-act="toggle-hidden-courses">${
+      showHidden ? "Hide the hidden ones again" : `Show ${db.hiddenCourses().length} hidden course${db.hiddenCourses().length === 1 ? "" : "s"}`
+    }</button></div>` : ""}
     ${courseDraft ? courseEditor() : ""}
   </section>
 
@@ -2226,10 +2257,20 @@ function lookupSection() {
   </section>`;
 }
 
+/* How many of this group's rounds were played off a given tee.
+   Used to lock the Remove button: taking away a tee that rounds point at
+   leaves them naming something the course no longer has. */
+const roundsOnTee = (courseId, teeId) =>
+  rounds.filter((r) => r.courseId === courseId && r.teeId === teeId).length;
+
 function courseEditor() {
   const d = courseDraft;
+  const editing = !!d.editing;
   return `<div class="card editor">
-    <div class="editor-title">New course</div>
+    <div class="editor-title">${editing ? "Edit course" : "New course"}</div>
+    ${editing ? `<div class="note tip">Rounds already posted here keep the rating and slope they were
+      played on — those are frozen onto each round and nothing here changes them. New rounds will use
+      what you save now.</div>` : ""}
     <label class="lbl">Find it by name</label>
     <div class="inline-form" style="padding:0">
       <input name="finder-q" class="inline-input" value="${esc(finder.q)}" placeholder="Course or club name" autocomplete="off">
@@ -2249,21 +2290,28 @@ function courseEditor() {
     <input class="field" name="c-name" value="${esc(d.name)}" placeholder="Royal Ontario">
 
     <label class="lbl">Tees</label>
-    ${d.tees.map((t, i) => `<div class="tee-row">
+    ${d.tees.map((t, i) => {
+      const inUse = editing ? roundsOnTee(d.id, t.id) : 0;
+      return `<div class="tee-row">
       <div class="tee-head">
         <input class="field" data-tee-field="${i}:name" value="${esc(t.name)}" placeholder="Tee name, e.g. Blue">
-        ${d.tees.length > 1 ? `<button class="rowbtn warn" data-rm-tee="${i}">Remove</button>` : ""}
+        ${d.tees.length > 1
+          ? (inUse
+              ? `<span class="hint">${inUse} round${inUse === 1 ? "" : "s"} — cannot remove</span>`
+              : `<button class="rowbtn warn" data-rm-tee="${i}">Remove</button>`)
+          : ""}
       </div>
       <div class="tee-nums">
         <label>Rating<input class="field mono" data-tee-field="${i}:rating" value="${esc(t.rating)}" inputmode="decimal"></label>
         <label>Slope<input class="field mono" data-tee-field="${i}:slope" value="${esc(t.slope)}" inputmode="numeric"></label>
         <label>Par<input class="field mono" data-tee-field="${i}:par" value="${esc(t.par)}" inputmode="numeric"></label>
       </div>
-    </div>`).join("")}
+    </div>`;
+    }).join("")}
     <button class="linkbtn" data-act="add-tee">Add another tee</button>
 
     <div class="inline-actions stacked editor-actions">
-      <button class="btn" data-act="save-course">Save course</button>
+      <button class="btn" data-act="save-course">${editing ? "Save changes" : "Save course"}</button>
       <button class="btn ghost" data-act="cancel-course">Cancel</button>
     </div>
   </div>`;
@@ -3060,6 +3108,53 @@ view.addEventListener("click", async (e) => {
     return render();
   }
   if (d.rmTee) { courseDraft.tees.splice(+d.rmTee, 1); return render(); }
+
+  if (d.editCourse) {
+    const c = courses.find((x) => x.id === d.editCourse);
+    if (!c) return;
+    if (!db.canEditCourse(c)) {
+      openProblem({
+        title: "This course was entered by somebody else",
+        detail: "Courses are shared across every group, so only whoever added one may change it.",
+        advice: "Add it again under your own name if you need different figures — rounds already posted keep the numbers they were played on either way.",
+      });
+      return;
+    }
+    /* The existing tee ids are carried through UNCHANGED. Rounds point at a tee
+       by id, so minting new ones here would quietly detach every round from
+       the tee it was played off. */
+    courseDraft = {
+      id: c.id,
+      editing: true,
+      createdBy: c.createdBy,
+      name: c.name,
+      tees: c.tees.map((t) => ({
+        id: t.id, name: t.name,
+        rating: String(t.rating), slope: String(t.slope), par: String(t.par),
+      })),
+    };
+    finder = { q: "", results: [], busy: false, msg: "" };
+    openCourse = null;
+    return render();
+  }
+
+  if (d.hideCourse || d.unhideCourse) {
+    const id = d.hideCourse || d.unhideCourse;
+    const c = courses.find((x) => x.id === id);
+    /* Refused rather than hidden: a course this group has played would take its
+       rounds out of every picker, and an old round could not then be edited. */
+    if (d.hideCourse && rounds.some((r) => r.courseId === id)) {
+      flashMsg("This group has rounds on that course, so it stays on the list.");
+      return render();
+    }
+    note(d.hideCourse ? "hiding a course" : "bringing a course back");
+    db.setCourseHidden(id, !!d.hideCourse);
+    idle();
+    flashMsg(d.hideCourse
+      ? `${c ? c.name : "That course"} hidden from this group's list.`
+      : `${c ? c.name : "That course"} is back on the list.`);
+    return render();
+  }
   if (d.role) {
     const [memberUid, role] = d.role.split(":");
     db.setMemberRole(memberUid, role);
@@ -3094,7 +3189,9 @@ view.addEventListener("click", async (e) => {
     /* The tees are NOT in the search result — the provider sends only a count
        there and requires the course to be fetched by id for the real data.
        So picking a course makes the second call. */
-    courseDraft.name = chosen.name;
+    /* Never while editing: the name you already have is the one you recognise,
+       and the fetch may yet fail and leave a stranger's spelling behind. */
+    if (!courseDraft.editing) courseDraft.name = chosen.name;
     finder = { ...finder, busy: true, msg: `Fetching the tees for ${chosen.name}…` };
     render();
 
@@ -3112,17 +3209,54 @@ view.addEventListener("click", async (e) => {
       }
     }
 
-    courseDraft.name = full.name || chosen.name;
-    courseDraft.tees = full.tees.map((t2) => ({
-      id: model.newId(),
-      name: t2.name,
-      rating: String(t2.rating),
-      slope: String(t2.slope),
-      par: String(t2.par),
-    }));
+    /* ALREADY ON THE LIST?
+     *
+     * Picking a course you already have used to add a SECOND copy under the
+     * same name, and there was then no way to tell them apart. So it switches
+     * to updating the one that exists — same course id, so every round posted
+     * on it stays attached — and the NAME YOU ALREADY HAVE is kept, because
+     * that is the one you recognise. */
+    const same = (a, b) => String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase();
+    const mine = courseDraft.editing
+      ? courses.find((c) => c.id === courseDraft.id)
+      : courses.find((c) => same(c.name, full.name || chosen.name));
+
+    /* Tee ids are matched by NAME and carried over. A round points at a tee by
+       id, so a fresh id would detach it from the tee it was played off. */
+    const existingTees = (mine && mine.tees) || [];
+    const teeIdFor = (name) => {
+      const hit = existingTees.find((t) => same(t.name, name));
+      return hit ? hit.id : model.newId();
+    };
+
+    if (mine && !db.canEditCourse(mine)) {
+      finder = {
+        q: finder.q, results: [], busy: false,
+        msg: `${mine.name} is already on the list and was entered by somebody else, so it cannot be updated here.`,
+      };
+      return render();
+    }
+
+    courseDraft = {
+      id: mine ? mine.id : courseDraft.id,
+      editing: !!mine,
+      createdBy: mine ? mine.createdBy : undefined,
+      /* The name you already have wins. */
+      name: mine ? mine.name : (full.name || chosen.name),
+      tees: full.tees.map((t2) => ({
+        id: teeIdFor(t2.name),
+        name: t2.name,
+        rating: String(t2.rating),
+        slope: String(t2.slope),
+        par: String(t2.par),
+      })),
+    };
+
     finder = {
       q: "", results: [], busy: false,
-      msg: `Filled in ${full.tees.length} tee${full.tees.length === 1 ? "" : "s"} — check them against the scorecard.`,
+      msg: mine
+        ? `You already have ${mine.name}. Saving will update its ${full.tees.length} tee${full.tees.length === 1 ? "" : "s"} and keep the name — check them against the scorecard.`
+        : `Filled in ${full.tees.length} tee${full.tees.length === 1 ? "" : "s"} — check them against the scorecard.`,
     };
     return render();
   }
@@ -3388,6 +3522,7 @@ view.addEventListener("click", async (e) => {
       return render();
     case "add-tee": courseDraft.tees.push({ id: model.newId(), name: "", rating: "", slope: "", par: "72" }); return render();
     case "cancel-course": courseDraft = null; finder = { q: "", results: [], busy: false, msg: "" }; return render();
+    case "toggle-hidden-courses": showHidden = !showHidden; return render();
     case "save-course": return saveCourse();
     case "find": return runFinder();
 
@@ -4580,14 +4715,31 @@ async function saveRename() {
 }
 
 function saveCourse() {
+  const editing = !!courseDraft.editing;
   const c = { ...courseDraft, name: courseDraft.name.trim(),
     tees: courseDraft.tees.filter((t) => t.name.trim() && t.rating && t.slope && t.par) };
   if (!c.name || !c.tees.length) { flashMsg("A course needs a name and at least one complete tee"); return; }
-  note(`adding course ${c.name}`);
-  db.addCourse(c);
+
+  /* A tee with rounds on it must survive the save even if the filter above
+     dropped it for an incomplete number — losing it would strand those
+     rounds. Checked here rather than trusted to the greyed-out button, which
+     is only a hint. */
+  if (editing) {
+    const before = (courses.find((x) => x.id === c.id) || {}).tees || [];
+    const lost = before.filter((t) => roundsOnTee(c.id, t.id) > 0 && !c.tees.some((n) => n.id === t.id));
+    if (lost.length) {
+      flashMsg(`${lost.map((t) => t.name).join(", ")} has rounds on it and cannot be removed.`);
+      return;
+    }
+  }
+
+  note(editing ? `updating course ${c.name}` : `adding course ${c.name}`);
+  if (editing) db.updateCourse(c); else db.addCourse(c);
   courseDraft = null;
   finder = { q: "", results: [], busy: false, msg: "" };
-  flashMsg(`${c.name} added`);
+  flashMsg(editing
+    ? `${c.name} updated. Rounds already posted keep the figures they were played on.`
+    : `${c.name} added`);
 }
 
 function saveGame() {
@@ -4618,11 +4770,23 @@ function postRound() {
 
   if (editingRound) {
     const ags = +(form.adjusted || form.gross);
+    /* THE RATING COMES OFF THE ROUND, NOT THE COURSE.
+     *
+     * This used to read tee.rating and tee.slope from the course as it is
+     * TODAY. Harmless while courses could never change — and a silent rewriting
+     * of history the moment they could: correcting a typo in a five-year-old
+     * score would re-rate it against figures that did not exist when it was
+     * played. The round froze its own rating and slope at entry, which is what
+     * the handicap system requires, so that is what is used. Only if the round
+     * predates that field is the course fallen back on. */
+    const original = rounds.find((r) => r.id === editingRound);
+    const wasRating = original && Number.isFinite(Number(original.rating)) ? Number(original.rating) : tee.rating;
+    const wasSlope = original && Number.isFinite(Number(original.slope)) ? Number(original.slope) : tee.slope;
     /* gameId is written every time, including as null — so a round can be taken
        out of a game as well as moved between them. */
     db.updateRound(editingRound, {
       date: form.date, gross: +form.gross, adjusted: ags,
-      differential: model.differential(ags, tee.rating, tee.slope),
+      differential: model.differential(ags, wasRating, wasSlope),
       notes: form.notes.trim(), gameId: form.gameId || null,
     });
     db.rebuildGolferIndex(golfer.id);
