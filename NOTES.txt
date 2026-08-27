@@ -195,6 +195,25 @@ rewriting of history the moment they could. It now reads the rating and slope
 frozen on the round, falling back to the course only for a round old enough to
 lack them.
 
+FIXED IN 2.21.8 - the tab bar floating on iPhone
+------------------------------------------------
+The tab bar was position:fixed to the bottom of the viewport. On an iPhone that
+detaches it while scrolling: Safari's bottom toolbar collapses, so the VISUAL
+viewport changes height while the LAYOUT viewport does not, and a fixed element
+stays pinned to the layout one. The bar floats up over the content mid-scroll
+and drops back when scrolling stops. An iPad never shows it because its toolbar
+does not collapse that way - which is why this went unseen for so long.
+
+The app is now a fixed-height flex column: header, scrolling main, tab bar, as
+three rows of one column 100dvh tall, with the body not scrolling at all. The
+bar is in ordinary flow and has nothing to detach from. main is now the only
+scrolling element, and its bottom padding dropped from 96px to 24px because the
+bar no longer overlaps it.
+
+NOT TESTED ON A DEVICE. Watch for two things: that the keyboard still scrolls a
+focused field into view, and that the date picker still behaves. If either
+misbehaves, the change is four rules in styles.css and reverts cleanly.
+
 STILL OPEN
 ----------
 * A code joins the ACCOUNT THAT IS SIGNED IN. An admin who is anonymous on a
