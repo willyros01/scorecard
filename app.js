@@ -1671,17 +1671,37 @@ function screenManage() {
              Remove — move behind a menu. Four buttons beside a long name will
              never fit a phone; they overlapped it instead. This also puts
              Remove out of accidental reach. */
+          /* THREE STATES, NOT TWO.
+           *
+           * This row used to branch on linkedUid alone, so a golfer who had been
+           * invited but had not joined yet looked exactly like one who had never
+           * been invited at all — the button still read "Invite" and there was no
+           * way to tell who you had already sent to. The invitation IS recorded:
+           * noteInvitation writes invitedAt and invitedAs onto the golfer, and the
+           * pending-invites list further down reads it. The row simply never did.
+           *
+           * The labels were wrong too. "Invited ✓" was shown for somebody who had
+           * JOINED, which is a different and much better thing, and it left no
+           * wording free for the state in between. */
+          const joined = !!g.linkedUid;
+          const waiting = !joined && !!g.invitedAt;
+          const invitedOn = waiting
+            ? new Date(g.invitedAt).toLocaleDateString(undefined, { day: "numeric", month: "short" })
+            : "";
           return `<div class="roster-row">
             <div class="roster-name">
               <span class="name">${esc(g.name)}</span>
-              <span class="sub">${g.handicapIndex == null ? "no index yet" : `index ${(+g.handicapIndex).toFixed(1)}`} · ${g.roundCount || 0} round${g.roundCount === 1 ? "" : "s"}</span>
+              <span class="sub">${g.handicapIndex == null ? "no index yet" : `index ${(+g.handicapIndex).toFixed(1)}`} · ${g.roundCount || 0} round${g.roundCount === 1 ? "" : "s"}${
+                waiting ? ` · <span class="waiting">invited ${esc(invitedOn)}, not joined yet</span>` : ""}</span>
             </div>
             <div class="roster-actions">
-            ${g.linkedUid
+            ${joined
               ? (db.isOwner()
-                  ? `<button class="rowbtn wide" data-reinvite="${g.id}" title="Let them join again">Invited ✓</button>`
-                  : `<button class="rowbtn wide" disabled>Invited ✓</button>`)
-              : `<button class="rowbtn wide primary" data-invite-golfer="${g.id}">Invite</button>`}
+                  ? `<button class="rowbtn wide" data-reinvite="${g.id}" title="Let them join again">Joined ✓</button>`
+                  : `<button class="rowbtn wide" disabled>Joined ✓</button>`)
+              : (waiting
+                  ? `<button class="rowbtn wide" data-invite-golfer="${g.id}" title="Invited ${esc(invitedOn)} — send it again">Re-send</button>`
+                  : `<button class="rowbtn wide primary" data-invite-golfer="${g.id}">Invite</button>`)}
             ${indexSource(g) === "rounds"
               ? `<button class="rowbtn" disabled title="Their index now comes from their own rounds">Index</button>`
               : `<button class="rowbtn" data-set-index="${g.id}">Index</button>`}

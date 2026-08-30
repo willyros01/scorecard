@@ -140,6 +140,10 @@ select.field { appearance: none; background-image: linear-gradient(45deg, transp
    than styled differently, so it reads as present-but-put-away. */
 .dimmed { opacity: 0.55; }
 
+/* "invited 3 Aug, not joined yet" on a roster row. Coloured rather than grey so
+   it separates from the index and round count it sits beside. */
+.roster-name .waiting { color: var(--pencil); font-weight: 600; }
+
 .indexes { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .idx { padding: 14px; text-align: left; background: var(--paper); border: 1px solid var(--rule); border-radius: 14px; }
 .idx .big { font-family: var(--mono); font-size: 34px; font-weight: 700; color: var(--pine); line-height: 1.1; }

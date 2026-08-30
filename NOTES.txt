@@ -214,6 +214,28 @@ NOT TESTED ON A DEVICE. Watch for two things: that the keyboard still scrolls a
 focused field into view, and that the date picker still behaves. If either
 misbehaves, the change is four rules in styles.css and reverts cleanly.
 
+FIXED IN 2.21.9 - the roster row still said "Invite" after inviting
+-------------------------------------------------------------------
+The invitation WAS being recorded. noteInvitation writes invitedAt and invitedAs
+onto the golfer, and the People list further down already reads them to show who
+is outstanding. The roster row simply never looked: it branched on linkedUid
+alone, so somebody invited but not yet joined was indistinguishable from
+somebody never invited.
+
+The labels were wrong as well. "Invited (tick)" was shown for a golfer who had
+JOINED - a different and much better thing - which left no wording free for the
+state in between.
+
+Three states now:
+  joined  (linkedUid)              "Joined ✓"
+  waiting (invitedAt, no link)     "Re-send", plus "invited 3 Aug, not joined
+                                   yet" on the row's second line
+  neither                          "Invite"
+
+resetInvitation clears linkedUid and leaves invitedAt, so re-opening somebody's
+invitation correctly puts them back into the waiting state rather than looking
+like a stranger.
+
 STILL OPEN
 ----------
 * A code joins the ACCOUNT THAT IS SIGNED IN. An admin who is anonymous on a
