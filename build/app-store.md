@@ -130,6 +130,14 @@ to the demo group as admin.
 
 **Contact information:** Wilfredo Rosales · willyros01@gmail.com · phone **CONFIRM** (Apple requires one).
 
+## 5a. Unlisted distribution (decided by Willy, Sep 28)
+
+Version 1 is released **unlisted**: on the App Store, reachable only by direct link. Add this line at the top of the reviewer notes, then, after submitting for review, send Apple's unlisted-app request form (https://developer.apple.com/contact/request/unlisted-app/):
+
+> This app is for invited members of private golf groups and is requested for unlisted distribution. Nobody can use a group without an invitation from its owner.
+
+The app is listed publicly only after Version 2.0 (see the migration spec).
+
 ## 6. Export compliance
 
 Set in the build: `ITSAppUsesNonExemptEncryption` = NO (audit check A7). App Store Connect does not
