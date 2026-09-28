@@ -2225,11 +2225,11 @@ function accountSection() {
           <p class="hint"><b>Not the password for your email account.</b> This is a new one, for this app only. Write it down — you will type it on every other device, with the email above.</p>
         `}
 
-        <div class="inline-actions stacked">
+        ${db.deletionPending() ? "" : `<div class="inline-actions stacked">
           <button class="btn ${confirmSignOut ? "danger" : "ghost"}" data-act="sign-out">
             ${confirmSignOut ? "Tap again to sign out" : "Sign out of this device"}
           </button>
-        </div>
+        </div>`}
         <p class="hint">${confirmSignOut
           ? "Nothing is deleted — this device simply returns to the first screen. Wait a few seconds to cancel."
           : "Signing out deletes nothing. It returns this device to the first screen."}</p>
@@ -2398,6 +2398,7 @@ function versionBlock() {
     <div><b>The Scorecard</b> <span class="mono">v${VERSION}</span></div>
     <div class="sub">${rounds.length} round${rounds.length === 1 ? "" : "s"} · ${golfers.length} golfer${golfers.length === 1 ? "" : "s"} · ${courses.length} course${courses.length === 1 ? "" : "s"}</div>
     <div class="sub">${esc(sync.text)} · World Handicap System, best 8 of last 20</div>
+    <div class="sub"><button class="linkbtn" data-act="delete-account">Delete my account</button></div>
   </section>`;
 }
 
@@ -2510,6 +2511,59 @@ function openPasswordSheet({ heading, because, allowLater = false } = {}) {
     <p class="hint"><b>Not the password for your email account.</b> A new one, for this app only.</p>
   </div>`;
 }
+
+/* ================= Delete my account (Change 7) ================= */
+
+function openDeleteAccount({ resume = false, problem = "" } = {}) {
+  const needsPassword = db.hasPassword() && !(db.currentEmail() || "").startsWith("delete-");
+  const blockers = db.deletionBlockers();
+  sheetEl.hidden = false;
+  sheetEl.dataset.report = "";
+  sheetEl.innerHTML = `<div class="sheet-body">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <h2>${resume ? "Your account isn't deleted yet" : "Delete your account?"}</h2>
+      <button class="rowbtn" data-close="1">${resume ? "Later" : "Keep it"}</button>
+    </div>
+    ${problem ? `<div class="note warn">${esc(problem)}</div>` : ""}
+    ${resume
+      ? `<p class="lead">The deletion you started didn't finish. You are still signed in. Tap Try again to finish it — if it keeps failing, it finishes automatically within a day.</p>`
+      : `<p class="lead">Your email and sign-in are deleted and you leave every group. Your golfer name, rounds and handicap stay with the group so its history and handicaps stay correct, and an admin can keep entering your scores. This can't be undone.</p>`}
+    ${!resume && blockers.abandoned ? `<div class="note warn"><b>${blockers.abandoned} earlier change${blockers.abandoned === 1 ? "" : "s"} could not be saved.</b> They will never upload. Dismiss them to continue.
+      <div class="inline-actions stacked"><button class="btn ghost" data-del="dismiss">Dismiss them</button></div></div>` : ""}
+    ${needsPassword ? `<label class="lbl">Your Scorecard password</label>
+      <input class="field" name="delete-password" type="password" autocomplete="current-password" placeholder="To confirm it's you">` : ""}
+    <div class="inline-actions stacked">
+      <button class="btn danger" data-del="go">${resume ? "Try again" : "Delete my account"}</button>
+      ${resume ? "" : `<button class="btn ghost" data-close="1">Keep it</button>`}
+    </div>
+  </div>`;
+}
+
+sheetEl.addEventListener("click", async (e) => {
+  const button = e.target.closest("[data-del]");
+  if (!button) return;
+  if (button.dataset.del === "dismiss") { db.dismissAbandoned(); return openDeleteAccount(); }
+  if (button.dataset.del !== "go") return;
+  const password = ((sheetEl.querySelector('[name="delete-password"]') || {}).value) || "";
+  const resume = db.deletionPending();
+  button.disabled = true;
+  busy("Deleting your account");
+  let result;
+  try {
+    result = await db.deleteMyAccount({ password, onStep: (step) => { busyWhat = step; paintBusy(); } });
+  } finally { idleAll(); }
+  if (result && result.ok) {
+    sheetEl.hidden = false;
+    sheetEl.innerHTML = `<div class="sheet-body"><h2>Your account has been deleted</h2>
+      <p class="lead">Your sign-in is gone and you have left every group. This app will now start fresh.</p>
+      <div class="inline-actions stacked"><button class="btn" data-del="restart">Done</button></div></div>`;
+    return;
+  }
+  openDeleteAccount({ resume: db.deletionPending() || resume, problem: (result && result.message) || "Something went wrong. Nothing was reported as deleted." });
+});
+sheetEl.addEventListener("click", (e) => {
+  if (e.target.closest('[data-del="restart"]')) location.reload();
+});
 
 function openNotice({ title, detail, advice, action }) {
   sheetEl.hidden = false;
@@ -2852,7 +2906,7 @@ document.getElementById("statusBtn").onclick = () => {
     <div class="inline-actions stacked">
       <button class="btn ghost" data-quick="backup">Back up my data</button>
       <button class="btn ${db.hasPassword() ? "ghost" : ""}" data-quick="setpassword">${db.hasPassword() ? "Change my password" : "Set a password"}</button>
-      <button class="btn ghost warn" data-quick="signout">Sign out of this device</button>
+      ${db.deletionPending() ? "" : `<button class="btn ghost warn" data-quick="signout">Sign out of this device</button>`}
     </div>
     <p class="hint">Signing out deletes nothing. It returns this device to the first screen.${email ? "" : " Without an account, you will need your invitation link to come back."}</p>
   </div>`;
@@ -3411,6 +3465,9 @@ view.addEventListener("click", async (e) => {
       } finally { idle(); }
       return render();
     }
+    case "delete-account":
+      openDeleteAccount({ resume: db.deletionPending() });
+      return;
     case "open-guide":
       platform.openExternal(`${platform.guideUrl()}#moving`);
       return;
@@ -4952,6 +5009,7 @@ async function loadInvitedDetails() {
   await platform.initLinks();   /* iPhone app: the link that opened it, if any */
   platform.onLink(async () => { await loadInvitedDetails(); render(); });
   await db.init();
+  await db.checkPendingDeletion();
   markBoot("group");
 
   const invite = db.readJoinLink();
@@ -4970,4 +5028,5 @@ async function loadInvitedDetails() {
   markBoot("ready");
   ready = true;
   render();
+  if (db.deletionPending()) openDeleteAccount({ resume: true });
 })();
