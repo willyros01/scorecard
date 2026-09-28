@@ -1,0 +1,6 @@
+kind:    checks
+result:  verify=skipped web=skipped
+branch:  ios
+commit:  ae018ef5288be736b341f53647e27f392fbec36e
+run:     1 (id 36457976540)
+time:    2026-09-28T17:25:41Z
