@@ -1,0 +1,11 @@
+OK    V1 npm ci succeeded from the committed lockfile
+OK    V2 every package is exactly the approved version
+
+  vendor/firebase/firebase-10.12.0.js  375.2kb
+
+⚡ Done in 61ms
+OK    V3 the committed bundle is identical to a fresh build
+OK    V4 no remote code in the 14 packaged files
+OK    V5 Capacitor core, cli and ios are 8.5.2
+OK    V6 no location.origin; the bundle exports everything store.js uses
+verify.sh: all checks passed
