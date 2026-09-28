@@ -8,6 +8,10 @@ rules_version = '2';
  * those. The number only moves when these rules genuinely change, and Claude
  * says so at the top of the message when that happens.
  *
+ * What changed in 2.22.0: two additions for the iPhone app's Delete my account.
+ * A person may delete their OWN invitation claim, and may read and write their
+ * OWN deletion request (accountDeletions/{uid}). Nothing else changed.
+ *
  * What changed in 2.21.0: an account may read its OWN membership documents
  * wherever they are, so it can find its groups when the pointer list is
  * missing. Read only, and only your own.
