@@ -183,3 +183,7 @@ The 500-round cap on `watchRounds` is there on purpose. An unbounded query is ex
 4. Verify the round count matches before anyone else joins
 
 Version 1 stays deployed and working throughout.
+
+---
+
+Write-access test by Claude, September 28, 2026. No app files changed. Safe to delete this line.
