@@ -1,12 +1,17 @@
 rules_version = '2';
 
-/* LAST CHANGED IN APP VERSION 2.21.0
+/* LAST CHANGED IN APP VERSION 2.22.0
  *
  * This is here only so you can compare it against what is published in the
  * Firebase console if you are ever in doubt. It does NOT track the app version:
  * most releases change no rules at all, and there is nothing to republish for
  * those. The number only moves when these rules genuinely change, and Claude
  * says so at the top of the message when that happens.
+ *
+ * What changed in 2.22.0: an account may delete its OWN invitation claim and
+ * may read and write its OWN account-deletion request. These permissions are
+ * restricted to the signed-in account; they grant no access to another
+ * person's claim or request.
  *
  * What changed in 2.21.0: an account may read its OWN membership documents
  * wherever they are, so it can find its groups when the pointer list is
@@ -191,7 +196,10 @@ service cloud.firestore {
           && request.resource.data.acceptedBy == request.auth.uid
           && request.resource.data.role != 'admin';
 
-        allow delete: if isOwner(assocId);
+        /* The owner may reset any invitation. A person deleting their account
+           may remove only the claim that is actually theirs. */
+        allow delete: if isOwner(assocId)
+          || (signedIn() && resource.data.acceptedBy == request.auth.uid);
       }
 
       /* ---------------- roster: which golfers play in this group ---------------- */
@@ -355,6 +363,16 @@ service cloud.firestore {
        which is exactly what happened between Safari and the home-screen app.
        Yours only, readable and writable by nobody else. */
     match /userGroups/{userId}/groups/{assocId} {
+      allow read, write: if signedIn() && userId == request.auth.uid;
+    }
+
+    /* ---------------- account deletion requests ---------------- */
+
+    /* A person may create, inspect, update or remove only the request whose
+       document ID is their own account ID. The admin completion job treats
+       every field inside this document as untrusted and takes authority only
+       from Firestore and Firebase Authentication. */
+    match /accountDeletions/{userId} {
       allow read, write: if signedIn() && userId == request.auth.uid;
     }
 
