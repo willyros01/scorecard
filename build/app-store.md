@@ -26,7 +26,7 @@ If Apple says the name is taken, fallback names (all ≤ 30 characters): **The S
 | Category | Primary: Sports. Secondary: none |
 | Content rights | Yes, the app shows third-party content: course and tee data looked up from golfcourseapi.com. **CONFIRM** your GolfCourseAPI plan allows use in an app. |
 | Age rating | Answer **None / No** to every question (no violence, gambling, contests, mature themes, medical, unrestricted web access, user-generated content shown to strangers). Expected result: 4+. |
-| Price | Free (**CONFIRM**; the guide says it costs nothing) |
+| Price | Free (confirmed by Willy, Sep 28; to be revisited if Firestore costs start) |
 | Privacy Policy URL | https://www.cuberoot-systems.com/scorecard/privacy/ |
 | Support URL | https://www.cuberoot-systems.com/scorecard/support/ |
 | Marketing URL | leave empty |
@@ -141,4 +141,4 @@ ask the encryption questions for these builds.
 2. Demo group "Demo Golf Society" with a separate owner test account and the reviewer admin account (Phase 4).
 3. P1 traffic survey, then final privacy answers (section 4).
 4. Screenshots from the TestFlight build.
-5. The three CONFIRM items: price, GolfCourseAPI content rights, review contact phone.
+5. The two CONFIRM items: GolfCourseAPI content rights, review contact phone.
