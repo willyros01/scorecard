@@ -236,8 +236,9 @@ for (const [name, type] of browsers) {
       await page.reload({ waitUntil: "load" });
       await page.waitForTimeout(3000);
       after = await waitForUser(page);
-      const version = await page.evaluate(() => self.APP_VERSION);
-      if (version === "2.21.9") throw new Error("the page still ran v2.21.9 after the switch");
+      /* The new code is running once its footer link is there. */
+      try { await waitForText(page, /Delete my account/, 30000); }
+      catch { throw new Error("the page still ran v2.21.9 after the switch"); }
       if (!before || !after || before.uid !== after.uid) throw new Error(`before ${before && before.uid}, after ${after && after.uid}`);
     });
     serve(NEW_DIR);
