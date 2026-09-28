@@ -353,6 +353,21 @@ function flashMsg(msg) { flash = msg; render(); setTimeout(() => { flash = null;
 function screenJoin() {
   const invite = db.readJoinLink();
 
+  /* Offline, "nothing found" only means "not downloaded yet" (Change 3,
+     Part C). Never offer to start a new group, or call an invitation unknown,
+     on the strength of that. */
+  if (db.readsOffline() && !(invite && invitedGolfer)) {
+    return `<div class="stack">
+      ${flashBar()}
+      <div class="card padded">
+        <h2 class="panel-title">You're offline</h2>
+        <p class="lead">${invite ? "This invitation can't be opened until you reconnect." : "Your groups appear when you reconnect."}</p>
+        <p class="hint">Nothing has been lost. This screen updates by itself once there is a connection.</p>
+      </div>
+      ${versionBlock()}
+    </div>`;
+  }
+
   if (invite) {
     /* A named invitation greets them by name and needs one tap. The name is
        read from the database, not from the link — a URL can be edited. */
@@ -1629,7 +1644,7 @@ function screenManage() {
   <section class="panel">
     <div class="panel-head"><h2 class="panel-title">Golfers in this group</h2><span class="panel-count">${golfers.length || ""}</span></div>
     <div class="card">
-      ${!golfers.length && db.canManage() ? `<div class="welcome" style="border:0;padding:1.4rem 1rem">
+      ${!golfers.length && db.canManage() && !db.readsOffline() ? `<div class="welcome" style="border:0;padding:1.4rem 1rem">
         <p style="margin:0 0 1rem">Nobody is on this roster yet. If your golfers already exist from before, put them back in one tap.</p>
         <div class="inline-actions stacked">
           <button class="btn" data-act="open-tool" data-tool="rebuild">Rebuild the roster</button>
@@ -5028,5 +5043,14 @@ async function loadInvitedDetails() {
   markBoot("ready");
   ready = true;
   render();
+  if (db.offlineCopyUnavailable()) flashMsg("Offline data unavailable on this device — the app needs a connection to show your group.");
   if (db.deletionPending()) openDeleteAccount({ resume: true });
+
+  /* Coming back online on the first screen: look for the groups again. */
+  addEventListener("online", async () => {
+    if (db.currentAssociation()) return render();
+    await settleGroup(db.recallAssociation());
+    await loadInvitedDetails();
+    render();
+  });
 })();

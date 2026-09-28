@@ -11,7 +11,24 @@ import * as model from "./model.js";
 import * as outbox from "./outbox.js";
 import * as platform from "./platform.js";
 
-const SDK = "https://www.gstatic.com/firebasejs/10.12.0";
+/* Firebase is bundled into the app's own files (spec Change 3): built from
+   the firebase npm package at exactly 10.12.0 by build/firebase-entry.js.
+   Nothing is downloaded at run time. */
+const FIREBASE_BUNDLE = "./vendor/firebase/firebase-10.12.0.js";
+
+/* ---------------- offline-aware reads (spec Change 3, Part C) ----------------
+   With data kept on the device, an offline read of something never
+   downloaded comes back EMPTY, not as an error. "Empty" must then mean
+   "unknown, offline" — never "you belong to no group" or "not found". */
+let cacheMiss = false;
+function noteRead(snap, found) {
+  const fromCache = !!(snap && snap.metadata && snap.metadata.fromCache);
+  if (fromCache && !found) cacheMiss = true;
+  else if (!fromCache) cacheMiss = false;
+}
+export const readsOffline = () => cacheMiss || (typeof navigator !== "undefined" && navigator.onLine === false);
+let persistentCacheOff = false;
+export const offlineCopyUnavailable = () => persistentCacheOff;
 
 let fb = null;            // { app, auth, db, mod }
 let uid = null;
@@ -72,13 +89,29 @@ export async function init() {
   if (!configured) { setStatus("On this device"); return; }
 
   try {
-    const [app, auth, store] = await Promise.all([
-      import(`${SDK}/firebase-app.js`),
-      import(`${SDK}/firebase-auth.js`),
-      import(`${SDK}/firebase-firestore.js`),
-    ]);
+    const { app, auth, store } = await import(FIREBASE_BUNDLE);
     const instance = app.initializeApp(config.firebaseConfig);
-    fb = { mod: { auth, store }, auth: auth.getAuth(instance), db: store.getFirestore(instance) };
+    /* getAuth's own defaults, minus the Google pop-up helper, so existing web
+       sign-ins carry straight over. getAuth itself can hang inside the app. */
+    const authInstance = auth.initializeAuth(instance, {
+      persistence: [auth.indexedDBLocalPersistence, auth.browserLocalPersistence, auth.browserSessionPersistence],
+    });
+    /* Inside the app every document read is kept on the device across
+       restarts (Part B). In a browser Firestore stays memory-only, as today. */
+    let database;
+    if (platform.isApp()) {
+      try {
+        database = store.initializeFirestore(instance, {
+          localCache: store.persistentLocalCache({ tabManager: store.persistentSingleTabManager() }),
+        });
+      } catch {
+        persistentCacheOff = true;
+        database = store.getFirestore(instance);
+      }
+    } else {
+      database = store.getFirestore(instance);
+    }
+    fb = { mod: { auth, store }, auth: authInstance, db: database };
 
     await new Promise((resolve) => {
       auth.onAuthStateChanged(fb.auth, async (user) => {
@@ -105,6 +138,15 @@ export async function init() {
 }
 
 const ref = (...path) => fb.mod.store.doc(fb.db, ...path);
+/* Every live watcher goes through here, so a saved copy shown while offline is
+   labelled as such (Part C). Only when the device is actually offline, so the
+   web app never flickers. */
+const listen = (target, onNext, onError) => fb.mod.store.onSnapshot(target, (snap) => {
+  if (snap && snap.metadata && snap.metadata.fromCache && typeof navigator !== "undefined" && navigator.onLine === false) {
+    setStatus("Offline — showing saved copy", true);
+  }
+  onNext(snap);
+}, onError);
 const col = (...path) => fb.mod.store.collection(fb.db, ...path);
 
 /* ---------------- the outbox writer ---------------- */
@@ -642,7 +684,7 @@ export function addGame({ date, endDate = null, courseId, name }) {
    number no matter which group you are looking at. */
 export function watchGolfers(callback) {
   const { onSnapshot } = fb.mod.store;
-  const stop = onSnapshot(col("golfers"),
+  const stop = listen(col("golfers"),
     (snap) => {
       clearError();
       /* Archived people are filtered out HERE, at the single point every screen
@@ -661,7 +703,7 @@ export function watchGolfers(callback) {
 /* Which of them play in this group. */
 export function watchRoster(callback) {
   const { onSnapshot } = fb.mod.store;
-  const stop = onSnapshot(col("associations", assocId, "roster"),
+  const stop = listen(col("associations", assocId, "roster"),
     (snap) => callback(snap.docs.map((d) => d.id)),
     (e) => report(e));
   unsubscribers.push(stop);
@@ -672,7 +714,7 @@ export function watchRoster(callback) {
    query would be the thing that quietly runs up a bill, so it is capped now. */
 export function watchRounds(callback, { max = 500 } = {}) {
   const { onSnapshot, query, orderBy, limit } = fb.mod.store;
-  const stop = onSnapshot(
+  const stop = listen(
     query(col("associations", assocId, "rounds"), orderBy("date", "desc"), limit(max)),
     (snap) => {
       clearError();
@@ -692,7 +734,7 @@ export function watchRounds(callback, { max = 500 } = {}) {
 
 export function watchCourses(callback) {
   const { onSnapshot } = fb.mod.store;
-  const stop = onSnapshot(col("courses"), (snap) => callback(snap.docs.map((d) => d.data())), (e) => report(e));
+  const stop = listen(col("courses"), (snap) => callback(snap.docs.map((d) => d.data())), (e) => report(e));
   unsubscribers.push(stop);
   return stop;
 }
@@ -997,6 +1039,7 @@ export async function loadMembership(id) {
   const { getDoc } = fb.mod.store;
   try {
     const snap = await getDoc(ref("associations", id, "members", uid));
+    noteRead(snap, snap.exists());
     myMember = snap.exists() ? snap.data() : null;
     if (myMember) {
       assocId = id;
@@ -1016,6 +1059,7 @@ export async function loadAssociation(id) {
   const { getDoc } = fb.mod.store;
   try {
     const snap = await getDoc(ref("associations", id));
+    noteRead(snap, snap.exists());
     if (!snap.exists()) return null;
     const group = { ...snap.data(), id: snap.id };
     /* Filled here as well as in the watcher, so an invitation can be built
@@ -1027,7 +1071,7 @@ export async function loadAssociation(id) {
 
 export function watchMembers(callback) {
   const { onSnapshot } = fb.mod.store;
-  const stop = onSnapshot(col("associations", assocId, "members"),
+  const stop = listen(col("associations", assocId, "members"),
     (snap) => callback(snap.docs.map((d) => ({ uid: d.id, ...d.data() }))), (e) => report(e));
   unsubscribers.push(stop);
   return stop;
@@ -1138,8 +1182,9 @@ export async function golferNamedInLink(golferId) {
   try {
     const { getDoc } = fb.mod.store;
     const snap = await getDoc(ref("golfers", golferId));
+    noteRead(snap, snap.exists());
     return snap.exists() ? { ...snap.data(), id: snap.id } : null;
-  } catch { return null; }
+  } catch { cacheMiss = true; return null; }
 }
 
 /* Accepting a named invitation.
@@ -1238,7 +1283,7 @@ export const clearJoinLink = () => {
 
 export function watchGames(callback, { max = 200 } = {}) {
   const { onSnapshot, query, orderBy, limit } = fb.mod.store;
-  const stop = onSnapshot(
+  const stop = listen(
     query(col("associations", assocId, "games"), orderBy("date", "desc"), limit(max)),
     (snap) => callback(snap.docs.map((d) => d.data())), (e) => report(e));
   unsubscribers.push(stop);
@@ -1360,7 +1405,7 @@ export async function importLegacyV1({ v1, assocName, displayName }) {
    device without anybody reloading. */
 export function watchAssociation(callback) {
   const { onSnapshot } = fb.mod.store;
-  const stop = onSnapshot(ref("associations", assocId),
+  const stop = listen(ref("associations", assocId),
     (snap) => {
       if (!snap.exists()) return;
       /* Keep the cached copy current. inviteLink() and ensureAdminCode() read
@@ -1501,6 +1546,7 @@ export async function groupsFromMemberships() {
       collectionGroup(fb.db, "members"),
       where("uid", "==", uid)
     ));
+    noteRead(found, !found.empty);
 
     const groups = [];
     for (const d of found.docs) {
@@ -1531,6 +1577,8 @@ export async function loadMyGroups() {
   try {
     const { getDocs, getDoc } = fb.mod.store;
     const snap = await getDocs(col("userGroups", uid, "groups"));
+    noteRead(snap, !snap.empty);
+    if (snap.metadata && snap.metadata.fromCache && snap.empty) return knownGroups();   /* unknown while offline */
     const hidden = hiddenGroups();
     const listed = snap.docs
       .map((d) => ({ id: d.id, name: (d.data() || {}).name || "Group" }))
@@ -1599,6 +1647,7 @@ export async function amMemberOf(id) {
   try {
     const { getDoc } = fb.mod.store;
     const snap = await getDoc(ref("associations", id, "members", uid));
+    noteRead(snap, snap.exists());
     return snap.exists();
   } catch { return false; }
 }
