@@ -9,6 +9,7 @@
 
 import * as model from "./model.js";
 import * as outbox from "./outbox.js";
+import * as platform from "./platform.js";
 
 const SDK = "https://www.gstatic.com/firebasejs/10.12.0";
 
@@ -703,24 +704,6 @@ export function stopWatching() {
   }
 }
 
-/* ---------------- optional Google sign-in ---------------- */
-
-export async function signInWithGoogle() {
-  if (!fb) throw new Error("Firebase has not loaded.");
-  const { GoogleAuthProvider, linkWithPopup, signInWithPopup } = fb.mod.auth;
-  const provider = new GoogleAuthProvider();
-  const current = fb.auth.currentUser;
-  try {
-    if (current && current.isAnonymous) await linkWithPopup(current, provider);
-    else await signInWithPopup(fb.auth, provider);
-    clearError();
-  } catch (e) {
-    if (String(e && e.code).includes("credential-already-in-use")) {
-      await signInWithPopup(fb.auth, provider);
-    } else { report(e); throw e; }
-  }
-}
-
 /* Signing in with an email and a password.
  *
  * This is the fix for the problem that broke version 2: on iOS, Safari and an
@@ -1065,7 +1048,7 @@ export function setMemberRole(memberUid, role) {
 /* An invitation is a link, so joining is one tap from a message rather than
    a code somebody has to read out and type. */
 export const joinLink = (association) =>
-  `${location.origin}${location.pathname}?join=${association.id}.${association.joinCode}`;
+  `${platform.joinBase()}?join=${association.id}.${association.joinCode}`;
 
 /* An invitation for a specific role.
  *
@@ -1108,7 +1091,7 @@ export function inviteLink(role = "member", golferId = null) {
    * rules still check the code against the group, so a link edited to say
    * admin while holding the guest code is refused. */
   const as = role === "admin" ? "&as=admin" : "";
-  return `${location.origin}${location.pathname}?join=${group.id}.${code}${named}${as}`;
+  return `${platform.joinBase()}?join=${group.id}.${code}${named}${as}`;
 }
 
 /* Groups created before admin invitations existed have no admin code. One is
@@ -1129,14 +1112,14 @@ export async function ensureAdminCode() {
 
 export function readJoinLink() {
   try {
-    const value = new URLSearchParams(location.search).get("join");
+    const value = new URLSearchParams(platform.linkQuery()).get("join");
     if (!value) return null;
 
     /* group.code            — an open invitation, they type their name
        group.code.golferId   — a named one, for a specific person on the roster */
     const parts = value.split(".");
     if (parts.length < 2) return null;
-    const params = new URLSearchParams(location.search);
+    const params = new URLSearchParams(platform.linkQuery());
     return {
       associationId: parts[0],
       code: parts[1],
@@ -1248,6 +1231,7 @@ export async function acceptNamedInvite({ associationId, code, golferId, role })
    including the role, so anything that still needs it must read it first. */
 export const clearJoinLink = () => {
   try { history.replaceState(null, "", location.pathname); } catch {}
+  platform.clearLinkQuery();
 };
 
 /* ---------------- games ---------------- */

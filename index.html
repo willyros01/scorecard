@@ -92,7 +92,10 @@
 
   <script type="module" src="./app.js"></script>
   <script>
-    if ("serviceWorker" in navigator) {
+    /* Inside the iPhone app the files are already on the device, so the
+       offline service worker is for browsers only (Change 9). */
+    var inApp = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+    if (!inApp && "serviceWorker" in navigator) {
       window.addEventListener("load", function(){ navigator.serviceWorker.register("./sw.js").catch(function(){}); });
     }
   </script>

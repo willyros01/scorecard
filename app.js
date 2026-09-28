@@ -1,9 +1,9 @@
 import * as db from "./store.js";
 import * as model from "./model.js";
 import * as lookup from "./courses-api.js";
+import * as platform from "./platform.js";
 
 const VERSION = (typeof self !== "undefined" && self.APP_VERSION) || "dev";
-const SUPER_ADMIN = "willyros01@gmail.com";
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -466,8 +466,11 @@ function screenJoin() {
     ` : `
       <div class="card padded">
         <h2 class="panel-title">Sign in</h2>
-        <p class="hint">Needed once, so this is the same account whether you open the app in Safari or from your home screen. Without it, each one becomes a separate person with a separate group — which is exactly what went wrong before.</p>
-        ${db.currentEmail() ? `<div class="note tip">This device is already known to Google as <b>${esc(db.currentEmail())}</b>. Use that email and choose a password for it — that keeps your existing data. A different email would start a separate, empty account.</div>` : ""}
+        ${platform.isApp()
+          ? `<p class="hint">Needed once, so you are the same person on every device.</p>
+             <p class="hint"><button class="linkbtn" data-act="open-guide">Used The Scorecard in Safari? Read this first</button></p>`
+          : `<p class="hint">Needed once, so this is the same account whether you open the app in Safari or from your home screen. Without it, each one becomes a separate person with a separate group — which is exactly what went wrong before.</p>`}
+        ${db.currentEmail() ? `<div class="note tip">This device is already signed in as <b>${esc(db.currentEmail())}</b>. Use that email and choose a password for it — that keeps your existing data. A different email would start a separate, empty account.</div>` : ""}
         <label class="lbl">Email</label>
         <input class="field" name="email" type="email" value="${esc(authForm.email || db.currentEmail())}" placeholder="you@example.com" autocomplete="username" autocapitalize="none">
         <label class="lbl">Password</label>
@@ -482,9 +485,6 @@ function screenJoin() {
       </div>
       <p class="hint" style="text-align:center">
         Been sent an invitation? Tap that link instead — guests need no account.
-      </p>
-      <p class="hint" style="text-align:center">
-        Looking for the Google button? It only works in the Safari browser, never in an app opened from the home screen. Email and password works in both.
       </p>
       <p class="hint" style="text-align:center">
         <button class="linkbtn" data-act="enter-code">I was given a code</button>
@@ -1611,7 +1611,7 @@ function openShare(text, title, options = {}) {
     </div>
     <div class="inline-actions stacked">
       <button class="btn ghost" data-send="save">Save as a file</button>
-      ${navigator.share ? `<button class="btn ghost" data-send="native">More apps…</button>` : ""}
+      ${platform.canShare() ? `<button class="btn ghost" data-send="native">More apps…</button>` : ""}
     </div>
   </div>`;
   sheetEl.dataset.text = text;
@@ -1632,7 +1632,7 @@ function screenManage() {
       ${!golfers.length && db.canManage() ? `<div class="welcome" style="border:0;padding:1.4rem 1rem">
         <p style="margin:0 0 1rem">Nobody is on this roster yet. If your golfers already exist from before, put them back in one tap.</p>
         <div class="inline-actions stacked">
-          <a class="btn" href="./rebuild.html" style="text-decoration:none;display:flex;align-items:center;justify-content:center">Rebuild the roster</a>
+          <button class="btn" data-act="open-tool" data-tool="rebuild">Rebuild the roster</button>
         </div>
       </div>` : ""}
       ${golfers.length ? `<div class="list">
@@ -1983,7 +1983,8 @@ function groupSection() {
         <button class="btn ghost" data-act="rename-group">Save the name</button>
       </div>
     </div>
-    <p class="hint"><a href="./rebuild.html">Rebuild the roster</a> · <a href="./tidy.html">Check and tidy the data</a> · <a href="./cleanup.html">Clean up unused groups</a></p>
+    <p class="hint"><button class="linkbtn" data-act="open-tool" data-tool="rebuild">Rebuild the roster</button> · <button class="linkbtn" data-act="open-tool" data-tool="tidy">Check and tidy the data</button> · <button class="linkbtn" data-act="open-tool" data-tool="cleanup">Clean up unused groups</button></p>
+    ${platform.isApp() ? `<p class="hint">Opens in Safari. Sign in there with the owner's email if asked.</p>` : ""}
   </section>
 
   <section class="panel">
@@ -2061,7 +2062,7 @@ function openBackupSheet() {
     </div>
     <div class="inline-actions stacked">
       <button class="btn ghost" data-send="copy">Copy the text</button>
-      ${navigator.share ? `<button class="btn ghost" data-send="native">More apps…</button>` : ""}
+      ${platform.canShare() ? `<button class="btn ghost" data-send="native">More apps…</button>` : ""}
     </div>
     <p class="hint">Save it somewhere lets you choose the folder — iCloud Drive, Google Drive, Dropbox or anywhere else on the device. A file kept off the phone is the one that survives losing the phone.</p>
   </div>`;
@@ -2077,6 +2078,22 @@ function openBackupSheet() {
 async function saveBackup() {
   const text = sheetEl.dataset.text || "";
   const name = sheetEl.dataset.filename || "scorecard-backup.txt";
+
+  /* Inside the iPhone app: write the file, confirm it is really written, then
+     open the share sheet with it. The sheet stays open with a clear message if
+     the write fails — nothing is reported as saved that wasn't. */
+  if (platform.isApp()) {
+    try {
+      await platform.saveFile(name, text, sheetEl.dataset.title || "Scorecard backup");
+      sheetEl.hidden = true;
+      flashMsg("Choose Save to Files, then pick iCloud Drive or any folder you like.");
+      render();
+    } catch (e) {
+      if (e && /cancel/i.test(String(e.message || e))) return;   /* they closed the share sheet */
+      flashMsg("The backup was NOT saved: " + ((e && e.message) || "the file could not be written") + ". Try Email or Copy instead.");
+    }
+    return;
+  }
 
   if (window.showSaveFilePicker) {
     try {
@@ -2199,7 +2216,7 @@ function accountSection() {
         ${settled ? `
           <p class="hint">Use this email and password on your other devices and you are one person everywhere.</p>
         ` : `
-          <div class="note"><b>One step left.</b> You are signed in through Google, which only works here in Safari. Set a password so you can reach this same account from the home-screen app, where Google cannot work.</div>
+          <div class="note"><b>One step left.</b> No password is set on this account yet. Set one so you can sign in on your other devices.</div>
           <label class="lbl">Password for this app</label>
           <input class="field" name="password" type="password" placeholder="Invent one, at least 6 characters" autocomplete="new-password">
           <div class="inline-actions stacked">
@@ -2223,25 +2240,18 @@ function accountSection() {
   return `<section class="panel">
     <div class="panel-head"><h2 class="panel-title">Account</h2></div>
     <div class="card padded">
-      <div class="name">This device only${db.canManage() ? " — and you are " + (db.myRole() === "owner" ? "the owner" : "an admin") : ""}</div>
-      <p class="hint">Right now this device is not tied to any account. That means Safari and the home-screen app count as two different people, each with their own groups. Signing in fixes that.</p>
-      ${db.canManage() ? `<div class="note"><b>Worth doing today.</b> Your role is real and works properly, but it exists only in this browser. Without an account it cannot follow you to another device, and it disappears if this browser's data is cleared.</div>` : ""}
-
-      <div class="note tip"><b>If you have version 1 data, do this in order.</b> Tap the Google button first — it can only work here in Safari — then come back and set a password. Setting a password without that step would create a separate, empty account.</div>
-
-      <div class="inline-actions stacked">
-        <button class="btn ghost" data-act="google">Sign in with Google — Safari only</button>
-      </div>
-      <p class="hint">Never works in an app opened from the home screen; iOS blocks the window Google needs.</p>
+      <div class="name">Sign in as the owner</div>
+      <div class="note"><b>Sign in with the owner's email address.</b> Use the email and the Scorecard password you set as owner — not your email account's password. Signing in with any other email opens a different account that does not own this group.</div>
+      ${db.canManage() ? `<p class="hint">Your role only lasts on this device until you sign in.</p>` : ""}
 
       <label class="lbl">Email</label>
       <input class="field" name="email" type="email" value="${esc(authForm.email)}" placeholder="you@example.com" autocomplete="username" autocapitalize="none">
       <label class="lbl">Password for this app</label>
-      <input class="field" name="password" type="password" placeholder="Invent one, at least 6 characters" autocomplete="new-password">
+      <input class="field" name="password" type="password" placeholder="Your Scorecard password" autocomplete="current-password">
       <div class="inline-actions stacked">
-        <button class="btn" data-act="sign-in" ${joining ? "disabled" : ""}>${joining ? "Signing in…" : "Set the password"}</button>
+        <button class="btn" data-act="sign-in" ${joining ? "disabled" : ""}>${joining ? "Signing in…" : "Sign in"}</button>
       </div>
-      <p class="hint"><b>Not your email password.</b> A new one, for this app only. You will type it on your other devices.</p>
+      <p class="hint"><b>Not your email password.</b> The Scorecard password, for this app only.</p>
       ${hasGroup ? `<p class="hint">Your groups and rounds stay exactly as they are — signing in attaches this device to an account, it does not move anything.</p>` : ""}
     </div>
   </section>`;
@@ -2595,13 +2605,13 @@ sheetEl.addEventListener("click", async (e) => {
       action.disabled = false;
       action.textContent = "Send this report";
       flashMsg("Couldn't send it directly. Opening your mail app instead.");
-      location.href = `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(sheetEl.dataset.subject || "BUG")}&body=${encodeURIComponent(context())}`;
+      platform.openExternal(`mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(sheetEl.dataset.subject || "BUG")}&body=${encodeURIComponent(context())}`);
     }
     return;
   }
 
   if (what === "email") {
-    location.href = `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(sheetEl.dataset.subject || "BUG")}&body=${encodeURIComponent(context())}`;
+    platform.openExternal(`mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(sheetEl.dataset.subject || "BUG")}&body=${encodeURIComponent(context())}`);
     return;
   }
 
@@ -3390,16 +3400,28 @@ view.addEventListener("click", async (e) => {
         const code = String((err && (err.code || err.message)) || "");
         const stale = code.includes("requires-recent-login");
         openProblem({
-          title: stale ? "Google needs to confirm you again" : "The password could not be set",
+          title: stale ? "Please sign in again first" : "The password could not be set",
           detail: stale
-            ? "Firebase will not attach a password to an account that signed in days ago."
+            ? "For safety, Firebase will not attach a password to an account that signed in days ago."
             : code || "No detail was given.",
           advice: stale
-            ? "Tap Sign in with Google just above this panel, pick your account, then set the password straight away."
+            ? "Sign out of this device, sign back in, then set the password straight away. If this account has no other way to sign in, email support."
             : "Try again. If it keeps failing, email this to support.",
         });
       } finally { idle(); }
       return render();
+    }
+    case "open-guide":
+      platform.openExternal(`${platform.guideUrl()}#moving`);
+      return;
+    case "open-tool": {
+      /* The one-time data tools are web pages, never part of the iPhone app.
+         In a browser they open as always; in the app, in Safari. */
+      const tool = { rebuild: "rebuild", tidy: "tidy", cleanup: "cleanup" }[d.tool];
+      if (!tool) return;
+      if (platform.isApp()) platform.openExternal(`${platform.webBase()}${tool}.html`);
+      else location.href = `./${tool}.html`;
+      return;
     }
     case "reset-password": {
       const address = ((view.querySelector('[name="email"]') || {}).value || authForm.email).trim();
@@ -3777,7 +3799,7 @@ view.addEventListener("click", async (e) => {
             advice: "Wait a moment and try again.",
           });
         }
-        const guide = `${location.origin}${location.pathname}quick-start.html`;
+        const guide = platform.guideUrl();
         openShare([
           `${association ? association.name : "Our golf group"} — you are invited to help run the group.`,
           "", `Join here: ${link}`, "", `How it works, in one page: ${guide}`, "",
@@ -3891,10 +3913,6 @@ view.addEventListener("click", async (e) => {
       flashMsg("Saved. Everybody in the group can search for courses now.");
       return render();
     }
-    case "google":
-      try { await db.signInWithGoogle(); flashMsg("Signed in"); }
-      catch { flashMsg("Sign-in didn't complete."); }
-      return render();
   }
 });
 
@@ -4026,7 +4044,7 @@ sheetEl.addEventListener("click", async (e) => {
         return;
       }
 
-      const guide = `${location.origin}${location.pathname}quick-start.html`;
+      const guide = platform.guideUrl();
       const text = [
         named
           ? `${named.name} — you are invited to keep your handicap with ${association ? association.name : "our golf group"}.`
@@ -4316,15 +4334,15 @@ sheetEl.addEventListener("click", async (e) => {
   if (how === "download") { downloadBackup(); return; }
 
   if (how === "whatsapp") {
-    open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank");
+    platform.openExternal(`https://wa.me/?text=${encodeURIComponent(text)}`, "tab");
     return;
   }
   if (how === "email") {
-    location.href = `mailto:?subject=${encodeURIComponent(sheetEl.dataset.title || "")}&body=${encodeURIComponent(text)}`;
+    platform.openExternal(`mailto:?subject=${encodeURIComponent(sheetEl.dataset.title || "")}&body=${encodeURIComponent(text)}`);
     return;
   }
   if (how === "sms") {
-    location.href = `sms:?&body=${encodeURIComponent(text)}`;
+    platform.openExternal(`sms:?&body=${encodeURIComponent(text)}`);
     return;
   }
 
@@ -4332,11 +4350,7 @@ sheetEl.addEventListener("click", async (e) => {
     send.disabled = true;
     const was = send.textContent;
     try {
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        await navigator.clipboard.writeText(text);
-      } else {
-        throw new Error("no clipboard");
-      }
+      await platform.copy(text);
       send.textContent = "Copied";
       setTimeout(() => { send.textContent = was; send.disabled = false; }, 1600);
     } catch {
@@ -4363,8 +4377,8 @@ sheetEl.addEventListener("click", async (e) => {
   }
 
   if (how === "native") {
-    if (!navigator.share) { flashMsg("This device has no share sheet. Use one of the other buttons."); return; }
-    try { await navigator.share({ text }); }
+    if (!platform.canShare()) { flashMsg("This device has no share sheet. Use one of the other buttons."); return; }
+    try { await platform.share({ text }); }
     catch (err) {
       /* Cancelling is not a failure and should say nothing. */
       if (err && err.name !== "AbortError") flashMsg("Sharing did not open. Try Email or WhatsApp.");
@@ -4917,8 +4931,26 @@ async function settleGroupInner(preferred) {
 
 db.onChange((s) => { sync = s; render(); });
 
+/* The steps boot() runs for an invitation that names somebody: fetch them so
+   the screen can greet them. Also used when a link arrives while the iPhone
+   app is already open (Change 2). */
+async function loadInvitedDetails() {
+  invitedGolfer = null;
+  invitedGroupName = "";
+  const link = db.readJoinLink();
+  if (link && link.golferId) {
+    invitedGolfer = await db.golferNamedInLink(link.golferId);
+    /* Usually null — a group document is not readable until you belong to it.
+       The screen falls back to a generic heading rather than looking broken. */
+    const group = await db.loadAssociation(link.associationId);
+    invitedGroupName = group ? group.name : "";
+  }
+}
+
 (async function boot() {
   render();
+  await platform.initLinks();   /* iPhone app: the link that opened it, if any */
+  platform.onLink(async () => { await loadInvitedDetails(); render(); });
   await db.init();
   markBoot("group");
 
@@ -4933,14 +4965,7 @@ db.onChange((s) => { sync = s; render(); });
   legacy = await db.readLegacyV1();
 
   /* If the link names somebody, fetch them so the screen can greet them. */
-  const link = db.readJoinLink();
-  if (link && link.golferId) {
-    invitedGolfer = await db.golferNamedInLink(link.golferId);
-    /* Usually null — a group document is not readable until you belong to it.
-       The screen falls back to a generic heading rather than looking broken. */
-    const group = await db.loadAssociation(link.associationId);
-    invitedGroupName = group ? group.name : "";
-  }
+  await loadInvitedDetails();
 
   markBoot("ready");
   ready = true;
