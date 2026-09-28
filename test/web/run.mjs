@@ -370,7 +370,7 @@ for (const [name, type] of browsers) {
     const page = await context.newPage();
     await page.goto(`${BASE}/`, { waitUntil: "load" });
     let user = null;
-    await check(`C9-${tag}`, `${name} (app): first screen uses the app wording and links to the moving guide`, async () => {
+    await check(`W5-${tag}`, `${name} (app): first screen uses the app wording and links to the moving guide`, async () => {
       user = await waitForUser(page);
       await waitForText(page, /same person on every device/);
       if (!/Used The Scorecard in Safari\? Read this first/.test(await bodyText(page))) throw new Error("no moving-guide link");
