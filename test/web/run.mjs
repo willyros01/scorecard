@@ -105,6 +105,163 @@ const APP_STUB = (launchUrl) => `
     },
   };`;
 
+/* ---------------- the test owner rehearsal (R1o, R2, R3, R4) ---------------- */
+
+const OWNER_TESTS = [
+  ["R1o", "rehearsal — the test owner stays signed in across the switch"],
+  ["R2", "rehearsal — a round queued offline on v2.21.9 uploads once after the switch"],
+  ["R3", "rehearsal — the remembered group opens straight away after the switch"],
+  ["R4", "rehearsal — after the switch: no Google button, Delete my account present"],
+];
+const PROJECT_ID = (fs.readFileSync(path.join(NEW_DIR, "firebase-config.js"), "utf8").match(/projectId:\s*"([^"]+)"/) || [])[1];
+
+async function waitForOwner(page, ms = 45000) {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    const u = await authUser(page);
+    if (u && !u.isAnonymous && String(u.email || "").toLowerCase() === OWNER_EMAIL.toLowerCase()) return u;
+    await page.waitForTimeout(500);
+  }
+  throw new Error("the test owner was not signed in within 45 s");
+}
+
+/* Rounds in a group carrying the given note, read from the server as the owner. */
+async function roundsWithNote(token, assoc, note) {
+  const res = await fetch(`https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/associations/${encodeURIComponent(assoc)}:runQuery`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ structuredQuery: {
+      from: [{ collectionId: "rounds" }],
+      where: { fieldFilter: { field: { fieldPath: "notes" }, op: "EQUAL", value: { stringValue: note } } },
+    } }),
+  });
+  if (!res.ok) throw new Error(`the round query was refused (HTTP ${res.status})`);
+  return (await res.json()).filter((row) => row.document).map((row) => row.document.name.split("/").pop());
+}
+
+async function ownerRehearsal(browser, name, tag) {
+  const label = Object.fromEntries(OWNER_TESTS);
+  const MARK = `R2 automated rehearsal ${tag} ${Date.now()} - removed by the test`;
+  let setupError = "";
+  let anon = null, ownerBefore = null, assocBefore = "", queued = null;
+
+  serve(OLD_DIR);
+  const context = await browser.newContext();
+  let page = await context.newPage();
+  try {
+    /* 1. v2.21.9: sign the test owner in from the first screen. */
+    await page.goto(`${BASE}/`, { waitUntil: "load" });
+    anon = await waitForUser(page);
+    await page.waitForSelector('[name="email"]');
+    await page.fill('[name="email"]', OWNER_EMAIL);
+    await page.fill('[name="password"]', OWNER_PASSWORD);
+    await page.click('[data-act="sign-in"]');
+    ownerBefore = await waitForOwner(page);
+    await page.waitForSelector('button[data-tab="enter"]');
+    assocBefore = await page.evaluate(() => localStorage.getItem("golf:v2:assoc") || "");
+    if (!assocBefore) throw new Error("v2.21.9 did not remember the group");
+
+    /* 2. v2.21.9: pick the owner's golfer and a course while online. */
+    await page.evaluate(async (ownerUid) => {
+      const db = await import("/store.js");
+      const once = (watch) => new Promise((resolve, reject) => {
+        let stop = null, done = false;
+        const timer = setTimeout(() => reject(new Error("the group's data did not load within 20 s")), 20000);
+        stop = watch((value) => {
+          if (done) return;
+          done = true; clearTimeout(timer); resolve(value);
+          setTimeout(() => { try { stop && stop(); } catch {} }, 0);
+        });
+      });
+      const golfers = await once((cb) => db.watchGolfers(cb));
+      const roster = await once((cb) => db.watchRoster(cb));
+      const courses = await once((cb) => db.watchCourses(cb));
+      const onRoster = golfers.filter((g) => roster.includes(g.id));
+      const golfer = onRoster.find((g) => g.linkedUid === ownerUid) || onRoster[0];
+      const course = courses.find((c) => c && Array.isArray(c.tees) && c.tees.some((t) => t && t.rating && t.slope));
+      if (!golfer) throw new Error("the Test group has no golfer on its roster");
+      if (!course) throw new Error("the Test group has no course with a rated tee");
+      window.__r2 = { golfer, course, tee: course.tees.find((t) => t && t.rating && t.slope) };
+    }, ownerBefore.uid);
+
+    /* 3. v2.21.9, offline: post the round. It must wait in the queue. */
+    await context.setOffline(true);
+    queued = await page.evaluate(async (note) => {
+      const db = await import("/store.js");
+      const { golfer, course, tee } = window.__r2;
+      const { round } = db.postRound({ golfer, course, tee, date: new Date().toISOString().slice(0, 10), gross: "99", adjusted: "", notes: note });
+      await new Promise((r) => setTimeout(r, 2000));
+      const queue = JSON.parse(localStorage.getItem("golf:v2:outbox") || "[]");
+      return { id: round.id, golferId: golfer.id, waiting: queue.some((op) => JSON.stringify(op).includes(round.id)) };
+    }, MARK);
+    if (!queued.waiting) throw new Error("the offline round was not waiting in v2.21.9's queue");
+
+    /* 4. Close v2.21.9 while still offline, swap in the ios branch, reopen online. */
+    await page.close();
+    serve(NEW_DIR);
+    await context.setOffline(false);
+    page = await context.newPage();
+    await page.goto(`${BASE}/`, { waitUntil: "load" });
+    try { await waitForText(page, /Delete my account/, 45000); }
+    catch { throw new Error("the page still ran v2.21.9 after the switch"); }
+  } catch (e) {
+    setupError = String((e && e.message) || e).split("\n")[0];
+  }
+  /* The anonymous session the first screen made is not the owner: remove it
+     (never when it became the owner's account). */
+  if (anon && anon.isAnonymous && ownerBefore && anon.uid !== ownerBefore.uid) await deleteTestAccount(anon);
+
+  const owner = !setupError;
+  await check(`R1o-${tag}`, `${name}: ${label.R1o}`, async () => {
+    if (!owner) throw new Error(setupError);
+    const after = await waitForOwner(page);
+    if (after.uid !== ownerBefore.uid) throw new Error(`before ${ownerBefore.uid}, after ${after.uid}`);
+  });
+  await check(`R3-${tag}`, `${name}: ${label.R3}`, async () => {
+    if (!owner) throw new Error(setupError);
+    await page.waitForSelector('button[data-tab="enter"]', { timeout: 30000 });
+    const assoc = await page.evaluate(() => localStorage.getItem("golf:v2:assoc") || "");
+    if (assoc !== assocBefore) throw new Error(`remembered group was ${assocBefore}, now ${assoc || "none"}`);
+    if (/Create the group/.test(await bodyText(page))) throw new Error("the first screen was shown instead of the group");
+  });
+  await check(`R2-${tag}`, `${name}: ${label.R2}`, async () => {
+    if (!owner) throw new Error(setupError);
+    const end = Date.now() + 60000;
+    for (;;) {
+      const still = await page.evaluate((id) => (localStorage.getItem("golf:v2:outbox") || "").includes(id), queued.id);
+      if (!still) break;
+      if (Date.now() > end) throw new Error("the queued round was still waiting 60 s after going online");
+      await page.waitForTimeout(1000);
+    }
+    const token = (await authUser(page)).stsTokenManager.accessToken;
+    const ids = await roundsWithNote(token, assocBefore, MARK);
+    if (ids.length !== 1 || ids[0] !== queued.id) throw new Error(`expected the one round ${queued.id}, found ${ids.length}: ${ids.join(", ")}`);
+  });
+  await check(`R4-${tag}`, `${name}: ${label.R4}`, async () => {
+    if (!owner) throw new Error(setupError);
+    const googleHere = async () => (await page.locator('[data-act="google"]').count()) > 0 || /Sign in with Google/.test(await bodyText(page));
+    if (!/Delete my account/.test(await bodyText(page))) throw new Error("no Delete my account link");
+    if (await googleHere()) throw new Error("a Google button is on the first screen");
+    const adminTab = page.locator('button[data-tab="admin"]');
+    if (await adminTab.count()) { await adminTab.first().click(); await page.waitForTimeout(1500); }
+    if (await googleHere()) throw new Error("a Google button is on the Admin tab");
+  });
+
+  /* Leave the Test group as it was: delete the test round and rebuild the
+     golfer's handicap, through the app's own code. */
+  if (queued && queued.id) {
+    await check(`R2c-${tag}`, `${name}: clean-up — the test round removed and the handicap rebuilt`, async () => {
+      if (page.isClosed()) { serve(NEW_DIR); await context.setOffline(false); page = await context.newPage(); await page.goto(`${BASE}/`, { waitUntil: "load" }); await waitForOwner(page); }
+      await page.evaluate(async (round) => { const db = await import("/store.js"); await db.deleteRoundAndRebuild(round); }, { id: queued.id, golferId: queued.golferId });
+      const token = (await authUser(page)).stsTokenManager.accessToken;
+      const left = await roundsWithNote(token, assocBefore, MARK);
+      if (left.length) throw new Error(`still there: ${left.join(", ")} — delete it in the Test group's History`);
+    });
+  }
+  serve(NEW_DIR);
+  await context.close();
+}
+
 const browsers = [["webkit", webkit], ["chromium", chromium]];
 setTimeout(() => { console.log("FAIL  WATCHDOG  the web tests took longer than 15 minutes"); server.kill(); process.exit(1); }, 15 * 60 * 1000).unref();
 for (const [name, type] of browsers) {
@@ -246,15 +403,15 @@ for (const [name, type] of browsers) {
     await context.close();
   }
 
-  /* ---- tests that need the test owner account ---- */
-  for (const [id, what] of [
-    ["R1o", "rehearsal — the test owner stays signed in across the switch"],
-    ["R2", "rehearsal — a round queued offline uploads once after the switch"],
-    ["R3", "rehearsal — the remembered group opens straight away"],
-    ["R4", "rehearsal — after the switch: no Google button, Delete my account present"],
-  ]) {
-    if (!OWNER_EMAIL || !OWNER_PASSWORD) skip(`${id}-${tag}`, `${name}: ${what}`, "TEST_OWNER_EMAIL / TEST_OWNER_PASSWORD not set yet");
-    else skip(`${id}-${tag}`, `${name}: ${what}`, "written once the test owner and Test group exist");
+  /* ---- merge rehearsal with the test owner: R1o, R2, R3, R4 (D2, D3) ----
+     The test owner signs in on v2.21.9 and a round is queued offline; the
+     page is closed, the ios branch's files are swapped in at the same address,
+     and it is opened again online. The test round is deleted at the end and
+     the golfer's handicap rebuilt, so the Test group is left as it was. */
+  if (!OWNER_EMAIL || !OWNER_PASSWORD) {
+    for (const [id, what] of OWNER_TESTS) skip(`${id}-${tag}`, `${name}: ${what}`, "TEST_OWNER_EMAIL / TEST_OWNER_PASSWORD not set yet");
+  } else {
+    await ownerRehearsal(browser, name, tag);
   }
 
   await browser.close();

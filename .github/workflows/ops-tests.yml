@@ -1,7 +1,7 @@
-name: Deletion job safety tests (SEC1-SEC5)
+name: Deletion safety tests (SEC1-SEC5, DEL1)
 
 # Runs by itself on every push to the ios branch that touches the deletion job
-# or its tests. Uses the Firebase emulators only; nothing live is touched.
+# or its tests, or the Firestore rules. Uses the Firebase emulators only; nothing live is touched.
 on:
   push:
     branches: [ios]
@@ -10,6 +10,7 @@ on:
       - .github/scripts/save-logs.sh
       - .github/workflows/ops-tests.yml
       - test/ops/**
+      - firestore.rules
 
 permissions:
   contents: write   # only to save the logs to the ci-logs branch
@@ -33,7 +34,7 @@ jobs:
           node-version: "22"
       - name: Install the Firebase emulators (exact version)
         run: npm install -g firebase-tools@15.31.0
-      - name: Run SEC1-SEC5 against the emulators
+      - name: Run SEC1-SEC5 and DEL1 against the emulators
         id: tests
         run: |
           set -o pipefail

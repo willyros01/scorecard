@@ -7,5 +7,7 @@ Please check, on your own device:
 4. Backup: Save it somewhere, then Save to Files. The file appears in iCloud Drive.
 5. Share a summary by WhatsApp, Email, Text message and Copy.
 6. There is no Google sign-in button anywhere.
+7. Offline: after opening your group once online, close the app, turn on Airplane Mode and reopen. The group, roster, rounds and handicap appear, and the status says it is showing the saved copy.
+8. Delete my account: try it only with a test account, never your own.
 
 Keep using the web app as well until everything above works. Report problems with Send a report in the app.
