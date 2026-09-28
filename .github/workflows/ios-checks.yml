@@ -30,7 +30,9 @@ jobs:
         with:
           node-version: "22"
       - name: First run only - create the lockfile and the Firebase bundle
+        id: bootstrap
         run: |
+          exec > >(tee bootstrap.log) 2>&1
           changed=no
           if [ ! -f package-lock.json ]; then npm install --no-audit --no-fund; changed=yes; fi
           if [ ! -f vendor/firebase/firebase-10.12.0.js ]; then npm ci --no-audit --no-fund; npm run -s bundle; changed=yes; fi
@@ -58,4 +60,4 @@ jobs:
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
-        run: bash .github/scripts/save-logs.sh checks "verify=${{ steps.verify.outcome }} web=${{ steps.web.outcome }}" verify.log web-tests.log
+        run: bash .github/scripts/save-logs.sh checks "bootstrap=${{ steps.bootstrap.outcome }} verify=${{ steps.verify.outcome }} web=${{ steps.web.outcome }}" bootstrap.log verify.log web-tests.log
