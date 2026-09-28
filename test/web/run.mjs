@@ -44,22 +44,31 @@ serve(NEW_DIR);
 const server = spawn("python3", ["-m", "http.server", String(PORT), "--bind", "127.0.0.1", "--directory", SITE], { stdio: "ignore" });
 await new Promise((r) => setTimeout(r, 1500));
 
-/* The signed-in Firebase user, read from where Firebase keeps it. */
+/* The signed-in Firebase user, read from where Firebase keeps it.
+   Careful: this must never create Firebase's database (an empty one would
+   break Firebase) and must always close its connection (an open one would
+   block Firebase's own upgrade and hang the page). */
 async function authUser(page) {
-  return page.evaluate(() => new Promise((resolve) => {
-    const open = indexedDB.open("firebaseLocalStorageDb");
-    open.onerror = () => resolve(null);
-    open.onsuccess = () => {
-      const db = open.result;
-      if (!db.objectStoreNames.contains("firebaseLocalStorage")) return resolve(null);
-      const all = db.transaction("firebaseLocalStorage").objectStore("firebaseLocalStorage").getAll();
-      all.onsuccess = () => {
-        const row = (all.result || []).find((r) => String(r.fbase_key || "").startsWith("firebase:authUser:"));
-        resolve(row ? row.value : null);
+  return page.evaluate(() => Promise.race([
+    new Promise((resolve) => {
+      const open = indexedDB.open("firebaseLocalStorageDb");
+      open.onupgradeneeded = () => { try { open.transaction.abort(); } catch {} };   // not created yet: leave it alone
+      open.onerror = () => resolve(null);
+      open.onblocked = () => resolve(null);
+      open.onsuccess = () => {
+        const db = open.result;
+        const done = (value) => { try { db.close(); } catch {} resolve(value); };
+        if (!db.objectStoreNames.contains("firebaseLocalStorage")) return done(null);
+        const all = db.transaction("firebaseLocalStorage").objectStore("firebaseLocalStorage").getAll();
+        all.onsuccess = () => {
+          const row = (all.result || []).find((r) => String(r.fbase_key || "").startsWith("firebase:authUser:"));
+          done(row ? row.value : null);
+        };
+        all.onerror = () => done(null);
       };
-      all.onerror = () => resolve(null);
-    };
-  }));
+    }),
+    new Promise((resolve) => setTimeout(() => resolve(null), 3000)),
+  ]));
 }
 async function waitForUser(page, ms = 30000) {
   const end = Date.now() + ms;
@@ -97,8 +106,12 @@ const APP_STUB = (launchUrl) => `
   };`;
 
 const browsers = [["webkit", webkit], ["chromium", chromium]];
+setTimeout(() => { console.log("FAIL  WATCHDOG  the web tests took longer than 15 minutes"); server.kill(); process.exit(1); }, 15 * 60 * 1000).unref();
 for (const [name, type] of browsers) {
+  console.log(`--- ${name} ---`);
   const browser = await type.launch();
+  const _newContext = browser.newContext.bind(browser);
+  browser.newContext = async (...a) => { const c = await _newContext(...a); c.setDefaultTimeout(45000); c.setDefaultNavigationTimeout(45000); return c; };
   const tag = name === "webkit" ? "WK" : "CH";
 
   /* ---- the web app as web users will get it after the merge ---- */
