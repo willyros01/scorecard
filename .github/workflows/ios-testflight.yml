@@ -1,0 +1,72 @@
+name: iPhone build to TestFlight
+
+# Starts by itself when a push to the ios branch changes the version number in
+# version.js (spec Revision 4: no tags). Pushes that don't change the version
+# build nothing. The full log is saved to the ci-logs branch, pass or fail.
+on:
+  push:
+    branches: [ios]
+    paths:
+      - version.js
+
+permissions:
+  contents: write   # only to save the logs to the ci-logs branch
+
+concurrency:
+  group: ios-testflight
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Did the version number change?
+        id: version
+        run: |
+          now="$(grep -oE 'APP_VERSION = "[^"]+"' version.js)"
+          before="$(git show "${{ github.event.before }}:version.js" 2>/dev/null | grep -oE 'APP_VERSION = "[^"]+"' || true)"
+          echo "before: ${before:-none}   now: ${now}"
+          if [ "$now" != "$before" ]; then echo "changed=yes" >> "$GITHUB_OUTPUT"; else echo "changed=no" >> "$GITHUB_OUTPUT"; echo "Version unchanged: nothing to build."; fi
+      - uses: maxim-lobanov/setup-xcode@v1
+        if: steps.version.outputs.changed == 'yes'
+        with:
+          xcode-version: latest-stable
+      - uses: actions/setup-node@v4
+        if: steps.version.outputs.changed == 'yes'
+        with:
+          node-version: "22"
+      - name: Build, audit and upload to TestFlight
+        id: build
+        if: steps.version.outputs.changed == 'yes'
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: bash build/ios-build.sh 2>&1 | tee build.log
+      - name: Remove anything secret from the logs
+        if: always() && steps.version.outputs.changed == 'yes'
+        env:
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          # The key's body must never be saved. Refuse to keep any line containing part of it.
+          body="$(printf '%s' "$ASC_KEY_P8" | grep -v -- '-----' | tr -d '\n' | cut -c1-24)"
+          for f in build.log xcodebuild.log audit-report.txt; do
+            [ -f "$f" ] || continue
+            if [ -n "$body" ] && grep -qF -- "$body" "$f"; then grep -vF -- "$body" "$f" > "$f.clean"; mv "$f.clean" "$f"; echo "Removed key text from $f"; fi
+            grep -v -- '-----BEGIN PRIVATE KEY-----' "$f" > "$f.clean" && mv "$f.clean" "$f"
+          done
+      - name: Save logs to the ci-logs branch
+        if: always() && steps.version.outputs.changed == 'yes'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/scripts/save-logs.sh testflight "${{ steps.build.outcome }}" build.log xcodebuild.log audit-report.txt

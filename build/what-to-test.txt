@@ -1,0 +1,11 @@
+The Scorecard for iPhone and iPad — first TestFlight build.
+
+Please check, on your own device:
+1. Sign in with your usual email and Scorecard password. Your group, roster, History and handicap appear exactly as in the web app.
+2. Tap an invitation link sent from the app: it should open the app on the join screen.
+3. Post a round with Airplane Mode on, close the app, reopen it, turn the network back on: the round uploads once.
+4. Backup: Save it somewhere, then Save to Files. The file appears in iCloud Drive.
+5. Share a summary by WhatsApp, Email, Text message and Copy.
+6. There is no Google sign-in button anywhere.
+
+Keep using the web app as well until everything above works. Report problems with Send a report in the app.
