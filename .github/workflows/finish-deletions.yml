@@ -1,0 +1,40 @@
+name: Finish account deletions
+
+# The daily completion job for "Delete my account" (spec: Change 7, D5).
+# Runs by itself every day, and once whenever this file or its script changes
+# on main. Nobody runs it by hand.
+on:
+  schedule:
+    - cron: "17 7 * * *"   # 07:17 UTC daily
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/finish-deletions.yml
+      - .github/scripts/finish-deletions.sh
+
+permissions:
+  contents: read
+  id-token: write   # keyless sign-in to Google (Workload Identity Federation)
+
+concurrency:
+  group: finish-deletions
+  cancel-in-progress: false
+
+jobs:
+  finish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Keyless sign-in to Google (limited to this workflow on main)
+        id: auth
+        uses: google-github-actions/auth@v3.0.0
+        with:
+          workload_identity_provider: projects/811267714235/locations/global/workloadIdentityPools/scorecard-github/providers/scorecard-provider
+          service_account: scorecard-deletions@scorecard-f41b8.iam.gserviceaccount.com
+          token_format: access_token
+      - name: Finish any interrupted deletions
+        env:
+          ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+          PROJECT: scorecard-f41b8
+        run: bash .github/scripts/finish-deletions.sh
