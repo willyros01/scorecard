@@ -17,8 +17,6 @@ import { initializeApp } from "firebase/app";
 import {
   initializeAuth,
   indexedDBLocalPersistence,
-  browserLocalPersistence,
-  browserSessionPersistence,
   onAuthStateChanged,
   signInAnonymously,
   signInWithEmailAndPassword,
@@ -61,8 +59,6 @@ export const app = { initializeApp };
 export const auth = {
   initializeAuth,
   indexedDBLocalPersistence,
-  browserLocalPersistence,
-  browserSessionPersistence,
   onAuthStateChanged,
   signInAnonymously,
   signInWithEmailAndPassword,

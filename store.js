@@ -91,10 +91,11 @@ export async function init() {
   try {
     const { app, auth, store } = await import(FIREBASE_BUNDLE);
     const instance = app.initializeApp(config.firebaseConfig);
-    /* getAuth's own defaults, minus the Google pop-up helper, so existing web
-       sign-ins carry straight over. getAuth itself can hang inside the app. */
+    /* IndexedDB is where getAuth has always kept the sign-in, so existing web
+       sign-ins carry straight over (proved by rehearsal R1). The no-remote-code
+       auth build offers IndexedDB only. getAuth itself can hang inside the app. */
     const authInstance = auth.initializeAuth(instance, {
-      persistence: [auth.indexedDBLocalPersistence, auth.browserLocalPersistence, auth.browserSessionPersistence],
+      persistence: [auth.indexedDBLocalPersistence],
     });
     /* Inside the app every document read is kept on the device across
        restarts (Part B). In a browser Firestore stays memory-only, as today. */
