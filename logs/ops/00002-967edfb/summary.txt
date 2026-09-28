@@ -1,0 +1,48 @@
+kind:    ops
+result:  success
+branch:  ios
+commit:  967edfb4992fa8600ba3bd69a15bba78d6092fdd
+run:     2 (id 36449756233)
+time:    2026-09-28T16:16:36Z
+
+--- last lines of ops-tests.log ---
+PASS  D1 A's round kept
+PASS  A's sign-in deleted
+PASS  B's sign-in untouched
+PASS  A's request removed after confirmation
+== Scenario 2 (SEC4): the owner of two groups requests deletion
+16:16:31 Deletion completion job for demo-scorecard (requests older than 0s).
+16:16:31 Requests found: 1
+16:16:31 BLOCKED Jl0c…: owns 2 group(s). Nothing deleted. The owner must delete those groups first.
+16:16:31 Summary: done 0, blocked 1, waiting for the app 0, failed 0.
+PASS  job finished (a blocked request is not a failure)
+PASS  SEC4 group G1 completely unchanged
+PASS  SEC4 group G2 completely unchanged
+PASS  SEC4 owner's sign-in NOT deleted
+PASS  SEC4 request kept and marked blocked
+== Scenario 3 (SEC5): Firebase does not confirm the sign-in is gone
+16:16:32 Deletion completion job for demo-scorecard (requests older than 0s).
+16:16:32 Requests found: 1
+16:16:33 OK wpvN…: cleaned up group G1… (3 writes).
+16:16:33 NOT CONFIRMED wpvN…: Firebase still has the account. Request kept; it will be retried.
+16:16:33 FAILED wpvN… (code 11); it will be retried next run.
+16:16:33 Summary: done 0, blocked 0, waiting for the app 0, failed 1.
+PASS  job reports a problem
+PASS  SEC5 request kept until the sign-in is confirmed gone
+PASS  SEC5 request marked not confirmed
+== Scenario 4: a request younger than one hour is left for the app
+16:16:33 Deletion completion job for demo-scorecard (requests older than 3600s).
+16:16:33 Requests found: 1
+16:16:33 Summary: done 0, blocked 0, waiting for the app 1, failed 0.
+PASS  job finished
+PASS  young request untouched
+PASS  young request: membership untouched
+PASS  young request: sign-in untouched
+
+RESULT: 29 passed, 0 failed
+[32m[1m✔ [22m[39m Script exited successfully (code 0)
+[36m[1mi  emulators:[22m[39m Shutting down emulators.
+[36m[1mi  firestore:[22m[39m Stopping Firestore Emulator
+[36m[1mi  auth:[22m[39m Stopping Authentication Emulator
+[36m[1mi  hub:[22m[39m Stopping emulator hub
+[36m[1mi  logging:[22m[39m Stopping Logging Emulator
