@@ -1,10 +1,10 @@
-name: Deletion safety tests (SEC1-SEC5, DEL1)
+name: Deletion safety tests (SEC1-SEC5, DEL1) and privacy tests (PRIV, v2)
 
 # Runs by itself on every push to the ios branch that touches the deletion job
 # or its tests, or the Firestore rules. Uses the Firebase emulators only; nothing live is touched.
 on:
   push:
-    branches: [ios]
+    branches: [ios, v2]
     paths:
       - .github/scripts/finish-deletions.sh
       - .github/scripts/save-logs.sh

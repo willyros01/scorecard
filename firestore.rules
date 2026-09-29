@@ -1,6 +1,23 @@
 rules_version = '2';
 
-/* LAST CHANGED IN APP VERSION 2.22.0
+/* LAST CHANGED FOR VERSION 2.0, PHASE A (privacy foundation) — not published yet
+ *
+ * What changes in Phase A (onboarding design Revision 2):
+ *   - rounds: readable only by an admin of the group, or by the golfer the
+ *     round belongs to. The rule that let ANY signed-in account read every
+ *     round in the database (the recursive rounds read) is removed.
+ *   - golfers: a private record. Readable by its linked account, by admins of
+ *     a group listed in its `groups`, or (single read, never a list) while it
+ *     is still unclaimed so an invitation can greet the invitee.
+ *   - directory: a new per-group list of name and handicap index only, which
+ *     every member of the group may read. This is what regular members see.
+ *   - games: readable by admins, and by members whose golfer is listed in the
+ *     game's participantGolferIds.
+ *   - golferNames: single reads only (the uniqueness check); nobody can list
+ *     every name, and only the golfer or an admin can change or remove one.
+ *   - invites: single reads by anyone signed in (as before); lists by members.
+ *
+ * Earlier history:
  *
  * This is here only so you can compare it against what is published in the
  * Firebase console if you are ever in doubt. It does NOT track the app version:
@@ -88,6 +105,40 @@ service cloud.firestore {
       return request.resource.data.editedIn is string
         && isAdmin(request.resource.data.editedIn)
         && exists(/databases/$(database)/documents/associations/$(request.resource.data.editedIn)/roster/$(golferId));
+    }
+
+    /* Admin of at least one of the groups a golfer plays in. Rules cannot loop,
+       so the golfer record carries a short list of its groups (at most 10) and
+       each entry is checked in turn. Repeated reads of one document count once
+       toward Firestore's per-request limit. */
+    function adminOfAny(groups) {
+      return groups is list && (
+           (groups.size() > 0 && isAdmin(groups[0]))
+        || (groups.size() > 1 && isAdmin(groups[1]))
+        || (groups.size() > 2 && isAdmin(groups[2]))
+        || (groups.size() > 3 && isAdmin(groups[3]))
+        || (groups.size() > 4 && isAdmin(groups[4]))
+        || (groups.size() > 5 && isAdmin(groups[5]))
+        || (groups.size() > 6 && isAdmin(groups[6]))
+        || (groups.size() > 7 && isAdmin(groups[7]))
+        || (groups.size() > 8 && isAdmin(groups[8]))
+        || (groups.size() > 9 && isAdmin(groups[9])));
+    }
+
+    function golferDoc(golferId) {
+      return get(/databases/$(database)/documents/golfers/$(golferId)).data;
+    }
+
+    /* An admin of a group this golfer plays in (looked up on the golfer). */
+    function adminOfGolfer(golferId) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/golfers/$(golferId))
+        && adminOfAny(golferDoc(golferId).get('groups', []));
+    }
+
+    /* The golfer on this account's membership in a group. */
+    function myGolferIn(assocId) {
+      return get(memberPath(assocId)).data.get('golferId', '');
     }
 
     /* The edit window runs from entry time, not the date played, and is
@@ -181,7 +232,8 @@ service cloud.firestore {
        * Readable by anyone signed in, because somebody holding a link must be
        * able to discover it is already taken before they try. */
       match /invites/{golferId} {
-        allow read: if signedIn();
+        allow get: if signedIn();
+        allow list: if isMember(assocId);
 
         /* Create only if nobody has claimed it, and only for yourself. */
         allow create: if signedIn()
@@ -212,7 +264,11 @@ service cloud.firestore {
       /* ---------------- rounds ---------------- */
 
       match /rounds/{roundId} {
-        allow read: if isMember(assocId);
+        /* Phase A: an admin sees the group's rounds; everybody else only their
+           own golfer's. A regular member's app must query where golferId is
+           their own golfer, or the whole query is refused. */
+        allow read: if isAdmin(assocId)
+          || (isMember(assocId) && myGolfer(resource.data.golferId));
         /* The owner may clear these out when deleting the whole group. */
         allow delete: if signedIn() && association(assocId).ownerUid == request.auth.uid;
 
@@ -245,10 +301,32 @@ service cloud.firestore {
           || (isMember(assocId) && withinEditWindow() && myGolfer(resource.data.golferId));
       }
 
+      /* ---------------- directory: name and index only ---------------- */
+
+      /* What a regular member may see of the other golfers in the group:
+         display name and handicap index, and nothing else. Firestore cannot
+         hide fields of a document, so private golfer data never goes here. */
+      match /directory/{golferId} {
+        allow read: if isMember(assocId);
+        allow create, update: if isAdmin(assocId)
+          || (isMember(assocId)
+              && myGolfer(golferId)
+              && request.resource.data.keys().hasOnly(['golferId', 'displayName', 'handicapIndex', 'updatedAt'])
+              && request.resource.data.golferId == golferId);
+        allow delete: if isAdmin(assocId)
+          || (signedIn() && association(assocId).ownerUid == request.auth.uid);
+      }
+
       /* ---------------- games ---------------- */
 
       match /games/{gameId} {
-        allow read: if isMember(assocId);
+        /* Phase A: admins, the game's creator, and members who played in it.
+           The shared result sheet lives on the game document itself
+           (published by an admin), so reading it never opens anybody's rounds. */
+        allow read: if isAdmin(assocId)
+          || (isMember(assocId) && (
+               resource.data.get('createdBy', '') == request.auth.uid
+               || myGolferIn(assocId) in resource.data.get('participantGolferIds', [])));
         allow create: if isMember(assocId)
           && request.resource.data.createdBy == request.auth.uid;
         allow update, delete: if isAdmin(assocId)
@@ -275,7 +353,15 @@ service cloud.firestore {
       /* Readable by anyone signed in. A golfer is shared across groups, and an
          invitation must show somebody their own name before they belong to
          anything. */
-      allow read: if signedIn();
+      /* Phase A: a private record. Its own account; admins of a group it plays
+         in; or a single read of a golfer nobody has claimed yet, so that an
+         invitation can greet the invitee by name (the id is random and known
+         only to whoever holds the invitation). Never listed by anybody. */
+      allow get: if signedIn() && (
+        resource.data.get('linkedUid', null) == request.auth.uid
+        || resource.data.get('linkedUid', null) == null
+        || adminOfAny(resource.data.get('groups', [])));
+      allow list: if false;
 
       /* Creating is an everyday act — adding a person to a roster. The name
          index below stops duplicates. */
@@ -317,8 +403,15 @@ service cloud.firestore {
        Firestore refuses a second document with the same id, which is what
        makes the guarantee real rather than a check the app could skip. */
     match /golferNames/{nameKey} {
-      allow read: if signedIn();
-      allow create, update, delete: if signedIn();
+      /* Phase A: single reads only (the uniqueness check); nobody can list
+         every name in the database. Creating a claim is open to a signed-in
+         account (adding or joining as a golfer); changing or removing one is
+         for that golfer's own account or an admin of a group it plays in. */
+      allow get: if signedIn();
+      allow list: if false;
+      allow create: if signedIn() && request.resource.data.golferId is string;
+      allow update, delete: if signedIn() && (
+        myGolfer(resource.data.golferId) || adminOfGolfer(resource.data.golferId));
     }
 
     /* ---------------- finding rounds wherever they are ---------------- */
@@ -348,9 +441,9 @@ service cloud.firestore {
       allow read: if signedIn() && memberUid == request.auth.uid;
     }
 
-    match /{path=**}/rounds/{roundId} {
-      allow read: if signedIn();
-    }
+    /* Phase A: the recursive rounds read that let ANY signed-in account read
+       every round in the database is removed. Rebuild the roster now reads
+       only the groups its admin manages. */
 
     /* ---------------- which groups an account belongs to ---------------- */
 

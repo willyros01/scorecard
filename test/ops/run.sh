@@ -7,4 +7,4 @@ cd "$(dirname "$0")"
 # The emulator only reads files inside this folder, so use a fresh copy of the rules.
 cp ../../firestore.rules firestore.rules.copy
 firebase emulators:exec --only firestore,auth --project demo-scorecard \
-  's=0; bash sec-tests.sh || s=1; echo; bash del1-tests.sh || s=1; exit $s'
+  's=0; bash sec-tests.sh || s=1; echo; bash del1-tests.sh || s=1; echo; if [ -f privacy-tests.sh ]; then bash privacy-tests.sh || s=1; fi; exit $s'
