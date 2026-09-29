@@ -32,7 +32,12 @@ for f in "$@"; do [[ -f "${f}" ]] && cp "${f}" "${DEST}/"; done
 } > "${DEST}/summary.txt"
 
 # Keep only the newest 30 runs of this kind.
-ls -1d "${TMP}/logs/${KIND}"/*/ 2>/dev/null | sort | head -n -30 | xargs -r rm -rf
+# (portable: this also runs on GitHub's Mac, where head -n -N and xargs -r don't exist)
+old_dirs="$(ls -1d "${TMP}/logs/${KIND}"/*/ 2>/dev/null | sort || true)"
+count="$(printf '%s\n' "${old_dirs}" | grep -c . || true)"
+if [ "${count}" -gt 30 ]; then
+  printf '%s\n' "${old_dirs}" | awk -v n="$((count - 30))" 'NR<=n' | while IFS= read -r d; do rm -rf "${d}"; done
+fi
 
 cd "${TMP}"
 git add -A

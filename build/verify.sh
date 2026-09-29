@@ -9,7 +9,7 @@ fail(){ echo "FAIL  $*"; exit 1; }
 
 # V1 — the lockfile must match package.json exactly.
 [[ -f package-lock.json ]] || fail "V1 package-lock.json is missing"
-npm ci --no-audit --no-fund >/dev/null 2>&1 || fail "V1 npm ci refused: package-lock.json and package.json disagree"
+npm ci --no-audit --no-fund > "${TMPDIR:-/tmp}/npm-ci.log" 2>&1 || { tail -n 40 "${TMPDIR:-/tmp}/npm-ci.log"; fail "V1 npm ci refused (the npm output above says why)"; }
 ok "V1 npm ci succeeded from the committed lockfile"
 
 # V2 — installed versions equal the approved list, and nothing is a range.
