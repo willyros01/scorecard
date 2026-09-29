@@ -74,6 +74,21 @@ async function notes() {
   if (ben) await api("PATCH", `/v1/betaBuildLocalizations/${ben.id}`, { data: { type: "betaBuildLocalizations", id: ben.id, attributes: { whatsNew } } });
   else await api("POST", "/v1/betaBuildLocalizations", { data: { type: "betaBuildLocalizations", attributes: { locale: "en-US", whatsNew }, relationships: { build: { data: { type: "builds", id: build.id } } } } });
   console.log(`"What to Test" filled for build ${BUILD}.`);
+
+  /* Make sure the build reaches the testers, whatever the group settings. */
+  if (build.attributes.usesNonExemptEncryption == null) {
+    await api("PATCH", `/v1/builds/${build.id}`, { data: { type: "builds", id: build.id, attributes: { usesNonExemptEncryption: false } } });
+    console.log("Export compliance answered: no non-exempt encryption.");
+  } else console.log(`Export compliance already set (usesNonExemptEncryption: ${build.attributes.usesNonExemptEncryption}).`);
+  const groups = await api("GET", `/v1/apps/${app.id}/betaGroups?limit=50`);
+  const internal = (groups.data || []).filter((g) => g.attributes.isInternalGroup);
+  if (!internal.length) console.log("::warning title=No internal group::No internal TestFlight group exists, so no tester receives the build.");
+  for (const g of internal) {
+    try {
+      await api("POST", `/v1/betaGroups/${g.id}/relationships/builds`, { data: [{ type: "builds", id: build.id }] });
+      console.log(`Build ${BUILD} added to internal group "${g.attributes.name}".`);
+    } catch (e) { console.log(`Group "${g.attributes.name}": ${e.message} (automatic distribution may already have added it).`); }
+  }
 }
 
 /* Read-only: reports every item, changes nothing. Exit 0 only if the key,
