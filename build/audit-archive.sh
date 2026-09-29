@@ -88,7 +88,8 @@ extra="$(grep -vE "$allowed" <<<"$keys" || true)"
 [[ -z "$extra" ]] && ok "A5 no unexpected entitlements" || bad "A5 unexpected entitlements: $(echo $extra)"
 gta="$(plutil -extract get-task-allow raw -o - "$WORK/entitlements.plist" 2>/dev/null || echo false)"
 [[ "$gta" == "false" ]] && ok "A5 get-task-allow is false" || bad "A5 get-task-allow is $gta"
-domains="$(plutil -extract com.apple.developer.associated-domains json -o - "$WORK/entitlements.plist" 2>/dev/null || echo none)"
+# (plutil -extract treats the dots in this key as a path, so read it with Python)
+domains="$(python3 -c 'import json,plistlib,sys; print(json.dumps(plistlib.load(open(sys.argv[1],"rb")).get("com.apple.developer.associated-domains"), separators=(",",":")))' "$WORK/entitlements.plist" 2>/dev/null || echo none)"
 [[ "$domains" == '["applinks:www.cuberoot-systems.com"]' ]] && ok "A5 associated domains: applinks:www.cuberoot-systems.com only" \
   || bad "A5 associated domains are $domains"
 
