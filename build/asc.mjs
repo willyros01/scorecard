@@ -93,7 +93,7 @@ async function check() {
     ok(`bundle ID ${BUNDLE_ID} is registered as "${bid.attributes.name}" (platform ${bid.attributes.platform})`);
     const team = process.env.APPLE_TEAM_ID || "";
     if (bid.attributes.seedId && team) (bid.attributes.seedId === team ? ok : no)(`bundle ID belongs to team ${bid.attributes.seedId}; APPLE_TEAM_ID is ${team}`);
-    const caps = await api("GET", `/v1/bundleIds/${bid.id}/bundleIdCapabilities?limit=50`);
+    const caps = await api("GET", `/v1/bundleIds/${bid.id}/bundleIdCapabilities`);
     const types = (caps.data || []).map((c) => c.attributes.capabilityType);
     note(`capabilities on: ${types.join(", ") || "none"}`);
     types.includes("ASSOCIATED_DOMAINS") ? ok("Associated Domains is on") : no("Associated Domains is NOT on");
