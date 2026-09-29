@@ -1,0 +1,18 @@
+kind:    apple
+result:  failure
+branch:  ios
+commit:  7a1b705db437dab9b36818cf1c8f3f3241b7ebc7
+run:     1 (id 36602970240)
+time:    2026-09-29T17:09:51Z
+
+--- last lines of apple-check.log ---
+OK    secret ASC_KEY_ID is set
+OK    secret ASC_ISSUER_ID is set
+OK    secret ASC_KEY_P8 is set
+OK    secret APPLE_TEAM_ID is set
+OK    APPLE_TEAM_ID is VXMLKHF72B
+OK    ASC_KEY_P8 looks like a .p8 key (BEGIN line present)
+OK    Apple accepts the key (ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_P8)
+OK    bundle ID io.github.willyros01.scorecard is registered as "The Scorecard" (platform UNIVERSAL)
+OK    bundle ID belongs to team VXMLKHF72B; APPLE_TEAM_ID is VXMLKHF72B
+App Store Connect: GET /v1/bundleIds/ZLMGX2Z76P/bundleIdCapabilities — PARAMETER_ERROR.ILLEGAL: The parameter 'limit' can not be used with this request : This relationship does not support this parameter.
