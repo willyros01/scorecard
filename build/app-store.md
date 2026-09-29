@@ -10,7 +10,7 @@ check before submission.
 | Field | Value |
 |---|---|
 | Platform | iOS (iPhone and iPad) |
-| Name | The Scorecard |
+| Name | The Scorecard: Golf Handicaps (created Sep 29; "The Scorecard" was taken). The home-screen name stays "The Scorecard" |
 | Primary language | English (U.S.) |
 | Bundle ID | io.github.willyros01.scorecard |
 | SKU | scorecard-ios |
