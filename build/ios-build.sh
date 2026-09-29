@@ -97,7 +97,7 @@ AUTH=(-allowProvisioningUpdates
 echo "--- Check the Apple key is accepted"
 KEY="$KEY" node build/asc.mjs preflight
 
-echo "--- 5. Set the version, 6. archive and sign"
+echo "--- 5. Set the version, 6. archive (signed for distribution at export, as Fairpot does: no devices needed)"
 xcodebuild archive \
   -project ios/App/App.xcodeproj \
   -scheme App \
@@ -107,6 +107,8 @@ xcodebuild archive \
   "${AUTH[@]}" \
   DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
   CODE_SIGN_STYLE=Automatic \
+  CODE_SIGN_IDENTITY="-" \
+  AD_HOC_CODE_SIGNING_ALLOWED=YES \
   MARKETING_VERSION="$VERSION" \
   CURRENT_PROJECT_VERSION="$BUILD" \
   > "$TMP/xcodebuild.log" 2>&1 || { tail -n 80 "$TMP/xcodebuild.log"; echo "RESULT: failed at archive and sign"; exit 1; }
