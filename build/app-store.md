@@ -24,7 +24,7 @@ If Apple says the name is taken, fallback names (all ≤ 30 characters): **The S
 |---|---|
 | Subtitle (≤ 30) | Golf handicaps for your group (29) |
 | Category | Primary: Sports. Secondary: none |
-| Content rights | Yes, the app shows third-party content: course and tee data looked up from golfcourseapi.com. **CONFIRM** your GolfCourseAPI plan allows use in an app. |
+| Content rights | Yes, the app shows third-party content: course and tee data looked up from golfcourseapi.com. Each group owner supplies their own licensed key. Question to GolfCourseAPI sent Sep 28; answer "Yes, I have the necessary rights" unless their reply says otherwise. |
 | Age rating | Answer **None / No** to every question (no violence, gambling, contests, mature themes, medical, unrestricted web access, user-generated content shown to strangers). Expected result: 4+. |
 | Price | Free (confirmed by Willy, Sep 28; to be revisited if Firestore costs start) |
 | Privacy Policy URL | https://www.cuberoot-systems.com/scorecard/privacy/ |
@@ -128,7 +128,7 @@ to the demo group as admin.
 >
 > Contact: Wilfredo Rosales, willyros01@gmail.com
 
-**Contact information:** Wilfredo Rosales · willyros01@gmail.com · phone **CONFIRM** (Apple requires one).
+**Contact information:** Wilfredo Rosales · willyros01@gmail.com · phone: given by Willy on Sep 28 — typed only into App Store Connect, never stored in this public repo.
 
 ## 5a. Unlisted distribution (decided by Willy, Sep 28)
 
@@ -149,4 +149,4 @@ ask the encryption questions for these builds.
 2. Demo group "Demo Golf Society" with a separate owner test account and the reviewer admin account (Phase 4).
 3. P1 traffic survey, then final privacy answers (section 4).
 4. Screenshots from the TestFlight build.
-5. The two CONFIRM items: GolfCourseAPI content rights, review contact phone.
+5. GolfCourseAPI's reply to the Sep 28 question (content rights).
