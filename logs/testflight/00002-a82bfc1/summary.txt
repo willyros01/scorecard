@@ -1,0 +1,90 @@
+kind:    testflight
+result:  failure
+branch:  ios
+commit:  a82bfc1a81f2bd55625d2c329a33a15c6e777f70
+run:     2 (id 36612448159)
+time:    2026-09-29T18:30:56Z
+
+--- last lines of build.log ---
+    Target 'SharePlugin' in project 'CapacitorShare'
+        ➜ Explicit dependency on target 'Capacitor' in project 'capacitor-swift-pm'
+        ➜ Explicit dependency on target 'Cordova' in project 'capacitor-swift-pm'
+    Target 'CapacitorApp' in project 'CapacitorApp'
+        ➜ Explicit dependency on target 'AppPlugin' in project 'CapacitorApp'
+        ➜ Explicit dependency on target 'Capacitor' in project 'capacitor-swift-pm'
+        ➜ Explicit dependency on target 'Cordova' in project 'capacitor-swift-pm'
+    Target 'AppPlugin' in project 'CapacitorApp'
+        ➜ Explicit dependency on target 'Capacitor' in project 'capacitor-swift-pm'
+        ➜ Explicit dependency on target 'Cordova' in project 'capacitor-swift-pm'
+    Target 'Cordova' in project 'capacitor-swift-pm' (no dependencies)
+    Target 'Capacitor' in project 'capacitor-swift-pm' (no dependencies)
+
+GatherProvisioningInputs
+
+CreateBuildDescription
+
+ExecuteExternalTool /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc --version
+
+ExecuteExternalTool /Applications/Xcode_26.6.app/Contents/Developer/usr/bin/actool --print-asset-tag-combinations --output-format xml1 /Users/runner/work/scorecard/scorecard/ios/App/App/Assets.xcassets
+
+ExecuteExternalTool /Applications/Xcode_26.6.app/Contents/Developer/usr/bin/ibtool --version --output-format xml1
+
+ExecuteExternalTool /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -v -E -dM -isysroot /Applications/Xcode_26.6.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.5.sdk -x c -c /dev/null
+
+ExecuteExternalTool /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/ld -version_details
+
+ExecuteExternalTool /Applications/Xcode_26.6.app/Contents/Developer/usr/bin/actool --version --output-format xml1
+
+Build description signature: 3226b49e0dfef3c2649d82b2b5505b9c
+Build description path: /Users/runner/Library/Developer/Xcode/DerivedData/App-foiydrissoivwcgqlipyfvsodhew/Build/Intermediates.noindex/ArchiveIntermediates/App/IntermediateBuildFilesPath/XCBuildData/3226b49e0dfef3c2649d82b2b5505b9c.xcbuilddata
+/Users/runner/work/scorecard/scorecard/ios/App/App.xcodeproj: error: Communication with Apple failed: Your team has no devices from which to generate a provisioning profile. Connect a device to use or manually add device IDs in Certificates, Identifiers & Profiles. https://developer.apple.com/account/ (in target 'App' from project 'App')
+/Users/runner/work/scorecard/scorecard/ios/App/App.xcodeproj: error: No profiles for 'io.github.willyros01.scorecard' were found: Xcode couldn't find any iOS App Development provisioning profiles matching 'io.github.willyros01.scorecard'. (in target 'App' from project 'App')
+** ARCHIVE FAILED **
+
+
+The following build commands failed:
+	Archiving project App with scheme App
+(1 failure)
+RESULT: failed at archive and sign
+
+--- last lines of xcodebuild.log ---
+        ➜ Explicit dependency on target 'Cordova' in project 'capacitor-swift-pm'
+    Target 'SharePlugin' in project 'CapacitorShare'
+        ➜ Explicit dependency on target 'Capacitor' in project 'capacitor-swift-pm'
+        ➜ Explicit dependency on target 'Cordova' in project 'capacitor-swift-pm'
+    Target 'CapacitorApp' in project 'CapacitorApp'
+        ➜ Explicit dependency on target 'AppPlugin' in project 'CapacitorApp'
+        ➜ Explicit dependency on target 'Capacitor' in project 'capacitor-swift-pm'
+        ➜ Explicit dependency on target 'Cordova' in project 'capacitor-swift-pm'
+    Target 'AppPlugin' in project 'CapacitorApp'
+        ➜ Explicit dependency on target 'Capacitor' in project 'capacitor-swift-pm'
+        ➜ Explicit dependency on target 'Cordova' in project 'capacitor-swift-pm'
+    Target 'Cordova' in project 'capacitor-swift-pm' (no dependencies)
+    Target 'Capacitor' in project 'capacitor-swift-pm' (no dependencies)
+
+GatherProvisioningInputs
+
+CreateBuildDescription
+
+ExecuteExternalTool /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc --version
+
+ExecuteExternalTool /Applications/Xcode_26.6.app/Contents/Developer/usr/bin/actool --print-asset-tag-combinations --output-format xml1 /Users/runner/work/scorecard/scorecard/ios/App/App/Assets.xcassets
+
+ExecuteExternalTool /Applications/Xcode_26.6.app/Contents/Developer/usr/bin/ibtool --version --output-format xml1
+
+ExecuteExternalTool /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -v -E -dM -isysroot /Applications/Xcode_26.6.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.5.sdk -x c -c /dev/null
+
+ExecuteExternalTool /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/ld -version_details
+
+ExecuteExternalTool /Applications/Xcode_26.6.app/Contents/Developer/usr/bin/actool --version --output-format xml1
+
+Build description signature: 3226b49e0dfef3c2649d82b2b5505b9c
+Build description path: /Users/runner/Library/Developer/Xcode/DerivedData/App-foiydrissoivwcgqlipyfvsodhew/Build/Intermediates.noindex/ArchiveIntermediates/App/IntermediateBuildFilesPath/XCBuildData/3226b49e0dfef3c2649d82b2b5505b9c.xcbuilddata
+/Users/runner/work/scorecard/scorecard/ios/App/App.xcodeproj: error: Communication with Apple failed: Your team has no devices from which to generate a provisioning profile. Connect a device to use or manually add device IDs in Certificates, Identifiers & Profiles. https://developer.apple.com/account/ (in target 'App' from project 'App')
+/Users/runner/work/scorecard/scorecard/ios/App/App.xcodeproj: error: No profiles for 'io.github.willyros01.scorecard' were found: Xcode couldn't find any iOS App Development provisioning profiles matching 'io.github.willyros01.scorecard'. (in target 'App' from project 'App')
+** ARCHIVE FAILED **
+
+
+The following build commands failed:
+	Archiving project App with scheme App
+(1 failure)

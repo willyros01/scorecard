@@ -1,0 +1,150 @@
+Building The Scorecard 2.22.0-ios.2 as version 2.22.0, build 2
+--- 1. npm ci and 2. build checks V1-V6
+OK    V1 npm ci succeeded from the committed lockfile
+OK    V2 every package is exactly the approved version
+
+  vendor/firebase/firebase-10.12.0.js  375.2kb
+
+⚡ Done in 73ms
+OK    V3 the committed bundle is identical to a fresh build
+OK    V4 no remote code in the 14 packaged files
+OK    V5 Capacitor core, cli and ios are 8.5.2
+OK    V6 no location.origin; the bundle exports everything store.js uses
+verify.sh: all checks passed
+--- 3. Collect the web files into www/
+www/app.js
+www/courses-api.js
+www/firebase-config.js
+www/icon.svg
+www/index.html
+www/migrate.js
+www/model.js
+www/outbox.js
+www/platform.js
+www/quick-start.html
+www/store.js
+www/styles.css
+www/vendor/firebase/firebase-10.12.0.js
+www/version.js
+--- 4. Capacitor: generate the iOS project (fresh every build) and sync
+✔ Adding native Xcode project in ios in 21.75ms
+✔ add in 22.33ms
+✔ Copying web assets from www to ios/App/App/public in 9.83ms
+✔ Creating capacitor.config.json in ios/App/App in 608.75μs
+✔ copy ios in 33.13ms
+✔ Updating iOS plugins in 996.50μs
+[info] All Capacitor plugins have a Package.swift file and will be included in Package.swift
+[info] Writing Package.swift
+[info] Found 5 Capacitor plugins for ios:
+       @capacitor/app@8.1.1
+       @capacitor/share@8.0.2
+       @capacitor/filesystem@8.1.3
+       @capacitor/clipboard@8.0.1
+       @capacitor/app-launcher@8.0.1
+✔ update ios in 17.31ms
+[success] ios platform added!
+Follow the Developer Workflow guide to get building:
+https://capacitorjs.com/docs/basics/workflow
+✔ Copying web assets from www to ios/App/App/public in 7.21ms
+✔ Creating capacitor.config.json in ios/App/App in 503.25μs
+✔ copy ios in 19.13ms
+✔ Updating iOS plugins in 1.26ms
+[info] All Capacitor plugins have a Package.swift file and will be included in Package.swift
+[info] Writing Package.swift
+[info] Found 5 Capacitor plugins for ios:
+       @capacitor/app@8.1.1
+       @capacitor/share@8.0.2
+       @capacitor/filesystem@8.1.3
+       @capacitor/clipboard@8.0.1
+       @capacitor/app-launcher@8.0.1
+✔ update ios in 15.96ms
+[info] Sync finished in 0.05s
+--- Project settings: privacy manifest, entitlements, Info.plist
+Xcode project: privacy manifest added as a resource; entitlements set.
+--- App icon and launch image
+--- App Store Connect key
+--- Check the Apple key is accepted
+Apple API preflight passed: the key is accepted.
+App record found: The Scorecard: Golf Handicaps (io.github.willyros01.scorecard).
+--- 5. Set the version, 6. archive and sign
+        ➜ Explicit dependency on target 'CapacitorFilesystem' in project 'CapacitorFilesystem'
+        ➜ Explicit dependency on target 'CapacitorClipboard' in project 'CapacitorClipboard'
+        ➜ Explicit dependency on target 'CapacitorAppLauncher' in project 'CapacitorAppLauncher'
+    Target 'CapApp-SPM' in project 'CapApp-SPM'
+        ➜ Explicit dependency on target 'Capacitor' in project 'capacitor-swift-pm'
+        ➜ Explicit dependency on target 'Cordova' in project 'capacitor-swift-pm'
+        ➜ Explicit dependency on target 'CapacitorApp' in project 'CapacitorApp'
+        ➜ Explicit dependency on target 'CapacitorShare' in project 'CapacitorShare'
+        ➜ Explicit dependency on target 'CapacitorFilesystem' in project 'CapacitorFilesystem'
+        ➜ Explicit dependency on target 'CapacitorClipboard' in project 'CapacitorClipboard'
+        ➜ Explicit dependency on target 'CapacitorAppLauncher' in project 'CapacitorAppLauncher'
+    Target 'CapacitorAppLauncher' in project 'CapacitorAppLauncher'
+        ➜ Explicit dependency on target 'AppLauncherPlugin' in project 'CapacitorAppLauncher'
+        ➜ Explicit dependency on target 'Capacitor' in project 'capacitor-swift-pm'
+        ➜ Explicit dependency on target 'Cordova' in project 'capacitor-swift-pm'
+    Target 'AppLauncherPlugin' in project 'CapacitorAppLauncher'
+        ➜ Explicit dependency on target 'Capacitor' in project 'capacitor-swift-pm'
+        ➜ Explicit dependency on target 'Cordova' in project 'capacitor-swift-pm'
+    Target 'CapacitorClipboard' in project 'CapacitorClipboard'
+        ➜ Explicit dependency on target 'ClipboardPlugin' in project 'CapacitorClipboard'
+        ➜ Explicit dependency on target 'Capacitor' in project 'capacitor-swift-pm'
+        ➜ Explicit dependency on target 'Cordova' in project 'capacitor-swift-pm'
+    Target 'ClipboardPlugin' in project 'CapacitorClipboard'
+        ➜ Explicit dependency on target 'Capacitor' in project 'capacitor-swift-pm'
+        ➜ Explicit dependency on target 'Cordova' in project 'capacitor-swift-pm'
+    Target 'CapacitorFilesystem' in project 'CapacitorFilesystem'
+        ➜ Explicit dependency on target 'FilesystemPlugin' in project 'CapacitorFilesystem'
+        ➜ Explicit dependency on target 'Capacitor' in project 'capacitor-swift-pm'
+        ➜ Explicit dependency on target 'Cordova' in project 'capacitor-swift-pm'
+        ➜ Explicit dependency on target 'IONFilesystemLib' in project 'IONFilesystemLib'
+    Target 'FilesystemPlugin' in project 'CapacitorFilesystem'
+        ➜ Explicit dependency on target 'Capacitor' in project 'capacitor-swift-pm'
+        ➜ Explicit dependency on target 'Cordova' in project 'capacitor-swift-pm'
+        ➜ Explicit dependency on target 'IONFilesystemLib' in project 'IONFilesystemLib'
+    Target 'IONFilesystemLib' in project 'IONFilesystemLib'
+        ➜ Explicit dependency on target 'IONFilesystemLib' in project 'IONFilesystemLib'
+    Target 'IONFilesystemLib' in project 'IONFilesystemLib' (no dependencies)
+    Target 'CapacitorShare' in project 'CapacitorShare'
+        ➜ Explicit dependency on target 'SharePlugin' in project 'CapacitorShare'
+        ➜ Explicit dependency on target 'Capacitor' in project 'capacitor-swift-pm'
+        ➜ Explicit dependency on target 'Cordova' in project 'capacitor-swift-pm'
+    Target 'SharePlugin' in project 'CapacitorShare'
+        ➜ Explicit dependency on target 'Capacitor' in project 'capacitor-swift-pm'
+        ➜ Explicit dependency on target 'Cordova' in project 'capacitor-swift-pm'
+    Target 'CapacitorApp' in project 'CapacitorApp'
+        ➜ Explicit dependency on target 'AppPlugin' in project 'CapacitorApp'
+        ➜ Explicit dependency on target 'Capacitor' in project 'capacitor-swift-pm'
+        ➜ Explicit dependency on target 'Cordova' in project 'capacitor-swift-pm'
+    Target 'AppPlugin' in project 'CapacitorApp'
+        ➜ Explicit dependency on target 'Capacitor' in project 'capacitor-swift-pm'
+        ➜ Explicit dependency on target 'Cordova' in project 'capacitor-swift-pm'
+    Target 'Cordova' in project 'capacitor-swift-pm' (no dependencies)
+    Target 'Capacitor' in project 'capacitor-swift-pm' (no dependencies)
+
+GatherProvisioningInputs
+
+CreateBuildDescription
+
+ExecuteExternalTool /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc --version
+
+ExecuteExternalTool /Applications/Xcode_26.6.app/Contents/Developer/usr/bin/actool --print-asset-tag-combinations --output-format xml1 /Users/runner/work/scorecard/scorecard/ios/App/App/Assets.xcassets
+
+ExecuteExternalTool /Applications/Xcode_26.6.app/Contents/Developer/usr/bin/ibtool --version --output-format xml1
+
+ExecuteExternalTool /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -v -E -dM -isysroot /Applications/Xcode_26.6.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.5.sdk -x c -c /dev/null
+
+ExecuteExternalTool /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/ld -version_details
+
+ExecuteExternalTool /Applications/Xcode_26.6.app/Contents/Developer/usr/bin/actool --version --output-format xml1
+
+Build description signature: 3226b49e0dfef3c2649d82b2b5505b9c
+Build description path: /Users/runner/Library/Developer/Xcode/DerivedData/App-foiydrissoivwcgqlipyfvsodhew/Build/Intermediates.noindex/ArchiveIntermediates/App/IntermediateBuildFilesPath/XCBuildData/3226b49e0dfef3c2649d82b2b5505b9c.xcbuilddata
+/Users/runner/work/scorecard/scorecard/ios/App/App.xcodeproj: error: Communication with Apple failed: Your team has no devices from which to generate a provisioning profile. Connect a device to use or manually add device IDs in Certificates, Identifiers & Profiles. https://developer.apple.com/account/ (in target 'App' from project 'App')
+/Users/runner/work/scorecard/scorecard/ios/App/App.xcodeproj: error: No profiles for 'io.github.willyros01.scorecard' were found: Xcode couldn't find any iOS App Development provisioning profiles matching 'io.github.willyros01.scorecard'. (in target 'App' from project 'App')
+** ARCHIVE FAILED **
+
+
+The following build commands failed:
+	Archiving project App with scheme App
+(1 failure)
+RESULT: failed at archive and sign
