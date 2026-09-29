@@ -1,0 +1,51 @@
+name: Apple setup check (read-only)
+
+# Starts by itself when build/apple-check.txt changes on the ios branch.
+# Reads only: confirms the four Apple secrets are set, Apple accepts the key,
+# the bundle ID is registered with Associated Domains, and whether the App
+# Store Connect app record exists. Builds nothing, changes nothing at Apple.
+on:
+  push:
+    branches: [ios]
+    paths:
+      - build/apple-check.txt
+      - .github/workflows/apple-check.yml
+
+permissions:
+  contents: write   # only to save the log to the ci-logs branch
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Check the Apple setup
+        id: check
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -o pipefail
+          {
+            missing=0
+            for v in ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_P8 APPLE_TEAM_ID; do
+              if [ -n "${!v}" ]; then echo "OK    secret $v is set"; else echo "FAIL  secret $v is NOT set"; missing=1; fi
+            done
+            [ "$APPLE_TEAM_ID" = "VXMLKHF72B" ] && echo "OK    APPLE_TEAM_ID is VXMLKHF72B" || { echo "FAIL  APPLE_TEAM_ID is not VXMLKHF72B"; missing=1; }
+            printf '%s' "$ASC_KEY_P8" | grep -q -- '-----BEGIN PRIVATE KEY-----' && echo "OK    ASC_KEY_P8 looks like a .p8 key (BEGIN line present)" || { echo "FAIL  ASC_KEY_P8 has no BEGIN PRIVATE KEY line"; missing=1; }
+            [ "$missing" = 0 ] || { echo "RESULT: secrets incomplete"; exit 1; }
+            mkdir -p "$RUNNER_TEMP/k"; printf '%s\n' "$ASC_KEY_P8" > "$RUNNER_TEMP/k/key.p8"
+            KEY="$RUNNER_TEMP/k/key.p8" node build/asc.mjs check
+            status=$?; rm -rf "$RUNNER_TEMP/k"; exit $status
+          } 2>&1 | tee apple-check.log
+      - name: Save the log to the ci-logs branch
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/scripts/save-logs.sh apple "${{ steps.check.outcome }}" apple-check.log

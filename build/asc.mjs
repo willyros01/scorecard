@@ -1,5 +1,7 @@
 /* App Store Connect API helper for the build (Node, no packages).
  *   node build/asc.mjs preflight   — check the Apple key is accepted
+ *   node build/asc.mjs check       — read-only Apple setup check: key, bundle ID,
+ *                                    Associated Domains, team, app record
  *   node build/asc.mjs notes       — once Apple has processed the build, fill
  *                                    Test Information and "What to Test"
  * Needs ASC_KEY_ID, ASC_ISSUER_ID and KEY (path of the .p8 file); notes also
@@ -74,11 +76,41 @@ async function notes() {
   console.log(`"What to Test" filled for build ${BUILD}.`);
 }
 
+/* Read-only: reports every item, changes nothing. Exit 0 only if the key,
+   the bundle ID and Associated Domains are all right (the app record is
+   reported but not required, since it is created separately). */
+async function check() {
+  let bad = 0;
+  const ok = (m) => console.log(`OK    ${m}`);
+  const no = (m) => { console.log(`FAIL  ${m}`); bad++; };
+  const note = (m) => console.log(`NOTE  ${m}`);
+  try { await api("GET", "/v1/apps?limit=1"); ok("Apple accepts the key (ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_P8)"); }
+  catch (e) { no(`Apple refused the key: ${e.message}`); process.exit(1); }
+  const ids = await api("GET", `/v1/bundleIds?filter[identifier]=${BUNDLE_ID}&limit=5`);
+  const bid = (ids.data || []).find((b) => b.attributes.identifier === BUNDLE_ID);
+  if (!bid) no(`bundle ID ${BUNDLE_ID} is not registered`);
+  else {
+    ok(`bundle ID ${BUNDLE_ID} is registered as "${bid.attributes.name}" (platform ${bid.attributes.platform})`);
+    const team = process.env.APPLE_TEAM_ID || "";
+    if (bid.attributes.seedId && team) (bid.attributes.seedId === team ? ok : no)(`bundle ID belongs to team ${bid.attributes.seedId}; APPLE_TEAM_ID is ${team}`);
+    const caps = await api("GET", `/v1/bundleIds/${bid.id}/bundleIdCapabilities?limit=50`);
+    const types = (caps.data || []).map((c) => c.attributes.capabilityType);
+    note(`capabilities on: ${types.join(", ") || "none"}`);
+    types.includes("ASSOCIATED_DOMAINS") ? ok("Associated Domains is on") : no("Associated Domains is NOT on");
+  }
+  const apps = await api("GET", `/v1/apps?filter[bundleId]=${BUNDLE_ID}`);
+  if (apps.data.length) ok(`App Store Connect app record exists: "${apps.data[0].attributes.name}" (SKU ${apps.data[0].attributes.sku})`);
+  else note("no App Store Connect app record yet (Willy creates it; needed before the first TestFlight build)");
+  console.log(bad ? `RESULT: ${bad} problem(s)` : "RESULT: Apple setup is ready");
+  process.exit(bad ? 1 : 0);
+}
+
 const cmd = process.argv[2];
 try {
   if (cmd === "preflight") await preflight();
   else if (cmd === "notes") await notes();
-  else throw new Error("use preflight or notes");
+  else if (cmd === "check") await check();
+  else throw new Error("use preflight, notes or check");
 } catch (e) {
   console.error(`App Store Connect: ${e.message}`);
   process.exit(2);
