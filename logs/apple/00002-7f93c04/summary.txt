@@ -1,0 +1,21 @@
+kind:    apple
+result:  success
+branch:  ios
+commit:  7f93c04d2ecf3c79a72a191fa25e7b9d45cd7c58
+run:     2 (id 36603165948)
+time:    2026-09-29T17:11:31Z
+
+--- last lines of apple-check.log ---
+OK    secret ASC_KEY_ID is set
+OK    secret ASC_ISSUER_ID is set
+OK    secret ASC_KEY_P8 is set
+OK    secret APPLE_TEAM_ID is set
+OK    APPLE_TEAM_ID is VXMLKHF72B
+OK    ASC_KEY_P8 looks like a .p8 key (BEGIN line present)
+OK    Apple accepts the key (ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_P8)
+OK    bundle ID io.github.willyros01.scorecard is registered as "The Scorecard" (platform UNIVERSAL)
+OK    bundle ID belongs to team VXMLKHF72B; APPLE_TEAM_ID is VXMLKHF72B
+NOTE  capabilities on: IN_APP_PURCHASE, ASSOCIATED_DOMAINS
+OK    Associated Domains is on
+NOTE  no App Store Connect app record yet (Willy creates it; needed before the first TestFlight build)
+RESULT: Apple setup is ready
