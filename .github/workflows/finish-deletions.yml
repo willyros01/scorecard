@@ -3,6 +3,13 @@ name: Finish account deletions
 # The daily completion job for "Delete my account" (spec: Change 7, D5).
 # Runs by itself every day, and once whenever this file or its script changes
 # on main. Nobody runs it by hand.
+#
+# Keep-alive (spec: Change 7, "The schedule stays switched on"): GitHub switches
+# off scheduled workflows in a public repo after 60 days without repository
+# activity. Every run therefore (1) calls GitHub's "enable workflow" API on this
+# workflow and (2) commits its log to the ci-logs branch, which is repository
+# activity every day. A daily health check running outside GitHub (a Claude
+# scheduled task) reports any day without a successful run.
 on:
   schedule:
     - cron: "17 7 * * *"   # 07:17 UTC daily
@@ -13,7 +20,8 @@ on:
       - .github/scripts/finish-deletions.sh
 
 permissions:
-  contents: read
+  contents: write   # only to commit this job's log to the ci-logs branch
+  actions: write    # only to keep this workflow's schedule switched on
   id-token: write   # keyless sign-in to Google (Workload Identity Federation)
 
 concurrency:
@@ -34,7 +42,38 @@ jobs:
           service_account: scorecard-deletions@scorecard-f41b8.iam.gserviceaccount.com
           token_format: access_token
       - name: Finish any interrupted deletions
+        id: finish
         env:
           ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
           PROJECT: scorecard-f41b8
-        run: bash .github/scripts/finish-deletions.sh
+        run: |
+          set -o pipefail
+          bash .github/scripts/finish-deletions.sh 2>&1 | tee "$RUNNER_TEMP/finish-deletions.log"
+      - name: Keep the daily schedule switched on, and save the log
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RESULT: ${{ steps.finish.outcome }}
+        run: |
+          set -Eeuo pipefail
+          gh api -X PUT "repos/${GITHUB_REPOSITORY}/actions/workflows/finish-deletions.yml/enable"
+          echo "Schedule confirmed switched on."
+          # The job's log shows only the first 4 characters of any account ID.
+          TMP="$(mktemp -d)"
+          git clone -q --depth 1 --branch ci-logs "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$TMP"
+          DEST="$TMP/logs/deletions/$(date -u +%Y-%m-%d)-run$(printf '%05d' "$GITHUB_RUN_NUMBER")"
+          mkdir -p "$DEST"
+          cp "$RUNNER_TEMP/finish-deletions.log" "$DEST/" 2>/dev/null || echo "(no job log)" > "$DEST/finish-deletions.log"
+          printf 'result: %s\nevent: %s\nrun: %s (id %s)\ntime: %s\n' "$RESULT" "$GITHUB_EVENT_NAME" "$GITHUB_RUN_NUMBER" "$GITHUB_RUN_ID" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$DEST/summary.txt"
+          ls -1d "$TMP/logs/deletions"/*/ | sort | head -n -90 | xargs -r rm -rf   # keep the last 90 runs
+          cd "$TMP"
+          git add -A
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -q -m "Logs: deletion job run ${GITHUB_RUN_NUMBER} (${RESULT})"
+          for attempt in 1 2 3; do
+            git push -q origin HEAD:ci-logs && { echo "Log saved to ci-logs."; exit 0; }
+            git pull -q --rebase origin ci-logs || true
+            sleep $((attempt * 3))
+          done
+          echo "Could not save the log to ci-logs." >&2
+          exit 1
