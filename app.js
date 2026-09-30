@@ -236,6 +236,7 @@ let invitedGroupName = "";
 /* Version 2.0 Phase B: which account card a signed-out (or old guest) screen
    shows — "create" or "signin". Null means the screen's own default. */
 let accountMode = null;
+const claimedOnce = new Set();   /* golfers this session has already tried to claim (screenEnter) */
 /* Version 2.0 Phase C: the PUBLIC group. */
 let showApply = false;          /* signed out: the Apply form is open */
 let applySentTo = "";           /* signed out: the application just sent */
@@ -1072,6 +1073,12 @@ function screenEnter() {
      Seeding it here covers every route in, including a fresh join. */
   if (!db.canManage() && !form.golferId) {
     let mine = typeof db.myGolferId === "function" ? db.myGolferId(allGolfers) : "";
+    /* Version 2.0: the membership records which golfer this is (golferId),
+       and the own golfer record may still be loading. */
+    if (!mine && typeof db.myGolferIdNow === "function") {
+      const recorded = db.myGolferIdNow();
+      if (recorded && allGolfers.some((g) => g.id === recorded)) mine = recorded;
+    }
 
     /* Fall back to matching on the name they joined under.
      *
@@ -1084,7 +1091,9 @@ function screenEnter() {
       const me = members.find((m) => m.uid === db.status().uid);
       const named = me && String(me.displayName || "").trim().toLowerCase();
       if (named) {
-        const match = allGolfers.find((g) => String(g.name || "").trim().toLowerCase() === named);
+        /* Real golfer records only: a directory entry (name and index of
+           somebody else) is never "you", and has no link to claim. */
+        const match = allGolfers.find((g) => !g.fromDirectory && String(g.name || "").trim().toLowerCase() === named);
         if (match) {
           mine = match.id;
 
@@ -1096,7 +1105,9 @@ function screenEnter() {
            * a guest could post a round and then not delete it. Claiming an
            * unlinked golfer as yourself is explicitly permitted, so this write
            * is allowed and it makes the two agree. */
-          if (!match.linkedUid) db.claimGolfer(match.id);
+          /* Once per golfer per session: this runs while drawing the screen,
+             and the claim itself redraws it. */
+          if (match.linkedUid == null && !claimedOnce.has(match.id)) { claimedOnce.add(match.id); db.claimGolfer(match.id); }
         }
       }
     }
@@ -1751,10 +1762,19 @@ function publishSheetIfChanged(game, played, board) {
              courseHandicap: row.courseHandicap ?? r.courseHandicap ?? null, teeName: r.teeName || "",
              estimated: !!row.estimated };
   }).sort((a, b) => a.id.localeCompare(b.id));
-  const now = JSON.stringify(results);
-  const before = JSON.stringify([...(game.results || [])].sort((a, b) => String(a.id).localeCompare(String(b.id))));
-  if (now !== before) db.publishGameResults(game.id, results);
+  /* Compared with the keys in a fixed order: Firestore hands maps back with
+     their keys in its own order, and a plain comparison would then differ
+     forever and write on every redraw. Also written at most once per content
+     per session, since this runs while the screen is being drawn. */
+  const stable = (list) => JSON.stringify(list.map((o) => Object.keys(o).sort().map((k) => [k, o[k] ?? null])));
+  const now = stable(results);
+  const before = stable([...(game.results || [])].sort((a, b) => String(a.id).localeCompare(String(b.id))));
+  if (now !== before && publishedSheets.get(game.id) !== now) {
+    publishedSheets.set(game.id, now);
+    db.publishGameResults(game.id, results);
+  }
 }
+const publishedSheets = new Map();   /* game id -> the sheet this session last published */
 
 function gameDetail(gameId) {
   const game = games.find((g) => g.id === gameId);
