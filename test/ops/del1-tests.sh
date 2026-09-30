@@ -25,8 +25,17 @@ reset(){
   curl -g -sS --fail -X DELETE "${ADMIN[@]}" "${AUTH_ADMIN}/projects/${P}/accounts" >/dev/null
 }
 # new_user → "uid token"
-new_user(){ curl -g -sS --fail -H 'Content-Type: application/json' -d '{"returnSecureToken":true}' \
+# Phase B: every account has an email and a password (anonymous sign-ins are refused).
+new_user(){ jq -nc --arg e "u$(date +%s%N)${RANDOM}@example.com" '{email:$e,password:"test-password-1",returnSecureToken:true}' \
+  | curl -g -sS --fail -H 'Content-Type: application/json' --data-binary @- \
   "${AUTHROOT}/accounts:signUp?key=fake-api-key" | jq -r '"\(.localId) \(.idToken)"'; }
+# An old-style guest: anonymous, no email → "uid token"
+anon_user(){ curl -g -sS --fail -H 'Content-Type: application/json' -d '{"returnSecureToken":true}' \
+  "${AUTHROOT}/accounts:signUp?key=fake-api-key" | jq -r '"\(.localId) \(.idToken)"'; }
+# link_email TOKEN EMAIL → new token for the SAME account, now with an email and password
+link_email(){ jq -nc --arg t "$1" --arg e "$2" '{idToken:$t,email:$e,password:"test-password-1",returnSecureToken:true}' \
+  | curl -g -sS --fail -H 'Content-Type: application/json' --data-binary @- \
+  "${AUTHROOT}/accounts:update?key=fake-api-key" | jq -r .idToken; }
 
 fields(){ jq -c 'with_entries(.value = (if .value == null then {nullValue:null} else {stringValue:.value} end))' <<<"$1"; }
 # Seeding, bypassing the rules.
@@ -52,7 +61,7 @@ refused(){ local label="$1"; shift; local code; code="$(commit_as "$@")"
   [[ "${code}" == 403 ]] && ok "${label}" || bad "${label} (HTTP ${code}, expected 403 refused)"; }
 
 seed(){
-  read -r A TA <<<"$(new_user)"   # the account being deleted: a guest in G1 and G2
+  read -r A TA <<<"$(anon_user)"  # the account being deleted: an old anonymous guest in G1 and G2
   read -r B TB <<<"$(new_user)"   # a fellow member of G1
   read -r X TX <<<"$(new_user)"   # a stranger in no group
   read -r O TO <<<"$(new_user)"   # the owner of both groups
@@ -99,7 +108,13 @@ if exists "associations/G1/members/${A}" && exists "associations/G1/invites/gA" 
 else bad "DEL1 nothing of A's changed after the refused attempts"; fi
 
 echo "== DEL1 part 2: the account itself makes every write, in the app's order — each must be allowed"
-allowed "DEL1 step 4: A records its deletion request (D4)"                    "${TA}" "$(rec_requested "${A}")"
+allowed "DEL1 step 4: A (still anonymous) records its deletion request (D4)"  "${TA}" "$(rec_requested "${A}")"
+mapfile -t LB < <(leave_batch "${A}" G1)
+refused "DEL1 Phase B: A cannot leave a group while still anonymous"           "${TA}" "${LB[@]}"
+# Step 5: the app attaches the throwaway email to the SAME account (reconfirmSignIn).
+TA="$(link_email "${TA}" "delete-${A,,}@accounts.cuberoot-systems.com")"
+[[ -n "${TA}" && "${TA}" != null ]] && ok "DEL1 step 5: the throwaway email is attached to A's own account" \
+  || bad "DEL1 step 5: the throwaway email is attached to A's own account"
 allowed "DEL1 step 5: A marks the request re-confirmed"                       "${TA}" "$(rec_reauth "${A}")"
 for g in G1 G2; do
   mapfile -t LB < <(leave_batch "${A}" "${g}")

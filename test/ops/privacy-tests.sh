@@ -21,8 +21,17 @@ reset(){
   curl -g -sS --fail -X DELETE "${ADMIN[@]}" "${FS_ADMIN}/projects/${P}/databases/(default)/documents" >/dev/null
   curl -g -sS --fail -X DELETE "${ADMIN[@]}" "${AUTH_ADMIN}/projects/${P}/accounts" >/dev/null
 }
-new_user(){ curl -g -sS --fail -H 'Content-Type: application/json' -d '{"returnSecureToken":true}' \
+# Phase B: every account has an email and a password (anonymous sign-ins are refused).
+new_user(){ jq -nc --arg e "u$(date +%s%N)${RANDOM}@example.com" '{email:$e,password:"test-password-1",returnSecureToken:true}' \
+  | curl -g -sS --fail -H 'Content-Type: application/json' --data-binary @- \
   "${AUTHROOT}/accounts:signUp?key=fake-api-key" | jq -r '"\(.localId) \(.idToken)"'; }
+# An old-style guest: anonymous, no email → "uid token"
+anon_user(){ curl -g -sS --fail -H 'Content-Type: application/json' -d '{"returnSecureToken":true}' \
+  "${AUTHROOT}/accounts:signUp?key=fake-api-key" | jq -r '"\(.localId) \(.idToken)"'; }
+# link_email TOKEN EMAIL → new token for the SAME account, now with an email and password
+link_email(){ jq -nc --arg t "$1" --arg e "$2" '{idToken:$t,email:$e,password:"test-password-1",returnSecureToken:true}' \
+  | curl -g -sS --fail -H 'Content-Type: application/json' --data-binary @- \
+  "${AUTHROOT}/accounts:update?key=fake-api-key" | jq -r .idToken; }
 
 # Values: strings, null, or JSON arrays of strings.
 fields(){ jq -c 'with_entries(.value = (

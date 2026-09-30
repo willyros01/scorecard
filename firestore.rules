@@ -1,8 +1,18 @@
 rules_version = '2';
 
-/* LAST CHANGED FOR VERSION 2.0, PHASE A (privacy foundation) — not published yet
+/* LAST CHANGED FOR VERSION 2.0, PHASE B (accounts) — not published yet
  *
- * What changes in Phase A (onboarding design Revision 2):
+ * What changes in Phase B (onboarding design Revision 2, R4 and R5):
+ *   - Everything in the app now needs a real account: signed in with an email
+ *     and password. An anonymous session (the old guest sign-in) is refused
+ *     everywhere except the few reads and writes it needs to find its own
+ *     groups and delete itself (Delete my account records its request before
+ *     it attaches the throwaway email; see authed() below).
+ *   - The check is the email on the sign-in token. A guest that sets an email
+ *     and password keeps the SAME account and passes from then on; so does the
+ *     throwaway credential Delete my account attaches.
+ *
+ * What changed in Phase A (onboarding design Revision 2):
  *   - rounds: readable only by an admin of the group, or by the golfer the
  *     round belongs to. The rule that let ANY signed-in account read every
  *     round in the database (the recursive rounds read) is removed.
@@ -58,7 +68,20 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    /* Phase B: a real account — signed in with an email and password. An
+       anonymous session has no email on its token and is refused. */
     function signedIn() {
+      return request.auth != null
+        && request.auth.token.get('email', '') is string
+        && request.auth.token.get('email', '') != '';
+    }
+
+    /* Any sign-in at all, anonymous included. Used ONLY where an old guest
+       session must still be able to see its own groups and delete itself:
+       its own deletion record, its own group list, its own membership
+       documents, the groups it created, and the golfer linked to it. Every
+       one of these is limited to the caller's own uid. */
+    function authed() {
       return request.auth != null;
     }
 
@@ -156,7 +179,7 @@ service cloud.firestore {
          membership write never happened — that is what makes an abandoned
          group findable and removable instead of stranded forever. */
       allow read: if isMember(assocId)
-        || (signedIn() && resource.data.ownerUid == request.auth.uid);
+        || (authed() && resource.data.ownerUid == request.auth.uid);
 
       allow create: if signedIn()
         && request.resource.data.ownerUid == request.auth.uid;
@@ -369,7 +392,7 @@ service cloud.firestore {
         || adminOfAny(resource.data.get('groups', [])));
       /* Lists only of your OWN golfer (a query where linkedUid is you) — how
          the app finds which golfer you are, and what Delete my account uses. */
-      allow list: if signedIn() && resource.data.get('linkedUid', null) == request.auth.uid;
+      allow list: if authed() && resource.data.get('linkedUid', null) == request.auth.uid;
 
       /* Creating is an everyday act — adding a person to a roster. The name
          index below stops duplicates. */
@@ -446,7 +469,7 @@ service cloud.firestore {
      * This is narrow on purpose: you may read a membership document only if it
      * is YOUR OWN, so it reveals nothing about anybody else. Read only. */
     match /{path=**}/members/{memberUid} {
-      allow read: if signedIn() && memberUid == request.auth.uid;
+      allow read: if authed() && memberUid == request.auth.uid;
     }
 
     /* Phase A: the recursive rounds read that let ANY signed-in account read
@@ -460,14 +483,18 @@ service cloud.firestore {
        which is exactly what happened between Safari and the home-screen app.
        Yours only, readable and writable by nobody else. */
     match /userGroups/{userId}/groups/{assocId} {
-      allow read, write: if signedIn() && userId == request.auth.uid;
+      allow read: if authed() && userId == request.auth.uid;
+      /* Deleting your own entry is part of Delete my account. Adding one
+         needs a real account. */
+      allow delete: if authed() && userId == request.auth.uid;
+      allow create, update: if signedIn() && userId == request.auth.uid;
     }
 
     /* ---------------- account deletion requests ---------------- */
 
     /* The daily admin job treats the document contents as untrusted. */
     match /accountDeletions/{userId} {
-      allow read, write: if signedIn() && userId == request.auth.uid;
+      allow read, write: if authed() && userId == request.auth.uid;
     }
 
     /* ---------------- join codes ---------------- */
