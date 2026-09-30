@@ -39,6 +39,7 @@ fields(){ jq -c 'with_entries(.value = (
   if .value == null then {nullValue:null}
   elif (.value|type) == "array" then {arrayValue:{values:(.value|map({stringValue:.}))}}
   elif (.value|type) == "number" then {doubleValue:.value}
+  elif (.value|type) == "boolean" then {booleanValue:.value}
   else {stringValue:.value} end))' <<<"$1"; }
 put(){ jq -nc --arg n "${DB}/$1" --argjson f "$(fields "$2")" '{writes:[{update:{name:$n,fields:$f}}]}' \
   | curl -g -sS --fail "${ADMIN[@]}" -H 'Content-Type: application/json' --data-binary @- "${FS}/${DB}:commit" >/dev/null; }
@@ -172,9 +173,11 @@ allowed "GRP4 an admin removes a regular member"                              de
 allowed "GRP4 a member may still leave by themselves"                         delete_as "${TN}" "associations/G1/members/${N}"
 
 echo "== GRP6 archiving golfers (Tidy's merge and clean-up)"
-put "golfers/gOff" '{"name":"Off Roster","linkedUid":null,"groups":["G1"]}'
+put "golfers/gOff" '{"name":"Off Roster","nameKey":"off-roster","linkedUid":null,"groups":["G1"]}'
 put "golfers/gOther" '{"name":"Other Group","linkedUid":null,"groups":["G2"]}'
-allowed "GRP6 the owner archives a golfer of G1 that is on no roster"         write_as "${TW}" "golfers/gOff" '{"archived":true,"archivedAt":"now","nameKey":null,"editedIn":"G1"}'
+put "golfers/gMerged" '{"name":"Dup","nameKey":"dup","linkedUid":null,"groups":["G1"],"roundCount":1}'
+allowed "GRP6 the owner archives a golfer of G1 that is on no roster"         write_as "${TW}" "golfers/gOff" '{"archived":true,"archivedAt":1759240000000,"nameKey":null,"editedIn":"G1"}'
+allowed "GRP6 Tidy's exact merge write (archived, archivedAt, nameKey, mergedInto, editedIn)" write_as "${TW}" "golfers/gMerged" '{"archived":true,"archivedAt":1759240000000,"nameKey":null,"mergedInto":"gKeep","editedIn":"PUBLICX"}'
 refused "GRP6 archiving cannot also rename"                                   write_as "${TAD}" "golfers/gOff" '{"archived":true,"name":"Renamed"}'
 refused "GRP6 a regular member cannot archive"                                write_as "${TM}" "golfers/gOff" '{"archived":true}'
 refused "GRP6 an admin of G1 cannot archive a golfer of G2 only"              write_as "${TAD}" "golfers/gOther" '{"archived":true}'

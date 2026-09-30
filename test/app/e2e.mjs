@@ -369,7 +369,16 @@ await check("E14", "Tidy finds and fixes duplicates and unused golfers across Wi
   const kept = await getDoc("golferNames/dup-person");
   if (!kept || kept.golferId !== "gD1") problems.push("the kept golfer's name claim was freed");
   if (await getDoc("golferNames/una-unused")) problems.push("the unused golfer's name was not freed");
-  if (problems.length) throw new Error(`${problems.join("; ")}. Tidy's log: ${log.slice(0, 600)}`);
+  if (problems.length) {
+    /* Say exactly what the rules answered for the same write. */
+    const signed = await (await fetch(`${AUTH}/accounts:signInWithPassword?key=fake-api-key`, { method: "POST",
+      headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: W.email, password: W.password, returnSecureToken: true }) })).json();
+    const probe = await fetch(`${FS}:commit`, { method: "POST", headers: { Authorization: `Bearer ${signed.idToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ writes: [{ update: { name: `projects/${P}/databases/(default)/documents/golfers/gU`,
+        fields: fields({ archived: true, archivedAt: Date.now(), nameKey: null, editedIn: "G1" }) },
+        updateMask: { fieldPaths: ["archived", "archivedAt", "nameKey", "editedIn"] } }] }) });
+    throw new Error(`${problems.join("; ")}. Tidy's log: ${log.slice(0, 400)} | the same write by Willy: HTTP ${probe.status} ${(await probe.text()).slice(0, 400)}`);
+  }
 });
 
 await browser.close();
