@@ -1,0 +1,48 @@
+kind:    ops
+result:  failure
+branch:  v2
+commit:  b9ec99e421e93d949e058dce16fbe0032395bb87
+run:     20 (id 36741296118)
+time:    2026-09-30T16:11:21Z
+
+--- last lines of ops-tests.log ---
+PASS  GRP6 a regular member cannot archive
+PASS  GRP6 an admin of G1 cannot archive a golfer of G2 only
+FAIL  GRP6 an admin of G2 archives G2's golfer (HTTP 403, expected 200)
+== GRP5 the owner keeps every right
+PASS  GRP5 the owner removes an admin
+PASS  GRP5 the owner renames the group
+PASS  GRP5 the owner changes the admin secret
+PASS  GRP5 the owner deletes a group
+
+RESULT: 46 passed, 2 failed
+
+PASS  E1  signed out: Sign in and Apply, and no sign-in happens by itself
+PASS  E2  the applicant applies with full name and email; the application is stored as pending
+PASS  E2b  a second application for the same email is refused with a clear message
+PASS  E3  the owner signs in, lands in PUBLIC and sees the application on the Admin tab
+[36m[1mi [22m[39m To reset the password for pat.applicant@example.com, follow this link: http://127.0.0.1:9099/emulator/action?mode=resetPassword&lang=en&oobCode=2_oF4DGL1XO7obLZV49PSwUI5xVo1V-qJeNqXDcDsqwAuEwK5vYsoO&apiKey=fake-api-key&newPassword=NEW_PASSWORD_HERE
+PASS  E4  approving creates the account, the golfer, the directory entry and the approval, and sends the password email
+PASS  E4b  a name already in use is refused and the owner is asked to change it
+PASS  E5  the applicant chooses a password from the email, signs in and is in the PUBLIC group
+      after E5 the member's screen says: The Scorecard PUBLIC PAT APPLICANT A+ Auto · day Connected Welcome to the public group. Post your rounds on the Enter tab. Almost ready Whoever runs your group still needs to add the roster and a course. ✎ Enter ≡ My rounds ▤ Summary ⚑ Games
+PASS  E6  the member sees the group ranking with Report or block beside other golfers
+PASS  E7  reporting a name reaches the reviewers
+PASS  E8  blocking hides the golfer from the member's ranking; unblocking brings them back
+PASS  E8b  a regular member reads only their own membership, and no errors appeared
+PASS  E9  the owner sees the report and dismisses it
+PASS  E10  only the group creator is offered Start another group
+PASS  E11  a named private invitation: create an account, then join as the invited golfer
+PASS  E12  an admin invites regular members only: no Admin choice on the invitation
+PASS  E13  an admin removes a regular member of their group, and has no button for the owner
+FAIL  E14  Tidy finds and fixes duplicates and unused golfers across Willy's groups  —  the duplicate record was not archived; the unused golfer was not archived; the unused golfer's name was not freed. Tidy's log: Dup Person: 2 rounds, index not established Dup Person: 1 round, index not established Mia Member: 0 rounds, index not established Could not merge Dup Person — refused Run this page again so the merged handicaps are recalculated. Could not remove the unused golfers — refused Done. 3 fixed. Close the app on every device and reopen it to see the corrected figures.
+
+RESULT: 16 passed, 1 failed
+[33m[1m⚠ [22m[39m Script exited unsuccessfully (code 1)
+[36m[1mi  emulators:[22m[39m Shutting down emulators.
+[36m[1mi  firestore:[22m[39m Stopping Firestore Emulator
+[36m[1mi  auth:[22m[39m Stopping Authentication Emulator
+[36m[1mi  hub:[22m[39m Stopping emulator hub
+[36m[1mi  logging:[22m[39m Stopping Logging Emulator
+
+[1m[31mError:[39m[22m Script "[1ms=0; bash sec-tests.sh || s=1; echo; bash del1-tests.sh || s=1; echo; if [ -f privacy-tests.sh ]; then bash privacy-tests.sh || s=1; fi; echo; bash acc-tests.sh || s=1; echo; bash pub-tests.sh || s=1; echo; bash grp-tests.sh || s=1; echo; if [ -d ../../node_modules/playwright ]; then node ../app/e2e.mjs ../.. || s=1; else echo "SKIP  app tests (npm ci not run)"; fi; exit $s[22m" exited with code 1
