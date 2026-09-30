@@ -116,9 +116,13 @@ export async function init() {
 
     await new Promise((resolve) => {
       auth.onAuthStateChanged(fb.auth, async (user) => {
+        /* Version 2.0 Phase B: no anonymous sign-in. Nobody signed in means the
+           first screen asks them to sign in, or to create their account from an
+           invitation. The old automatic guest sign-in is gone for good. */
         if (!user) {
-          try { await auth.signInAnonymously(fb.auth); }
-          catch (e) { setStatus("Saved on device", true); report(e); resolve(); }
+          uid = null;
+          setStatus("Signed out");
+          resolve();
           return;
         }
         uid = user.uid;
@@ -960,6 +964,7 @@ export async function signInWithEmail({ email, password }) {
         }
 
         await linkWithCredential(current, EmailAuthProvider.credential(address, secret));
+        await refreshToken();
         uid = fb.auth.currentUser.uid;
         clearError();
         return { ok: true, outcome: "created" };
@@ -1118,6 +1123,7 @@ export async function setMyPassword({ email, password }) {
   }
 
   try { await fb.auth.currentUser.reload(); } catch {}
+  await refreshToken();
   uid = fb.auth.currentUser.uid;
   clearError();
   return { ok: true, outcome: "added" };
@@ -1135,6 +1141,52 @@ export const isSignedIn = () => {
   const user = fb && fb.auth && fb.auth.currentUser;
   return !!(user && !user.isAnonymous);
 };
+
+/* Any sign-in on this device, including an old anonymous guest session. */
+export const hasUser = () => !!(fb && fb.auth && fb.auth.currentUser);
+
+/* An old guest session from before Version 2.0 (Phase B). The rules refuse it
+   everything except finding its own groups and deleting itself, so the app
+   asks for an email and password — attached to the SAME account, so the
+   person keeps their groups, role and rounds. */
+export const isAnonymousSession = () => {
+  const user = fb && fb.auth && fb.auth.currentUser;
+  return !!(user && user.isAnonymous);
+};
+
+/* After an email is attached, the token must carry it before the next read,
+   or the rules still see an anonymous session. */
+async function refreshToken() {
+  try { await fb.auth.currentUser.getIdToken(true); } catch {}
+}
+
+/* Creating an account. Only ever from an invitation, a group code, or
+   (Phase C) an approved application — never as a side effect of a typo on
+   the sign-in screen. */
+export async function createAccount({ email, password }) {
+  if (!fb) throw new Error("Firebase has not loaded yet.");
+  const address = String(email || "").trim();
+  const secret = String(password || "");
+  if (!address) throw new Error("auth/invalid-email");
+  if (secret.length < 6) throw new Error("auth/weak-password");
+  if (fb.auth.currentUser) throw new Error("auth/already-signed-in");
+  try {
+    await fb.mod.auth.createUserWithEmailAndPassword(fb.auth, address, secret);
+  } catch (e) {
+    const code = String((e && (e.code || e.message)) || "");
+    if (code.includes("email-already-in-use")) {
+      const taken = new Error("auth/email-already-in-use");
+      taken.code = "auth/email-already-in-use";
+      throw taken;
+    }
+    throw e;
+  }
+  uid = fb.auth.currentUser.uid;
+  clearError();
+  setStatus("Connected");
+  emit();
+  return { ok: true, outcome: "created" };
+}
 
 export async function signOutEverywhere() {
   /* Live listeners must go first. Left running, they keep firing against
@@ -2281,6 +2333,7 @@ async function reconfirmSignIn(password) {
   const credential = () => EmailAuthProvider.credential(note.throwawayEmail, note.throwawayPassword);
   if (!hasPw) await linkWithCredential(user, credential());
   await reauthenticateWithCredential(user, credential());
+  await refreshToken();   /* the rules need the email on the token from here on */
 }
 
 /* The whole flow. Returns { ok: true } once Firebase has confirmed the

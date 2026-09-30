@@ -4,8 +4,9 @@
  * browsers: WebKit (the engine inside Safari) and Chromium. The app is served
  * at http://localhost:8000 on GitHub's own test machine; nothing is published.
  *
- * It talks to the real Firebase project only as anonymous test sessions,
- * which are deleted again at the end of each test. Tests that need the test
+ * It talks to the real Firebase project only as throwaway test sessions
+ * (anonymous ones made by v2.21.9, and webtest-… email accounts made by the
+ * Version 2.0 account screens), which are deleted again at the end of each test. Tests that need the test
  * owner account run only when TEST_OWNER_EMAIL and TEST_OWNER_PASSWORD are set.
  *
  * Usage: node test/web/run.mjs <new-site-dir> <old-site-dir>
@@ -75,9 +76,19 @@ async function waitForUser(page, ms = 30000) {
   while (Date.now() < end) { const u = await authUser(page); if (u && u.uid) return u; await page.waitForTimeout(500); }
   throw new Error("no Firebase sign-in within 30 s");
 }
-/* Remove the anonymous test account again (an account may delete itself). */
+/* Nobody signed in: wait a moment to be sure no sign-in happens by itself. */
+async function expectNoUser(page, ms = 6000) {
+  await page.waitForTimeout(ms);
+  const u = await authUser(page);
+  if (u && u.uid) throw new Error(`a sign-in happened by itself (${u.isAnonymous ? "anonymous" : u.email})`);
+}
+const TEST_EMAIL = () => `webtest-${Date.now()}-${Math.floor(Math.random() * 1e6)}@accounts.cuberoot-systems.com`;
+/* Remove a test account again (an account may delete itself): anonymous
+   sessions, and the webtest-… email accounts this file creates. Never any
+   other account. */
 async function deleteTestAccount(user) {
-  if (!user || !user.isAnonymous || !user.stsTokenManager) return;
+  if (!user || !user.stsTokenManager) return;
+  if (!user.isAnonymous && !/^webtest-.*@accounts\.cuberoot-systems\.com$/.test(String(user.email || ""))) return;
   try {
     await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:delete?key=${API_KEY}`, {
       method: "POST", headers: { "Content-Type": "application/json", Referer: `${BASE}/` },
@@ -279,15 +290,26 @@ for (const [name, type] of browsers) {
     page.on("pageerror", (e) => errors.push(String(e.message || e)));
     await page.goto(`${BASE}/`, { waitUntil: "load" });
     let user = null;
-    await check(`W1-${tag}`, `${name}: the app starts and signs in anonymously`, async () => {
-      user = await waitForUser(page);
-      await waitForText(page, /Sign in|Create the group|Start your group/);
+    await check(`W1-${tag}`, `${name}: the app starts signed out and shows Sign in (Version 2.0: no anonymous sign-in)`, async () => {
+      await waitForText(page, /Sign in/);
+      await expectNoUser(page);
+      const t = await bodyText(page);
+      if (!/I was given a code/.test(t)) throw new Error("no code link");
+      if (/Create the group|Start your group/.test(t)) throw new Error("offered a group while signed out");
     });
     await check(`W2-${tag}`, `${name}: no uncaught errors while starting`, async () => {
       if (errors.length) throw new Error(errors.join(" | "));
     });
     await check(`C6-${tag}`, `${name}: no Google sign-in anywhere on the first screen`, async () => !/google/i.test(await bodyText(page)));
-    await check(`W3-${tag}`, `${name}: "Delete my account" is at the foot of the screen`, async () => /Delete my account/.test(await bodyText(page)));
+    await check(`W3-${tag}`, `${name}: signed out, there is no "Delete my account" (nothing to delete)`, async () => !/Delete my account/.test(await bodyText(page)));
+    await check(`B1-${tag}`, `${name}: signed out, "I was given a code" asks for an account first`, async () => {
+      await page.locator('[data-act="enter-code"]').first().click();
+      await waitForText(page, /Join with a code/);
+      const t = await bodyText(page);
+      if (!/Create my account/.test(t) || !/I already have an account/.test(t)) throw new Error("no create-account card");
+      await page.locator('[data-act="hide-code"]').first().click();
+      await waitForText(page, /Sign in/);
+    });
     await check(`W6-${tag}`, `${name}: User guide, Support and Privacy links at the foot of the screen`, async () => {
       const t = await bodyText(page);
       if (!/User guide/.test(t) || !/Support/.test(t) || !/Privacy/.test(t)) throw new Error("a link is missing");
@@ -343,7 +365,7 @@ for (const [name, type] of browsers) {
     await page.goto(`${BASE}/`, { waitUntil: "load" });
     let user = null;
     await check(`C2-${tag}`, `${name} (app): the link that opened the app is read (cold start)`, async () => {
-      user = await waitForUser(page);
+      await waitForText(page, /You have been invited/);
       const link = await page.evaluate(async () => (await import("/store.js")).readJoinLink());
       if (!link || link.associationId !== "GAPP" || link.golferId !== "golferA") throw new Error(JSON.stringify(link));
     });
@@ -377,11 +399,45 @@ for (const [name, type] of browsers) {
     await page.goto(`${BASE}/`, { waitUntil: "load" });
     let user = null;
     await check(`W5-${tag}`, `${name} (app): first screen uses the app wording and links to the moving guide`, async () => {
-      user = await waitForUser(page);
-      await waitForText(page, /same person on every device/);
+      await waitForText(page, /same account on every device/);
       if (!/Used The Scorecard in Safari\? Read this first/.test(await bodyText(page))) throw new Error("no moving-guide link");
     });
     await deleteTestAccount(user);
+    await context.close();
+  }
+
+  /* ---- Version 2.0 Phase B: an invitation while signed out ---- */
+  {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    await page.goto(`${BASE}/?join=GNONE.CODE9`, { waitUntil: "load" });
+    let user = null;
+    await check(`B2-${tag}`, `${name}: an invitation while signed out asks to create an account first`, async () => {
+      await waitForText(page, /You have been invited to a group/);
+      const t = await bodyText(page);
+      if (!/Create my account/.test(t)) throw new Error("no Create my account button");
+      if (/Type the name you play under/.test(t)) throw new Error("the invitation was shown before an account");
+    });
+    await check(`B3-${tag}`, `${name}: two different passwords are refused before anything is created`, async () => {
+      await page.fill('[name="email"]', TEST_EMAIL());
+      await page.fill('[name="password"]', "abcdef1");
+      await page.fill('[name="password-again"]', "abcdef2");
+      await page.locator('[data-act="create-account"]').click();
+      await waitForText(page, /two passwords are different/);
+      await expectNoUser(page, 1500);
+    });
+    await check(`B4-${tag}`, `${name}: Create my account makes an email account (not anonymous) and then shows the invitation`, async () => {
+      const email = TEST_EMAIL();
+      await page.fill('[name="email"]', email);
+      await page.fill('[name="password"]', "webtest-pass-1");
+      await page.fill('[name="password-again"]', "webtest-pass-1");
+      await page.locator('[data-act="create-account"]').click();
+      user = await waitForUser(page);
+      if (user.isAnonymous || String(user.email).toLowerCase() !== email.toLowerCase()) throw new Error(`signed in as ${user.isAnonymous ? "anonymous" : user.email}`);
+      await waitForText(page, /Type the name you play under|Join the group/);
+      if (!/Delete my account/.test(await bodyText(page))) throw new Error("no Delete my account once signed in");
+    });
+    await deleteTestAccount(user || await authUser(page));
     await context.close();
   }
 
@@ -392,7 +448,7 @@ for (const [name, type] of browsers) {
     const context = await browser.newContext();
     const page = await context.newPage();
     let before = null, after = null;
-    await check(`R1-${tag}`, `${name}: rehearsal — the same anonymous account before and after the switch`, async () => {
+    await check(`R1-${tag}`, `${name}: rehearsal — the same anonymous account before and after the switch, now asked for an email and password`, async () => {
       await page.goto(`${BASE}/`, { waitUntil: "load" });
       before = await waitForUser(page);
       serve(NEW_DIR);
@@ -403,6 +459,10 @@ for (const [name, type] of browsers) {
       try { await waitForText(page, /Delete my account/, 30000); }
       catch { throw new Error("the page still ran v2.21.9 after the switch"); }
       if (!before || !after || before.uid !== after.uid) throw new Error(`before ${before && before.uid}, after ${after && after.uid}`);
+      /* Version 2.0 Phase B: the old guest session gets the keep-your-place screen. */
+      try { await waitForText(page, /Set your email and password/, 20000); }
+      catch { throw new Error("the old guest session was not asked for an email and password"); }
+      if (!/Keep my place/.test(await bodyText(page))) throw new Error("no Keep my place button");
     });
     serve(NEW_DIR);
     await deleteTestAccount(after || before);

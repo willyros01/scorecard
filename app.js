@@ -233,6 +233,9 @@ let toldAboutPromotion = false;
 let editingGame = false;
 let invitedGolfer = null;
 let invitedGroupName = "";
+/* Version 2.0 Phase B: which account card a signed-out (or old guest) screen
+   shows — "create" or "signin". Null means the screen's own default. */
+let accountMode = null;
 
 /* Kept beside the handlers so adding a button and forgetting the selector
    cannot happen silently — a test compares this list against the markup. */
@@ -353,6 +356,11 @@ function flashMsg(msg) { flash = msg; render(); setTimeout(() => { flash = null;
 function screenJoin() {
   const invite = db.readJoinLink();
 
+  /* Version 2.0 Phase B: nobody is signed in automatically any more. An
+     invitation or a code first asks for an account (create one, or sign in),
+     then shows the invitation itself — which can only be read with one. */
+  if (!db.hasUser()) return screenSignedOut(invite);
+
   /* Offline, "nothing found" only means "not downloaded yet" (Change 3,
      Part C). Never offer to start a new group, or call an invitation unknown,
      on the strength of that. */
@@ -390,7 +398,7 @@ function screenJoin() {
             <button class="btn" data-act="accept-named" ${joining ? "disabled" : ""}>${joining ? "Joining…" : "Yes, that's me — join"}</button>
           </div>
           <p class="hint">${invite.role === "admin"
-            ? "You are joining as an <b>admin</b>, so you will be asked to set a password afterwards."
+            ? "You are joining as an <b>admin</b>."
             : "Nothing to type. Your rounds and handicap come with you."}</p>
           <p class="hint">Not you? <button class="linkbtn" data-act="not-me">This is somebody else's invitation</button></p>
         </div>
@@ -405,14 +413,14 @@ function screenJoin() {
           ? "You have been invited to help run the group"
           : "You have been invited"}</h2>
         <p class="hint">${invite.role === "admin" && !invite.golferId
-          ? "You will be an admin: you can add courses, manage the roster and post rounds for anybody. You are not added as a player, so no handicap is kept for you. You will be asked to set a password next."
-          : "Type the name you play under and you are in. No account, no password."}</p>
+          ? "You will be an admin: you can add courses, manage the roster and post rounds for anybody. You are not added as a player, so no handicap is kept for you."
+          : "Type the name you play under and you are in."}</p>
         <label class="lbl">${invite.role === "admin" && !invite.golferId ? "Your name" : "Your name"}</label>
         <input class="field" name="join-name" value="${esc(joinForm.name)}" placeholder="e.g. Willy Rosales" autocomplete="name">
         <div class="inline-actions stacked">
           <button class="btn" data-act="accept-invite" ${joining ? "disabled" : ""}>${joining ? "Joining…" : "Join the group"}</button>
         </div>
-        <p class="hint">Using more than one device? Tap this same link on each of them.</p>
+        <p class="hint">Using more than one device? Sign in there with the same email and password.</p>
       </div>
       ${versionBlock()}
     </div>`;
@@ -425,9 +433,7 @@ function screenJoin() {
         <h2 class="panel-title">Join with a code</h2>
         <p class="hint">Six characters, like ABC234.</p>
         <div class="note tip">A group code joins you as a <b>guest</b>. If you are already an admin
-        here, your role is kept — the code will not take it away. If you are an admin of this group
-        on <b>another device</b>, sign in with your email and password instead, or this device
-        becomes a second, separate person.</div>
+        here, your role is kept — the code will not take it away.</div>
         <label class="lbl">Your name</label>
         <input class="field" name="join-name" value="${esc(joinForm.name)}" placeholder="e.g. Willy" autocomplete="name">
         <label class="lbl">Group code</label>
@@ -478,35 +484,199 @@ function screenJoin() {
         </div>
       </div>
       ${migrationCard()}
-    ` : `
+    ` : ""}
+    ${versionBlock()}
+  </div>`;
+}
+
+/* ---------------- Version 2.0 Phase B: accounts ---------------- */
+
+/* Signing in or creating an account needs a connection; say so up front. */
+function offlineAccountNote() {
+  return typeof navigator !== "undefined" && navigator.onLine === false
+    ? `<div class="note">You're offline. Signing in needs a connection — this screen works again once you reconnect.</div>`
+    : "";
+}
+
+/* The account card shared by the signed-out screen and the old-guest screen. */
+function signInCard({ heading, lead = "", backAct = "", backLabel = "" }) {
+  return `<div class="card padded">
+    <h2 class="panel-title">${heading}</h2>
+    ${lead}
+    <label class="lbl">Email</label>
+    <input class="field" name="email" type="email" value="${esc(authForm.email || "")}" placeholder="you@example.com" autocomplete="username" autocapitalize="none">
+    <label class="lbl">Password for this app</label>
+    <input class="field" name="password" type="password" placeholder="Your Scorecard password" autocomplete="current-password">
+    <div class="inline-actions stacked">
+      <button class="btn" data-act="sign-in" ${joining ? "disabled" : ""}>${joining ? "Signing in…" : "Sign in"}</button>
+      <button class="btn ghost" data-act="reset-password">Forgot the password</button>
+    </div>
+    <p class="hint"><b>Not your email password.</b> The Scorecard password, for this app only.</p>
+    ${backAct ? `<p class="hint"><button class="linkbtn" data-act="${backAct}">${backLabel}</button></p>` : ""}
+  </div>`;
+}
+
+/* Email, password and the password again — a typo in a new password locks
+   somebody out of an account they have only just made. */
+function newAccountFields() {
+  return `<label class="lbl">Email</label>
+    <input class="field" name="email" type="email" value="${esc(authForm.email || "")}" placeholder="you@example.com" autocomplete="username" autocapitalize="none">
+    <label class="lbl">Choose a password for this app</label>
+    <input class="field" name="password" type="password" placeholder="At least 6 characters" autocomplete="new-password">
+    <label class="lbl">The same password again</label>
+    <input class="field" name="password-again" type="password" placeholder="At least 6 characters" autocomplete="new-password">
+    <p class="hint"><b>Not your email password.</b> Pick a different one, for The Scorecard only.</p>`;
+}
+
+/* Nobody signed in. With an invitation or a code, the account comes first
+   (create one, or sign in to an existing one); otherwise it is Sign in. */
+function screenSignedOut(invite) {
+  const joiningSomething = !!invite || showCodeEntry;
+  const mode = accountMode || (joiningSomething ? "create" : "signin");
+  const adminOnly = invite && invite.role === "admin" && !invite.golferId;
+  const heading = invite
+    ? (adminOnly ? "You have been invited to help run a group" : "You have been invited to a group")
+    : showCodeEntry ? "Join with a code" : "Sign in";
+  const next = invite ? "Then you will see your invitation." : "Then you will type the group code.";
+
+  if (joiningSomething && mode === "create") {
+    return `<div class="stack">
+      ${flashBar()}
+      ${offlineAccountNote()}
       <div class="card padded">
-        <h2 class="panel-title">Sign in</h2>
-        ${platform.isApp()
-          ? `<p class="hint">Needed once, so you are the same person on every device.</p>
-             <p class="hint"><button class="linkbtn" data-act="open-guide">Used The Scorecard in Safari? Read this first</button></p>`
-          : `<p class="hint">Needed once, so this is the same account whether you open the app in Safari or from your home screen. Without it, each one becomes a separate person with a separate group — which is exactly what went wrong before.</p>`}
-        ${db.currentEmail() ? `<div class="note tip">This device is already signed in as <b>${esc(db.currentEmail())}</b>. Use that email and choose a password for it — that keeps your existing data. A different email would start a separate, empty account.</div>` : ""}
-        <label class="lbl">Email</label>
-        <input class="field" name="email" type="email" value="${esc(authForm.email || db.currentEmail())}" placeholder="you@example.com" autocomplete="username" autocapitalize="none">
-        <label class="lbl">Password</label>
-        <input class="field" name="password" type="password" placeholder="At least 6 characters" autocomplete="current-password">
+        <h2 class="panel-title">${heading}</h2>
+        <p class="hint">First, create your account: your email and a password. It is the same account on every device, so your groups and handicap follow you. ${next}</p>
+        ${newAccountFields()}
         <div class="inline-actions stacked">
-          <button class="btn" data-act="sign-in" ${joining ? "disabled" : ""}>${joining ? "Signing in…" : "Sign in"}</button>
+          <button class="btn" data-act="create-account" ${joining ? "disabled" : ""}>${joining ? "Creating your account…" : "Create my account"}</button>
         </div>
-        <p class="hint">New email? An account is made for you. <b>This is a password for this app only</b> — not your email password. Pick a different one.</p>
-        <div class="inline-actions stacked">
-          <button class="btn ghost" data-act="reset-password">Forgot the password</button>
-        </div>
+        <p class="hint"><button class="linkbtn" data-act="account-mode-signin">I already have an account — sign in</button></p>
+        ${showCodeEntry && !invite ? `<div class="inline-actions stacked"><button class="btn ghost" data-act="hide-code">Back</button></div>` : ""}
       </div>
+      ${versionBlock()}
+    </div>`;
+  }
+
+  return `<div class="stack">
+    ${flashBar()}
+    ${offlineAccountNote()}
+    ${signInCard({
+      heading,
+      lead: joiningSomething
+        ? `<p class="hint">Sign in with your email and Scorecard password. ${next}</p>`
+        : platform.isApp()
+          ? `<p class="hint">Use your email and Scorecard password. It is the same account on every device.</p>
+             <p class="hint"><button class="linkbtn" data-act="open-guide">Used The Scorecard in Safari? Read this first</button></p>`
+          : `<p class="hint">Use your email and Scorecard password. It is the same account in Safari, on your home screen and in the iPhone app.</p>`,
+      backAct: joiningSomething ? "account-mode-create" : "",
+      backLabel: "New here? Create your account",
+    })}
+    ${joiningSomething ? (showCodeEntry && !invite ? `<div class="inline-actions stacked"><button class="btn ghost" data-act="hide-code">Back</button></div>` : "") : `
       <p class="hint" style="text-align:center">
-        Been sent an invitation? Tap that link instead — guests need no account.
+        New to The Scorecard? You join a group by invitation: tap the link you were sent.
       </p>
       <p class="hint" style="text-align:center">
         <button class="linkbtn" data-act="enter-code">I was given a code</button>
-      </p>
-    `}
+      </p>`}
     ${versionBlock()}
   </div>`;
+}
+
+/* An old guest session from before Version 2.0. The rules refuse it
+   everything but finding its own groups and deleting itself, so the email and
+   password are set here, on the SAME account: nothing moves, nothing is lost. */
+function screenUpgrade() {
+  if (accountMode === "signin") {
+    return `<div class="stack">
+      ${flashBar()}
+      ${offlineAccountNote()}
+      ${signInCard({
+        heading: "Sign in",
+        lead: `<p class="hint">Only if you already made an account with an email and a password. This device's guest place is not carried over — for that, go back and set an email and password instead.</p>`,
+        backAct: "account-mode-create",
+        backLabel: "Back — keep my place on this device",
+      })}
+      ${versionBlock()}
+    </div>`;
+  }
+  return `<div class="stack">
+    ${flashBar()}
+      ${offlineAccountNote()}
+    <div class="card padded">
+      <h2 class="panel-title">Set your email and password</h2>
+      <p class="lead">The Scorecard now signs everybody in with an email and a password.</p>
+      <p class="hint">Set yours once. You stay the same person: your groups, your role, your rounds and your handicap all stay with you, here and on any device where you sign in.</p>
+      ${newAccountFields()}
+      <div class="inline-actions stacked">
+        <button class="btn" data-act="upgrade-account" ${joining ? "disabled" : ""}>${joining ? "Saving…" : "Keep my place"}</button>
+      </div>
+      <p class="hint"><button class="linkbtn" data-act="account-mode-signin">I already have an account with an email — sign in</button></p>
+      <p class="hint">Would rather leave? <b>Delete my account</b> is at the foot of this screen.</p>
+    </div>
+    ${versionBlock()}
+  </div>`;
+}
+
+/* Reads the new-account fields; returns null (after saying why) if unusable. */
+function readNewAccountFields() {
+  const email = ((view.querySelector('[name="email"]') || {}).value || "").trim();
+  const password = (view.querySelector('[name="password"]') || {}).value || "";
+  const again = (view.querySelector('[name="password-again"]') || {}).value || "";
+  authForm = { email, password: "" };
+  if (!email) { flashMsg("Type your email address"); return null; }
+  if (password.length < 6) { flashMsg("The password needs at least six characters"); return null; }
+  if (password !== again) { flashMsg("The two passwords are different. Type them again."); return null; }
+  return { email, password };
+}
+
+async function createAccountHere() {
+  const fields = readNewAccountFields();
+  if (!fields) return;
+  joining = true;
+  busy("Creating your account");
+  render();
+  try {
+    await db.createAccount(fields);
+    accountMode = null;
+    await loadInvitedDetails();
+    joining = false;
+    flashMsg("Account created. Use this email and password on your other devices.");
+  } catch (err) {
+    joining = false;
+    const code = String((err && (err.code || err.message)) || "");
+    if (code.includes("email-already-in-use")) {
+      accountMode = "signin";
+      flashMsg("That email already has an account. Sign in with it instead.");
+    } else {
+      openSignInProblem(err, fields.email);
+    }
+  } finally {
+    idle();
+    render();
+  }
+}
+
+async function upgradeAccount() {
+  const fields = readNewAccountFields();
+  if (!fields) return;
+  joining = true;
+  busy("Setting your email and password");
+  render();
+  try {
+    await db.setMyPassword(fields);
+    accountMode = null;
+    joining = false;
+    await settleGroup(db.recallAssociation());
+    await loadInvitedDetails();
+    tab = "enter";
+    flashMsg(`Done. You are signed in as ${fields.email} — use it on every device.`);
+  } catch (err) {
+    joining = false;
+    openSignInProblem(err, fields.email);
+  } finally {
+    idle();
+    render();
+  }
 }
 
 let legacy = null;          /* { v1, preview } once found */
@@ -2473,7 +2643,7 @@ function versionBlock() {
     <div class="sub">${rounds.length} round${rounds.length === 1 ? "" : "s"} · ${golfers.length} golfer${golfers.length === 1 ? "" : "s"} · ${courses.length} course${courses.length === 1 ? "" : "s"}</div>
     <div class="sub">${esc(sync.text)} · World Handicap System, best 8 of last 20</div>
     <div class="sub"><button class="linkbtn" data-act="open-user-guide">User guide</button> · <button class="linkbtn" data-act="open-support">Support</button> · <button class="linkbtn" data-act="open-privacy">Privacy</button></div>
-    <div class="sub"><button class="linkbtn" data-act="delete-account">Delete my account</button></div>
+    ${db.hasUser() ? `<div class="sub"><button class="linkbtn" data-act="delete-account">Delete my account</button></div>` : ""}
   </section>`;
 }
 
@@ -2869,6 +3039,10 @@ function renderNow() {
   try {
     if (!ready || settling) {
       view.innerHTML = bootCard();
+    } else if (db.isAnonymousSession()) {
+      tabsEl.innerHTML = "";
+      view.innerHTML = screenUpgrade();
+      document.getElementById("brandSub").textContent = "One step to keep your place";
     } else if (!db.currentAssociation()) {
       tabsEl.innerHTML = "";
       view.innerHTML = screenJoin();
@@ -3649,7 +3823,11 @@ view.addEventListener("click", async (e) => {
     /* Named apart from the Admin tab's "show-code" on purpose: both lived in
        this one switch, so the first case matched and the Show the code button
        silently did nothing at all. */
-    case "enter-code": showCodeEntry = true; return render();
+    case "enter-code": showCodeEntry = true; accountMode = null; return render();
+    case "create-account": return createAccountHere();
+    case "upgrade-account": return upgradeAccount();
+    case "account-mode-signin": accountMode = "signin"; return render();
+    case "account-mode-create": accountMode = "create"; return render();
     case "hide-code": showCodeEntry = false; return render();
     case "create-group": return createGroup();
     case "import-v1": return importV1();
@@ -4557,7 +4735,13 @@ async function signIn() {
   try {
     const result = await db.signInWithEmail({ email, password });
     joining = false;
-    await settleGroup(db.currentAssociation());
+    accountMode = null;
+    if (db.readJoinLink()) {
+      /* Signed in from an invitation: show the invitation next. */
+      await loadInvitedDetails();
+    } else {
+      await settleGroup(db.currentAssociation() || db.recallAssociation());
+    }
 
     /* Land on Enter. Signing in used to leave people on whichever tab they
        happened to be on — usually Admin, which is not where anybody wants to
@@ -4617,6 +4801,13 @@ function openSignInProblem(error, email) {
   } else if (code.includes("weak-password")) {
     title = "Password too short";
     detail = "Use at least six characters.";
+  } else if (code.includes("email-already-in-use") || code.includes("credential-already-in-use")) {
+    title = "That email already has an account";
+    detail = "Sign in with it instead, or use a different email.";
+    offerReset = true;
+  } else if (code.includes("wrong-email")) {
+    title = "That is not this account's email";
+    detail = "Use the email this account already has.";
   }
 
   sheetEl.hidden = false;
@@ -5092,6 +5283,9 @@ db.onChange((s) => { sync = s; render(); });
 async function loadInvitedDetails() {
   invitedGolfer = null;
   invitedGroupName = "";
+  /* Only an account can read an invitation (Phase B); signed out or an old
+     guest session, the account screen comes first. */
+  if (!db.hasUser() || db.isAnonymousSession()) return;
   const link = db.readJoinLink();
   if (link && link.golferId) {
     invitedGolfer = await db.golferNamedInLink(link.golferId);
@@ -5110,18 +5304,20 @@ async function loadInvitedDetails() {
   await db.checkPendingDeletion();
   markBoot("group");
 
-  const invite = db.readJoinLink();
   const remembered = db.recallAssociation();
 
-  await settleGroup(remembered);
+  /* An old guest session (Phase B) can read nothing until it has an email and
+     password, so it goes straight to that screen. Signed out: nothing to load. */
+  const account = db.hasUser() && !db.isAnonymousSession();
+  if (account) await settleGroup(remembered);
   markBoot("data");
 
   /* Look for a version 1 scorecard whether or not there is already a group.
      Somebody who created one first still needs a way to bring their data in. */
-  legacy = await db.readLegacyV1();
+  if (account) legacy = await db.readLegacyV1();
 
   /* If the link names somebody, fetch them so the screen can greet them. */
-  await loadInvitedDetails();
+  if (account) await loadInvitedDetails();
 
   markBoot("ready");
   ready = true;
@@ -5131,7 +5327,7 @@ async function loadInvitedDetails() {
 
   /* Coming back online on the first screen: look for the groups again. */
   addEventListener("online", async () => {
-    if (db.currentAssociation()) return render();
+    if (db.currentAssociation() || !db.hasUser() || db.isAnonymousSession()) return render();
     await settleGroup(db.recallAssociation());
     await loadInvitedDetails();
     render();

@@ -53,6 +53,7 @@
  */
 
 const stateEl = document.getElementById("state");
+let signedOut = false;   /* set by connect() when nobody is signed in */
 const findingsEl = document.getElementById("findings");
 const actionsEl = document.getElementById("actions");
 const logEl = document.getElementById("log");
@@ -100,7 +101,9 @@ async function connect() {
 
   return new Promise((resolve) => {
     auth.onAuthStateChanged(authority, async (user) => {
-      if (!user) { try { await auth.signInAnonymously(authority); } catch { resolve(false); } return; }
+      /* Version 2.0: no anonymous sign-in. This tool uses the sign-in the app
+         left in this browser; without one there is nothing it may read. */
+      if (!user || user.isAnonymous) { signedOut = true; resolve(false); return; }
       uid = user.uid;
       email = user.email || "";
       resolve(true);
@@ -552,7 +555,7 @@ async function repair() {
 
 (async function run() {
   try {
-    if (!(await connect())) { stateEl.textContent = "Could not sign in to Firebase."; return; }
+    if (!(await connect())) { stateEl.textContent = signedOut ? "Not signed in. Open The Scorecard in this browser, sign in with your email and password, then open this page again." : "Could not sign in to Firebase."; return; }
     stateEl.textContent = "Checking your data…";
     findings = await inspect();
     draw();
