@@ -324,7 +324,7 @@ await ada.goto(APP, { waitUntil: "load" });
 await check("E12", "an admin invites regular members only: no Admin choice on the invitation", async () => {
   await waitForText(ada, /Sign in/);
   await signIn(ada, A1.email, A1.password);
-  await waitForText(ada, /Saturday Group/);
+  await waitForText(ada, /Saturday Group/i);
   await tab(ada, "manage");
   await ada.locator('[data-invite-golfer="gJ"]').first().click();
   await waitForText(ada, /Invite Jay Unjoined/);
