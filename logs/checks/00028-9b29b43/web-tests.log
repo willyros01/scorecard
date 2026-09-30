@@ -1,0 +1,42 @@
+--- webkit ---
+PASS  W1-WK  webkit: the app starts and signs in anonymously
+PASS  W2-WK  webkit: no uncaught errors while starting
+PASS  C6-WK  webkit: no Google sign-in anywhere on the first screen
+PASS  W3-WK  webkit: "Delete my account" is at the foot of the screen
+PASS  W6-WK  webkit: User guide, Support and Privacy links at the foot of the screen
+PASS  C1-WK  webkit: invitation links use the Cuberoot address (Change 1)
+PASS  C1b-WK  webkit: the guide link is the Cuberoot guide
+PASS  W4-WK  webkit: a ?join= link in the address bar is read as before
+PASS  O3w-WK  webkit: offline, the first screen says so and never offers to create a group
+PASS  C2-WK  webkit (app): the link that opened the app is read (cold start)
+PASS  C4b-WK  webkit (app): the same link delivered again is ignored; a new one is taken once
+PASS  C4-WK  webkit (app): a link tapped while the app is open is handled
+PASS  W5-WK  webkit (app): first screen uses the app wording and links to the moving guide
+PASS  R1-WK  webkit: rehearsal — the same anonymous account before and after the switch
+SKIP  R1o-WK  webkit: rehearsal — the test owner stays signed in across the switch  —  TEST_OWNER_EMAIL / TEST_OWNER_PASSWORD not set yet
+SKIP  R2-WK  webkit: rehearsal — a round queued offline on v2.21.9 uploads once after the switch  —  TEST_OWNER_EMAIL / TEST_OWNER_PASSWORD not set yet
+SKIP  R3-WK  webkit: rehearsal — the remembered group opens straight away after the switch  —  TEST_OWNER_EMAIL / TEST_OWNER_PASSWORD not set yet
+SKIP  R4-WK  webkit: rehearsal — after the switch: no Google button, Delete my account present  —  TEST_OWNER_EMAIL / TEST_OWNER_PASSWORD not set yet
+--- chromium ---
+PASS  W1-CH  chromium: the app starts and signs in anonymously
+PASS  W2-CH  chromium: no uncaught errors while starting
+PASS  C6-CH  chromium: no Google sign-in anywhere on the first screen
+PASS  W3-CH  chromium: "Delete my account" is at the foot of the screen
+PASS  W6-CH  chromium: User guide, Support and Privacy links at the foot of the screen
+PASS  C1-CH  chromium: invitation links use the Cuberoot address (Change 1)
+PASS  C1b-CH  chromium: the guide link is the Cuberoot guide
+PASS  W4-CH  chromium: a ?join= link in the address bar is read as before
+PASS  C13w-CH  chromium: the browser still registers its offline service worker
+PASS  O3w-CH  chromium: offline, the first screen says so and never offers to create a group
+PASS  C2-CH  chromium (app): the link that opened the app is read (cold start)
+PASS  C4b-CH  chromium (app): the same link delivered again is ignored; a new one is taken once
+PASS  C4-CH  chromium (app): a link tapped while the app is open is handled
+PASS  C13-CH  chromium (app): no service worker inside the app (Change 9)
+PASS  W5-CH  chromium (app): first screen uses the app wording and links to the moving guide
+PASS  R1-CH  chromium: rehearsal — the same anonymous account before and after the switch
+SKIP  R1o-CH  chromium: rehearsal — the test owner stays signed in across the switch  —  TEST_OWNER_EMAIL / TEST_OWNER_PASSWORD not set yet
+SKIP  R2-CH  chromium: rehearsal — a round queued offline on v2.21.9 uploads once after the switch  —  TEST_OWNER_EMAIL / TEST_OWNER_PASSWORD not set yet
+SKIP  R3-CH  chromium: rehearsal — the remembered group opens straight away after the switch  —  TEST_OWNER_EMAIL / TEST_OWNER_PASSWORD not set yet
+SKIP  R4-CH  chromium: rehearsal — after the switch: no Google button, Delete my account present  —  TEST_OWNER_EMAIL / TEST_OWNER_PASSWORD not set yet
+
+RESULT: 30 passed, 0 failed, 8 skipped
