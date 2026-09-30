@@ -124,7 +124,12 @@ const newPage = async () => {
   context.setDefaultTimeout(20000);
   const page = await context.newPage();
   page.errors = [];
-  page.on("pageerror", (e) => page.errors.push(String(e.message || e)));
+  page.on("pageerror", (e) => {
+    /* The first of each error with where it happened, so a failure here says
+       what to fix. */
+    const line = String(e.message || e);
+    if (!page.errors.includes(line)) { page.errors.push(line); console.log(`      page error: ${String(e.stack || e).split("\n").slice(0, 8).join(" <- ")}`); }
+  });
   return page;
 };
 
@@ -208,6 +213,8 @@ await check("E5", "the applicant chooses a password from the email, signs in and
   const golfer = await getDoc(`golfers/${member.golferId}`);
   if (golfer.linkedUid !== uid) throw new Error("the golfer is not linked");
 });
+
+console.log(`      after E5 the member's screen says: ${(await text(pat)).replace(/\s+/g, " ").slice(0, 400)}`);
 
 /* E6–E8: the new member reports and blocks */
 await check("E6", "the member sees the group ranking with Report or block beside other golfers", async () => {
