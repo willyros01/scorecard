@@ -126,7 +126,7 @@ allowed "ACC3 an email member lists the directory"                           que
 allowed "ACC3 a new email account reads courses"                             get_as "${TN}" "courses/c1"
 allowed "ACC3 a new email account reads an invitation (to accept it)"         get_as "${TN}" "associations/G1/invites/gU"
 allowed "ACC3 a new email account greets itself by an unclaimed golfer name" get_as "${TN}" "golfers/gU"
-allowed "ACC3 a new email account creates its own group"                     write_as "${TN}" "associations/GN" "{\"name\":\"New group\",\"ownerUid\":\"${N}\"}"
+refused "ACC3 a new email account cannot create a group (Phase D: group creators only)" write_as "${TN}" "associations/GN" "{\"name\":\"New group\",\"ownerUid\":\"${N}\"}"
 allowed "ACC3 a new email account adds it to its own group list"             write_as "${TN}" "userGroups/${N}/groups/GN" '{"assocId":"GN"}'
 
 echo "== ACC4 the guest sets an email and password on the SAME account and is let back in"

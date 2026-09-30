@@ -1,6 +1,17 @@
 rules_version = '2';
 
-/* LAST CHANGED FOR VERSION 2.0, PHASE C (the PUBLIC group) — not published yet
+/* LAST CHANGED FOR VERSION 2.0, PHASE D (groups and admins) — not published yet
+ *
+ * What changes in Phase D (Willy's rules, Sep 30):
+ *   - Only accounts listed in groupCreators may create a group. The setup
+ *     script lists Willy's account; no app can write the list.
+ *   - The admin invitation secret moves from the group document (which every
+ *     member can read) to associations/{id}/secrets/admin, which only the
+ *     owner can read. So only the owner can send an admin invitation; admins
+ *     invite regular members only.
+ *   - Only the owner promotes or demotes (unchanged).
+ *   - A group's admins may remove its regular members — never the owner, never
+ *     another admin. (This replaces the PUBLIC-only rule of Phase C.)
  *
  * What changes in Phase C (onboarding design Revision 2, R1-R3, R11, R12):
  *   - publicApplications/{email}: anyone, even signed out, may create ONE
@@ -182,6 +193,16 @@ service cloud.firestore {
       return get(memberPath(assocId)).data.get('golferId', '');
     }
 
+    /* Phase D: the accounts allowed to create groups (Willy's). */
+    function groupCreator() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/groupCreators/$(request.auth.uid));
+    }
+
+    function adminSecret(assocId) {
+      return get(/databases/$(database)/documents/associations/$(assocId)/secrets/admin).data;
+    }
+
     /* Phase C: the PUBLIC group's fixed id, and the confirmed email of the
        caller as a document key (lower case). */
     function publicId() {
@@ -223,14 +244,20 @@ service cloud.firestore {
 
       /* Phase C: never the PUBLIC group's id — that group is created once, by
          the owner's setup script. */
-      allow create: if signedIn()
+      /* Phase D: only a group creator, and never with the admin secret on the
+         group document itself. */
+      allow create: if groupCreator()
         && assocId != publicId()
-        && request.resource.data.ownerUid == request.auth.uid;
+        && request.resource.data.ownerUid == request.auth.uid
+        && !request.resource.data.keys().hasAny(['adminCode']);
 
       /* The owner may rename the group or rotate the join code, but may not
          hand ownership away by editing this document. */
       allow update: if isOwner(assocId)
-        && request.resource.data.ownerUid == resource.data.ownerUid;
+        && request.resource.data.ownerUid == resource.data.ownerUid
+        /* Phase D: the admin secret may only stay as it was or be removed
+           (moved to secrets/admin), never set here again. */
+        && request.resource.data.get('adminCode', null) in [null, resource.data.get('adminCode', null)];
 
       /* Only whoever created it, and only ever their own. Needed so the
          cleanup tool can remove groups that failed to set up properly. */
@@ -275,7 +302,8 @@ service cloud.firestore {
                into an admin one, because the guest code will not match. */
             (assocId != publicId()
               && request.resource.data.role == 'admin'
-              && request.resource.data.joinCode == association(assocId).adminCode)
+              && exists(/databases/$(database)/documents/associations/$(assocId)/secrets/admin)
+              && request.resource.data.joinCode == adminSecret(assocId).adminCode)
             ||
             /* Phase C: an approved applicant joins the PUBLIC group, as the
                golfer the reviewer chose, once their email is confirmed. */
@@ -302,10 +330,18 @@ service cloud.firestore {
            removed by anybody, including themselves. */
         allow delete: if (memberUid != association(assocId).ownerUid
             && (memberUid == request.auth.uid || isOwner(assocId)))
-          /* Phase C: a PUBLIC reviewer may remove a regular member. */
-          || (assocId == publicId() && isAdmin(assocId) && resource.data.role == 'member')
+          /* Phase D: a group's admins may remove its regular members. */
+          || (isAdmin(assocId) && resource.data.role == 'member')
           /* or the owner clearing the group out before deleting it */
           || (signedIn() && association(assocId).ownerUid == request.auth.uid);
+      }
+
+      /* ---------------- Phase D: the owner's secrets ---------------- */
+
+      /* The admin invitation secret. Only the owner reads or changes it, so
+         only the owner can send an admin invitation. */
+      match /secrets/{secretId} {
+        allow read, write: if isOwner(assocId);
       }
 
       /* ---------------- invitation claims ---------------- */
@@ -618,6 +654,13 @@ service cloud.firestore {
         && request.resource.data.keys().hasOnly(['name', 'blockedAt'])
         && request.resource.data.get('name', '') is string
         && request.resource.data.get('name', '').size() <= 120;
+    }
+
+    /* Phase D: who may create groups. You may check your own entry; nobody
+       can list it, and no app can write it (the setup script does). */
+    match /groupCreators/{userId} {
+      allow get: if signedIn() && userId == request.auth.uid;
+      allow list, write: if false;
     }
 
     /* ---------------- account deletion requests ---------------- */

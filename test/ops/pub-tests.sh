@@ -170,7 +170,7 @@ echo "== PUB3 the PUBLIC group cannot be entered any other way"
 refused "PUB3 an outsider cannot join PUBLIC with its code"                   write_as "${TX}" "associations/PUBLIC/members/${X}" "{\"uid\":\"${X}\",\"role\":\"member\",\"joinCode\":\"PUB123\"}"
 refused "PUB3 an outsider cannot join PUBLIC with no approval"                ts_write "${TX}" "associations/PUBLIC/members/${X}" "{\"uid\":\"${X}\",\"role\":\"member\",\"golferId\":\"gP\"}" joinedAt
 refused "PUB3 nobody can create a group with the id PUBLIC"                   write_as "${TX}" "associations/PUBLIC" "{\"name\":\"Mine\",\"ownerUid\":\"${X}\"}"
-allowed "PUB3 ordinary groups are still created as before"                    write_as "${TX}" "associations/GX" "{\"name\":\"Mine\",\"ownerUid\":\"${X}\"}"
+refused "PUB3 an account that is not a group creator cannot create a group (Phase D)" write_as "${TX}" "associations/GX" "{\"name\":\"Mine\",\"ownerUid\":\"${X}\"}"
 allowed "PUB3 private groups still join by code"                             write_as "${TX}" "associations/G1/members/${X}" "{\"uid\":\"${X}\",\"role\":\"member\",\"joinCode\":\"G1CODE\"}"
 refused "PUB3 a PUBLIC member cannot add a golfer to the PUBLIC roster"       write_as "${TM}" "associations/PUBLIC/roster/gZ" '{"golferId":"gZ"}'
 allowed "PUB3 a reviewer adds a golfer to the PUBLIC roster"                  write_as "${TR}" "associations/PUBLIC/roster/gP" '{"golferId":"gP"}'
