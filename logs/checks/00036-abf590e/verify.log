@@ -1,0 +1,7 @@
+OK    V1 npm ci succeeded from the committed lockfile
+OK    V2 every package is exactly the approved version
+
+  vendor/firebase/firebase-10.12.0.js  376.4kb
+
+⚡ Done in 49ms
+FAIL  V3 the committed bundle differs from a fresh build

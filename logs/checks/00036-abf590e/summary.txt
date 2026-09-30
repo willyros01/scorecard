@@ -1,0 +1,17 @@
+kind:    checks
+result:  bootstrap=success verify=failure web=skipped
+branch:  v2
+commit:  abf590ea5c013fc68e4cd673f06382df3fa9887d
+run:     36 (id 36721954865)
+time:    2026-09-30T13:29:21Z
+
+--- last lines of bootstrap.log ---
+
+--- last lines of verify.log ---
+OK    V1 npm ci succeeded from the committed lockfile
+OK    V2 every package is exactly the approved version
+
+  vendor/firebase/firebase-10.12.0.js  376.4kb
+
+⚡ Done in 49ms
+FAIL  V3 the committed bundle differs from a fresh build
