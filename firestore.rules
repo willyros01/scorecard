@@ -12,6 +12,8 @@ rules_version = '2';
  *   - Only the owner promotes or demotes (unchanged).
  *   - A group's admins may remove its regular members — never the owner, never
  *     another admin. (This replaces the PUBLIC-only rule of Phase C.)
+ *   - The group creator (Willy) may list every golfer, as today, so the Tidy
+ *     page keeps working unchanged. Nobody else may.
  *
  * What changes in Phase C (onboarding design Revision 2, R1-R3, R11, R12):
  *   - publicApplications/{email}: anyone, even signed out, may create ONE
@@ -507,7 +509,10 @@ service cloud.firestore {
         || adminOfAny(resource.data.get('groups', [])));
       /* Lists only of your OWN golfer (a query where linkedUid is you) — how
          the app finds which golfer you are, and what Delete my account uses. */
-      allow list: if authed() && resource.data.get('linkedUid', null) == request.auth.uid;
+      /* Phase D (Willy's choice B): the group creator may also list every
+         golfer, as today, so Tidy keeps working unchanged. Nobody else. */
+      allow list: if (authed() && resource.data.get('linkedUid', null) == request.auth.uid)
+        || groupCreator();
 
       /* Creating is an everyday act — adding a person to a roster. The name
          index below stops duplicates. */

@@ -135,6 +135,11 @@ refused "GRP1 nobody can list the group creators"                             qu
 refused "GRP1 nobody can add themselves as a group creator"                   write_as "${TN}" "groupCreators/${N}" '{"note":"me"}'
 refused "GRP1 not even Willy, from the app"                                   write_as "${TW}" "groupCreators/${M}" '{"note":"x"}'
 
+put "golfers/gAny" '{"name":"Anybody","linkedUid":null,"groups":["G2"]}'
+allowed "GRP1 Willy (group creator) lists every golfer, for Tidy"             query_as "${TW}" "" golfers false
+refused "GRP1 an admin cannot list every golfer"                              query_as "${TAD}" "" golfers false
+refused "GRP1 a regular member cannot list every golfer"                      query_as "${TM}" "" golfers false
+
 echo "== GRP2 admin invitations: the owner only"
 allowed "GRP2 the owner reads the admin secret"                               get_as "${TW}" "associations/G1/secrets/admin"
 refused "GRP2 an admin cannot read the admin secret"                          get_as "${TAD}" "associations/G1/secrets/admin"

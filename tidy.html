@@ -94,9 +94,19 @@ async function connect() {
     import(`${SDK}/firebase-auth.js`),
     import(`${SDK}/firebase-firestore.js`),
   ]);
-  const instance = app.initializeApp(config.firebaseConfig);
+  /* Automated tests only: on this machine's own address with ?emulators=1,
+     the page talks to the Firebase emulators, exactly as the app does. */
+  const emulators = ["localhost", "127.0.0.1"].includes(location.hostname)
+    && new URLSearchParams(location.search).has("emulators");
+  const instance = app.initializeApp(emulators
+    ? { apiKey: "fake-api-key", projectId: "demo-scorecard", authDomain: "localhost", appId: "demo" }
+    : config.firebaseConfig);
   const authority = auth.getAuth(instance);
   db = store.getFirestore(instance);
+  if (emulators) {
+    auth.connectAuthEmulator(authority, "http://127.0.0.1:9099", { disableWarnings: true });
+    store.connectFirestoreEmulator(db, "127.0.0.1", 8080);
+  }
   mod = store;
 
   return new Promise((resolve) => {

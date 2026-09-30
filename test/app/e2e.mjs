@@ -127,6 +127,17 @@ await put(`associations/G1/members/${W.uid}`, { uid: W.uid, role: "owner", displ
 await put(`associations/G1/members/${A1.uid}`, { uid: A1.uid, role: "admin", displayName: "Ada Admin" });
 await put(`associations/G1/members/${R1.uid}`, { uid: R1.uid, role: "member", displayName: "Rex Regular", golferId: "gR" });
 await put(`userGroups/${A1.uid}/groups/G1`, { assocId: "G1", name: "Saturday Group" });
+/* For Tidy (E14): one person recorded twice in G1, and one unused golfer. */
+await put("golfers/gD1", { name: "Dup Person", nameKey: "dup-person", linkedUid: null, groups: ["G1"], roundCount: 0 });
+await put("golfers/gD2", { name: "Dup Person", nameKey: "dup-person", linkedUid: null, groups: ["G1"], roundCount: 0 });
+await put("golferNames/dup-person", { golferId: "gD1", name: "Dup Person" });
+await put("associations/G1/roster/gD1", { golferId: "gD1" });
+await put("associations/G1/roster/gD2", { golferId: "gD2" });
+await put("associations/G1/rounds/rD1", { id: "rD1", golferId: "gD1", assocId: "G1", date: "2026-09-01", differential: 10.0, gross: 85 });
+await put("associations/G1/rounds/rD2", { id: "rD2", golferId: "gD1", assocId: "G1", date: "2026-09-02", differential: 12.0, gross: 87 });
+await put("associations/G1/rounds/rD3", { id: "rD3", golferId: "gD2", assocId: "G1", date: "2026-09-03", differential: 11.0, gross: 86 });
+await put("golfers/gU", { name: "Una Unused", nameKey: "una-unused", linkedUid: null, groups: ["G1"] });
+await put("golferNames/una-unused", { golferId: "gU", name: "Una Unused" });
 for (const [id, name, linked] of [["gR", "Rex Regular", R1.uid], ["gI", "Ivy Invitee", null], ["gJ", "Jay Unjoined", null]]) {
   await put(`golfers/${id}`, { name, nameKey: name.toLowerCase().replace(/[^a-z0-9]+/g, "-"), linkedUid: linked, groups: ["G1"] });
   await put(`golferNames/${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`, { golferId: id, name });
@@ -340,6 +351,22 @@ await check("E13", "an admin removes a regular member of their group, and has no
   await waitForText(ada, /no longer have access/);
   if (await getDoc(`associations/G1/members/${R1.uid}`)) throw new Error("Rex is still a member");
   if (ada.errors.length) throw new Error(ada.errors.join(" | "));
+});
+
+/* E14: Tidy, run by Willy, under the Version 2.0 rules */
+await check("E14", "Tidy finds and fixes duplicates and unused golfers across Willy's groups", async () => {
+  await owner.goto(`http://localhost:${PORT}/tidy.html?emulators=1`, { waitUntil: "load" });
+  await waitForText(owner, /recorded twice or more/, 30000);
+  const found = await text(owner);
+  if (!/in no group, with no rounds/.test(found)) throw new Error(`the unused golfer was not found: ${found.replace(/\s+/g, " ").slice(0, 400)}`);
+  await owner.locator("#fix").click();
+  await waitForText(owner, /Done\. \d+ fixed/, 30000);
+  const log = (await owner.evaluate(() => document.getElementById("log").innerText)).replace(/\s+/g, " ");
+  const problems = [];
+  if ((await getDoc("associations/G1/rounds/rD3")).golferId !== "gD1") problems.push("the duplicate's round was not moved");
+  if (!(await getDoc("golfers/gD2")).archived) problems.push("the duplicate record was not archived");
+  if (!(await getDoc("golfers/gU")).archived) problems.push("the unused golfer was not archived");
+  if (problems.length) throw new Error(`${problems.join("; ")}. Tidy's log: ${log.slice(0, 600)}`);
 });
 
 await browser.close();
