@@ -205,8 +205,12 @@ await check("E5", "the applicant chooses a password from the email, signs in and
   await usePasswordEmail(APPLICANT.email, APPLICANT.password);
   await waitForText(pat, /Sign in/);
   await signIn(pat, APPLICANT.email, APPLICANT.password);
-  await waitForText(pat, /Welcome to the public group/);
   const uid = (await accountByEmail(APPLICANT.email)).localId;
+  /* The welcome message is brief; what matters is that the app is in the group. */
+  const end = Date.now() + 20000;
+  while (Date.now() < end && (await pat.evaluate(async () => (await import("/store.js")).currentAssociation())) !== "PUBLIC") await pat.waitForTimeout(300);
+  if ((await pat.evaluate(async () => (await import("/store.js")).currentAssociation())) !== "PUBLIC") throw new Error("the app is not in the PUBLIC group");
+  await waitForText(pat, /Enter/);
   const member = await getDoc(`associations/PUBLIC/members/${uid}`);
   if (!member || member.role !== "member") throw new Error("no membership");
   if (await getDoc(`publicApprovals/${APPLICANT.email}`)) throw new Error("the approval was not removed");

@@ -1473,6 +1473,9 @@ function screenSummary() {
         </div>
       </div>
     </section>
+    ${/* A regular member still sees the group's ranking (names and indexes)
+         before posting anything — and, in the public group, Report or block. */
+      !db.canManage() ? groupRankingSection() : ""}
     ${versionBlock()}`;
   }
 
