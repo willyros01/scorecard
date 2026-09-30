@@ -30,6 +30,7 @@ import {
   sendEmailVerification,
   deleteUser,
   signOut,
+  connectAuthEmulator,
 } from "firebase/auth/web-extension";
 
 import {
@@ -56,6 +57,7 @@ import {
   serverTimestamp,
   arrayUnion,
   arrayRemove,
+  connectFirestoreEmulator,
 } from "firebase/firestore";
 
 export const app = { initializeApp, deleteApp };
@@ -76,6 +78,7 @@ export const auth = {
   sendEmailVerification,
   deleteUser,
   signOut,
+  connectAuthEmulator,
 };
 
 export const store = {
@@ -102,4 +105,5 @@ export const store = {
   serverTimestamp,
   arrayUnion,
   arrayRemove,
+  connectFirestoreEmulator,
 };

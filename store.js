@@ -74,6 +74,19 @@ const report = (e) => { const [short, full] = describe(e); setError(short, full)
 
 /* ---------------- boot ---------------- */
 
+/* Automated tests only. On this machine's own address (localhost) with
+   ?emulators=1, the app talks to the Firebase emulators running beside the
+   tests — a demo project that cannot reach any live data. Anywhere else,
+   including the published site and the iPhone app, this is always false. */
+const EMULATORS = (() => {
+  try {
+    return ["localhost", "127.0.0.1"].includes(location.hostname)
+      && new URLSearchParams(location.search).has("emulators");
+  } catch { return false; }
+})();
+const EMULATOR_CONFIG = { apiKey: "fake-api-key", projectId: "demo-scorecard", authDomain: "localhost", appId: "demo" };
+const AUTH_EMULATOR = "http://127.0.0.1:9099";
+
 export async function init() {
   let config;
   try {
@@ -90,13 +103,15 @@ export async function init() {
 
   try {
     const { app, auth, store } = await import(FIREBASE_BUNDLE);
-    const instance = app.initializeApp(config.firebaseConfig);
+    const firebaseConfig = EMULATORS ? EMULATOR_CONFIG : config.firebaseConfig;
+    const instance = app.initializeApp(firebaseConfig);
     /* IndexedDB is where getAuth has always kept the sign-in, so existing web
        sign-ins carry straight over (proved by rehearsal R1). The no-remote-code
        auth build offers IndexedDB only. getAuth itself can hang inside the app. */
     const authInstance = auth.initializeAuth(instance, {
       persistence: [auth.indexedDBLocalPersistence],
     });
+    if (EMULATORS) auth.connectAuthEmulator(authInstance, AUTH_EMULATOR, { disableWarnings: true });
     /* Inside the app every document read is kept on the device across
        restarts (Part B). In a browser Firestore stays memory-only, as today. */
     let database;
@@ -112,7 +127,8 @@ export async function init() {
     } else {
       database = store.getFirestore(instance);
     }
-    fb = { mod: { app, auth, store }, auth: authInstance, db: database, config: config.firebaseConfig };
+    if (EMULATORS) store.connectFirestoreEmulator(database, "127.0.0.1", 8080);
+    fb = { mod: { app, auth, store }, auth: authInstance, db: database, config: firebaseConfig };
 
     await new Promise((resolve) => {
       auth.onAuthStateChanged(fb.auth, async (user) => {
@@ -1292,6 +1308,7 @@ export async function approveApplication({ application, golferName }) {
   const second = fb.mod.app.initializeApp(fb.config, name2);
   try {
     const secondAuth = fb.mod.auth.initializeAuth(second, { persistence: fb.mod.auth.inMemoryPersistence });
+    if (EMULATORS) fb.mod.auth.connectAuthEmulator(secondAuth, AUTH_EMULATOR, { disableWarnings: true });
     try {
       await fb.mod.auth.createUserWithEmailAndPassword(secondAuth, application.email, randomPassword());
     } catch (e) {

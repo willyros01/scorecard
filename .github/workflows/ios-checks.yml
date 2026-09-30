@@ -35,11 +35,18 @@ jobs:
           exec > >(tee bootstrap.log) 2>&1
           changed=no
           if [ ! -f package-lock.json ]; then npm install --no-audit --no-fund; changed=yes; fi
-          if [ ! -f vendor/firebase/firebase-10.12.0.js ]; then npm ci --no-audit --no-fund; npm run -s bundle; changed=yes; fi
+          # The bundle is rebuilt whenever the list of Firebase functions
+          # (build/firebase-entry.js) or the locked packages change; the
+          # fingerprint of both is kept beside the bundle.
+          want="$(cat build/firebase-entry.js package-lock.json | sha256sum | cut -c1-16)"
+          have="$(cat vendor/firebase/bundle.source 2>/dev/null || true)"
+          if [ ! -f vendor/firebase/firebase-10.12.0.js ] || [ "$want" != "$have" ]; then
+            npm ci --no-audit --no-fund; npm run -s bundle; echo "$want" > vendor/firebase/bundle.source; changed=yes
+          fi
           if [ "$changed" = yes ]; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add package-lock.json vendor/firebase/firebase-10.12.0.js
+            git add package-lock.json vendor/firebase/firebase-10.12.0.js vendor/firebase/bundle.source
             git commit -m "Add the generated lockfile and Firebase bundle (exact approved versions)"
             git push origin HEAD:${GITHUB_REF_NAME}
           fi
