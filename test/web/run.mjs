@@ -288,6 +288,12 @@ for (const [name, type] of browsers) {
     });
     await check(`C6-${tag}`, `${name}: no Google sign-in anywhere on the first screen`, async () => !/google/i.test(await bodyText(page)));
     await check(`W3-${tag}`, `${name}: "Delete my account" is at the foot of the screen`, async () => /Delete my account/.test(await bodyText(page)));
+    await check(`W6-${tag}`, `${name}: User guide, Support and Privacy links at the foot of the screen`, async () => {
+      const t = await bodyText(page);
+      if (!/User guide/.test(t) || !/Support/.test(t) || !/Privacy/.test(t)) throw new Error("a link is missing");
+      const urls = await page.evaluate(async () => { const m = await import("/platform.js"); return [m.guideUrl(), m.supportUrl(), m.privacyUrl()]; });
+      if (urls.join(" ") !== "https://www.cuberoot-systems.com/scorecard/guide/ https://www.cuberoot-systems.com/scorecard/support/ https://www.cuberoot-systems.com/scorecard/privacy/") throw new Error(urls.join(" "));
+    });
     await check(`C1-${tag}`, `${name}: invitation links use the Cuberoot address (Change 1)`, async () => {
       const link = await page.evaluate(async () => (await import("/store.js")).joinLink({ id: "G1", joinCode: "ABC123" }));
       if (link !== "https://www.cuberoot-systems.com/scorecard/join/?join=G1.ABC123") throw new Error(link);

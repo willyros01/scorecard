@@ -23,6 +23,9 @@ const JOIN_BASE = "https://www.cuberoot-systems.com/scorecard/join/";
 export const webBase = () => WEB_BASE;
 /* One guide for both the iPhone app and the web app (Phase 1). */
 export const guideUrl = () => GUIDE_URL;
+/* The privacy policy and support pages, also on the Cuberoot site. */
+export const privacyUrl = () => "https://www.cuberoot-systems.com/scorecard/privacy/";
+export const supportUrl = () => "https://www.cuberoot-systems.com/scorecard/support/";
 /* Invitation links. On an iPhone with the app installed this address opens
    the app; anywhere else the Cuberoot page forwards to the web app with the
    same ?join=… query, which the web app reads exactly as before. */

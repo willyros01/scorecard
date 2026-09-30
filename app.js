@@ -2413,6 +2413,7 @@ function versionBlock() {
     <div><b>The Scorecard</b> <span class="mono">v${VERSION}</span></div>
     <div class="sub">${rounds.length} round${rounds.length === 1 ? "" : "s"} · ${golfers.length} golfer${golfers.length === 1 ? "" : "s"} · ${courses.length} course${courses.length === 1 ? "" : "s"}</div>
     <div class="sub">${esc(sync.text)} · World Handicap System, best 8 of last 20</div>
+    <div class="sub"><button class="linkbtn" data-act="open-user-guide">User guide</button> · <button class="linkbtn" data-act="open-support">Support</button> · <button class="linkbtn" data-act="open-privacy">Privacy</button></div>
     <div class="sub"><button class="linkbtn" data-act="delete-account">Delete my account</button></div>
   </section>`;
 }
@@ -3485,6 +3486,17 @@ view.addEventListener("click", async (e) => {
       return;
     case "open-guide":
       platform.openExternal(`${platform.guideUrl()}#moving`);
+      return;
+    /* The online guide, support and privacy pages on the Cuberoot site, from
+       the foot of every screen. They open in Safari. */
+    case "open-user-guide":
+      platform.openExternal(platform.guideUrl(), "tab");
+      return;
+    case "open-support":
+      platform.openExternal(platform.supportUrl(), "tab");
+      return;
+    case "open-privacy":
+      platform.openExternal(platform.privacyUrl(), "tab");
       return;
     case "open-tool": {
       /* The one-time data tools are web pages, never part of the iPhone app.
