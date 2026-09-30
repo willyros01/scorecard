@@ -121,6 +121,14 @@ async function connect() {
   });
 }
 
+/* Whether the name claim golferNames/{key} belongs to this golfer. */
+async function nameClaimedBy(key, golferId) {
+  try {
+    const snap = await mod.getDoc(mod.doc(db, "golferNames", key));
+    return snap.exists() && (snap.data() || {}).golferId === golferId;
+  } catch { return false; }
+}
+
 /* ---------- look, but change nothing ---------- */
 async function inspect() {
   const { collection, getDocs, query, where } = mod;
@@ -505,7 +513,10 @@ async function repair() {
             { archived: true, archivedAt: Date.now(), nameKey: null,
               mergedInto: merge.keeper.id, editedIn: (groups[0] || {}).id || "" },
             { merge: true });
-          if (spare.nameKey) tidyBatch.delete(doc(db, "golferNames", spare.nameKey));
+          /* Free the name only if the claim is THIS record's. Duplicates share
+             one name, and the claim usually belongs to the record being kept;
+             freeing it would let a second person take the kept golfer's name. */
+          if (spare.nameKey && await nameClaimedBy(spare.nameKey, spare.id)) tidyBatch.delete(doc(db, "golferNames", spare.nameKey));
         }
         await tidyBatch.commit();
 
@@ -533,7 +544,7 @@ async function repair() {
           batch.set(doc(db, "golfers", g.id),
             { archived: true, archivedAt: Date.now(), nameKey: null, editedIn: (groups[0] || {}).id || "" },
             { merge: true });
-          if (g.nameKey) batch.delete(doc(db, "golferNames", g.nameKey));
+          if (g.nameKey && await nameClaimedBy(g.nameKey, g.id)) batch.delete(doc(db, "golferNames", g.nameKey));
         }
         await batch.commit();
       }

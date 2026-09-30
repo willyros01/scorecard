@@ -366,6 +366,9 @@ await check("E14", "Tidy finds and fixes duplicates and unused golfers across Wi
   if ((await getDoc("associations/G1/rounds/rD3")).golferId !== "gD1") problems.push("the duplicate's round was not moved");
   if (!(await getDoc("golfers/gD2")).archived) problems.push("the duplicate record was not archived");
   if (!(await getDoc("golfers/gU")).archived) problems.push("the unused golfer was not archived");
+  const kept = await getDoc("golferNames/dup-person");
+  if (!kept || kept.golferId !== "gD1") problems.push("the kept golfer's name claim was freed");
+  if (await getDoc("golferNames/una-unused")) problems.push("the unused golfer's name was not freed");
   if (problems.length) throw new Error(`${problems.join("; ")}. Tidy's log: ${log.slice(0, 600)}`);
 });
 

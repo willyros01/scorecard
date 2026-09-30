@@ -14,6 +14,10 @@ rules_version = '2';
  *     another admin. (This replaces the PUBLIC-only rule of Phase C.)
  *   - The group creator (Willy) may list every golfer, as today, so the Tidy
  *     page keeps working unchanged. Nobody else may.
+ *   - An owner or admin of a group a golfer plays in may archive that golfer
+ *     (Tidy's merge and clean-up), changing nothing else. The live rules
+ *     refused this whenever the golfer was off the roster, so Tidy's merge
+ *     and unused-golfer clean-up never finished.
  *
  * What changes in Phase C (onboarding design Revision 2, R1-R3, R11, R12):
  *   - publicApplications/{email}: anyone, even signed out, may create ONE
@@ -538,6 +542,15 @@ service cloud.firestore {
            by the branch above, which requires the link to be unchanged. */
         || (request.resource.data.linkedUid == null
             && editingAsAdmin(golferId))
+        /* Phase D: an owner or admin of a group this golfer plays in (from the
+           golfer's own list of groups) may ARCHIVE it — Tidy's merge and
+           clean-up — changing nothing else. The roster check above cannot
+           allow this: a merged duplicate has just left the roster, and an
+           unused golfer was never on one. */
+        || (adminOfAny(resource.data.get('groups', []))
+            && request.resource.data.get('archived', false) == true
+            && request.resource.data.diff(resource.data).affectedKeys()
+                 .hasOnly(['archived', 'archivedAt', 'nameKey', 'mergedInto', 'editedIn']))
       );
 
       /* CLOSED, deliberately. A delete carries no data, so the rules have

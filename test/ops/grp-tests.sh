@@ -171,6 +171,15 @@ refused "GRP4 a regular member cannot remove another member"                  de
 allowed "GRP4 an admin removes a regular member"                              delete_as "${TAD}" "associations/G1/members/${M}"
 allowed "GRP4 a member may still leave by themselves"                         delete_as "${TN}" "associations/G1/members/${N}"
 
+echo "== GRP6 archiving golfers (Tidy's merge and clean-up)"
+put "golfers/gOff" '{"name":"Off Roster","linkedUid":null,"groups":["G1"]}'
+put "golfers/gOther" '{"name":"Other Group","linkedUid":null,"groups":["G2"]}'
+allowed "GRP6 the owner archives a golfer of G1 that is on no roster"         write_as "${TW}" "golfers/gOff" '{"archived":true,"archivedAt":"now","nameKey":null,"editedIn":"G1"}'
+refused "GRP6 archiving cannot also rename"                                   write_as "${TAD}" "golfers/gOff" '{"archived":true,"name":"Renamed"}'
+refused "GRP6 a regular member cannot archive"                                write_as "${TM}" "golfers/gOff" '{"archived":true}'
+refused "GRP6 an admin of G1 cannot archive a golfer of G2 only"              write_as "${TAD}" "golfers/gOther" '{"archived":true}'
+allowed "GRP6 an admin of G2 archives G2's golfer"                            write_as "${TX}" "golfers/gOther" '{"archived":true,"editedIn":"G2"}'
+
 echo "== GRP5 the owner keeps every right"
 allowed "GRP5 the owner removes an admin"                                     delete_as "${TW}" "associations/G1/members/${AD2}"
 allowed "GRP5 the owner renames the group"                                    write_as "${TW}" "associations/G1" '{"name":"Group one renamed"}'
