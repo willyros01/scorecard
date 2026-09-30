@@ -111,6 +111,16 @@ allowed "PRIV4 an unclaimed golfer can be read by id (invitation greeting)"  get
 refused "PRIV4 nobody can list the golfers collection (member)"             query_as "${TA}" "" golfers false
 refused "PRIV4 nobody can list the golfers collection (admin)"              query_as "${TAD}" "" golfers false
 
+allowed "PRIV4 A lists golfers where linkedUid is A (find my golfer)"     query_as "${TA}" "" golfers false linkedUid EQUAL "${A}"
+refused "PRIV4 A cannot list golfers where linkedUid is B"                 query_as "${TA}" "" golfers false linkedUid EQUAL "${B}"
+
+echo "== PRIV9 a member records which golfer they are, and nothing else"
+put "associations/G1/members/${A}" "{\"uid\":\"${A}\",\"role\":\"member\"}"
+allowed "PRIV9 A sets golferId gA on A's own membership"                    write_as "${TA}" "associations/G1/members/${A}" '{"golferId":"gA"}'
+refused "PRIV9 A cannot claim golfer gB on A's own membership"              write_as "${TA}" "associations/G1/members/${A}" '{"golferId":"gB"}'
+refused "PRIV9 A cannot change A's own role"                               write_as "${TA}" "associations/G1/members/${A}" '{"role":"admin"}'
+refused "PRIV9 A cannot set a golferId on B's membership"                  write_as "${TA}" "associations/G1/members/${B}" '{"golferId":"gA"}'
+
 echo "== PRIV5 the directory: name and index for members only"
 allowed "PRIV5 A lists the G1 directory"                                      query_as "${TA}" "associations/G1" directory false
 refused "PRIV5 the G2 owner cannot list the G1 directory"                    query_as "${TX}" "associations/G1" directory false

@@ -208,9 +208,15 @@ service cloud.firestore {
               && request.resource.data.joinCode == association(assocId).adminCode)
           );
 
-        /* Only the owner changes roles, and never the owner's own. */
-        allow update: if isOwner(assocId)
-          && memberUid != association(assocId).ownerUid;
+        /* Only the owner changes roles, and never the owner's own.
+           Phase A: a member may also record WHICH golfer they are on their own
+           membership (golferId), and nothing else, and only a golfer that is
+           really linked to their account. Games use it to tell who played. */
+        allow update: if (isOwner(assocId)
+            && memberUid != association(assocId).ownerUid)
+          || (signedIn() && memberUid == request.auth.uid
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['golferId'])
+              && myGolfer(request.resource.data.golferId));
 
         /* People may leave; the owner may remove others; the owner cannot be
            removed by anybody, including themselves. */
@@ -361,7 +367,9 @@ service cloud.firestore {
         resource.data.get('linkedUid', null) == request.auth.uid
         || resource.data.get('linkedUid', null) == null
         || adminOfAny(resource.data.get('groups', [])));
-      allow list: if false;
+      /* Lists only of your OWN golfer (a query where linkedUid is you) — how
+         the app finds which golfer you are, and what Delete my account uses. */
+      allow list: if signedIn() && resource.data.get('linkedUid', null) == request.auth.uid;
 
       /* Creating is an everyday act — adding a person to a roster. The name
          index below stops duplicates. */

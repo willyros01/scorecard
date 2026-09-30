@@ -52,6 +52,8 @@ import {
   writeBatch,
   onSnapshot,
   serverTimestamp,
+  arrayUnion,
+  arrayRemove,
 } from "firebase/firestore";
 
 export const app = { initializeApp };
@@ -94,4 +96,6 @@ export const store = {
   writeBatch,
   onSnapshot,
   serverTimestamp,
+  arrayUnion,
+  arrayRemove,
 };

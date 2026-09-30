@@ -584,7 +584,9 @@ export async function addGolfer({ name }) {
   if (!golfer) {
     /* Nothing matched, so this really is somebody new. */
     golfer = model.buildGolfer({ name });
-    writes.push({ op: "set", path: ["golfers", golfer.id], data: golfer });
+    /* groups: the groups this golfer plays in, which lets their admins read
+       the record (Phase A rules). */
+    writes.push({ op: "set", path: ["golfers", golfer.id], data: { ...golfer, groups: [assocId] } });
     writes.push({ op: "set", path: ["golferNames", key], data: { golferId: golfer.id, name: golfer.name } });
   }
   writes.push({
@@ -681,24 +683,161 @@ export function addGame({ date, endDate = null, courseId, name }) {
 
 /* ---------------- live reads ---------------- */
 
-/* Every golfer in the whole system. Their index lives here, so it is the same
-   number no matter which group you are looking at. */
+/* The golfers this screen may show (Version 2.0, Phase A privacy).
+ *
+ * Owners and admins: the full record of every golfer on this group's roster,
+ * read one document at a time (nobody may list the whole golfers collection).
+ * Regular members: their OWN full record, plus name and handicap index only for
+ * everybody else, from the group's directory. A directory entry arrives as a
+ * golfer-shaped object with fromDirectory set and directoryIndex holding the
+ * published index, so the screens need no second code path to show a name. */
+let watchGeneration = 0;
 export function watchGolfers(callback) {
+  const generation = watchGeneration;
+  if (canManage()) return watchRosterGolfers(callback, generation);
+  return watchMemberGolfers(callback, generation);
+}
+
+function watchRosterGolfers(callback, generation) {
   const { onSnapshot } = fb.mod.store;
-  const stop = listen(col("golfers"),
-    (snap) => {
-      clearError();
-      /* Archived people are filtered out HERE, at the single point every screen
-         reads from, rather than in each list separately — one place to get
-         right instead of a dozen. Hidden, never destroyed: clearing the flag
-         brings them straight back. */
-      callback(snap.docs
-        .map((d) => ({ ...d.data(), id: d.id }))
-        .filter((g) => !g.archived));
-    },
-    (e) => report(e));
+  const docs = new Map();      /* golferId -> data */
+  const stops = new Map();     /* golferId -> unsubscribe */
+  const emit = () => callback([...docs.values()].filter((g) => !g.archived));
+  const stopRoster = listen(col("associations", assocId, "roster"), (snap) => {
+    const ids = new Set(snap.docs.map((d) => d.id));
+    for (const [id, stop] of stops) if (!ids.has(id)) { try { stop(); } catch {} stops.delete(id); docs.delete(id); }
+    for (const id of ids) {
+      if (stops.has(id)) continue;
+      const subscribe = (retried) => listen(ref("golfers", id), (g) => {
+        if (g.exists()) docs.set(id, { ...g.data(), id }); else docs.delete(id);
+        emit();
+      }, () => {
+        docs.delete(id); emit();
+        /* Refused: the record does not list this group yet (made before
+           Phase A). As an admin here, add the group, then read again once. */
+        if (!retried) addGroupToGolfer(id).then((done) => {
+          if (done && stops.has(id) && generation === watchGeneration) stops.set(id, subscribe(true));
+        });
+      });
+      stops.set(id, subscribe(false));
+    }
+    emit();
+  }, (e) => report(e));
+  const stop = () => { try { stopRoster(); } catch {} for (const s2 of stops.values()) { try { s2(); } catch {} } stops.clear(); };
+  if (generation === watchGeneration) unsubscribers.push(stop); else stop();
+  return stop;
+}
+
+function watchMemberGolfers(callback, generation) {
+  let mine = null;
+  let others = [];
+  const emit = () => callback([...(mine ? [mine] : []), ...others.filter((o) => !mine || o.id !== mine.id)]);
+  const stops = [];
+  stops.push(listen(col("associations", assocId, "directory"), (snap) => {
+    others = snap.docs.map((d) => {
+      const e = d.data();
+      return { id: d.id, name: e.displayName || "Unknown", fromDirectory: true,
+               directoryIndex: e.handicapIndex == null ? null : Number(e.handicapIndex) };
+    });
+    emit();
+  }, (e) => report(e)));
+  findMyGolfer().then((g) => {
+    if (generation !== watchGeneration || !g) return;
+    stops.push(listen(ref("golfers", g.id), (snap) => {
+      mine = snap.exists() ? { ...snap.data(), id: snap.id } : null;
+      emit();
+      if (mine) publishOwnDirectoryEntries(mine);
+    }, (e) => report(e)));
+  });
+  const stop = () => { while (stops.length) { try { stops.pop()(); } catch {} } };
   unsubscribers.push(stop);
   return stop;
+}
+
+/* Which golfer this account is: the one whose linkedUid is this account.
+   Remembered per session; the membership records it too (golferId), which is
+   what the games rule reads to decide who played. */
+let myGolferCache = null;
+export async function findMyGolfer() {
+  if (!fb || !uid) return null;
+  if (myGolferCache && myGolferCache.linkedUid === uid) return myGolferCache;
+  const { query, where, limit, getDocs, updateDoc } = fb.mod.store;
+  try {
+    const snap = await getDocs(query(col("golfers"), where("linkedUid", "==", uid), limit(5)));
+    const found = snap.docs.map((d) => ({ ...d.data(), id: d.id })).filter((g) => !g.archived)[0] || null;
+    myGolferCache = found;
+    if (found && assocId && myMember && myMember.golferId !== found.id) {
+      /* Best effort: the rules allow only this one field, and only for a
+         golfer really linked to this account. */
+      try { await updateDoc(ref("associations", assocId, "members", uid), { golferId: found.id }); myMember.golferId = found.id; }
+      catch { /* older rules: harmless */ }
+    }
+    return found;
+  } catch { return null; }
+}
+export const myGolferIdNow = () => (myGolferCache ? myGolferCache.id : (myMember && myMember.golferId) || "");
+
+/* ---------------- the directory: name and index only ---------------- */
+
+const directoryEntry = (golfer) => ({
+  golferId: golfer.id,
+  displayName: golfer.name || "",
+  handicapIndex: model.effectiveIndex(golfer).index,
+  updatedAt: Date.now(),
+});
+
+/* Writes one golfer's entry in one group. Best effort and never queued: the
+   entry is a projection of the golfer record, rebuilt whenever it is next
+   written, so a failed write loses nothing. */
+export async function publishDirectoryEntry(golfer, group = assocId) {
+  if (!fb || !golfer || !golfer.id || !group || golfer.fromDirectory) return false;
+  try { await fb.mod.store.setDoc(ref("associations", group, "directory", golfer.id), directoryEntry(golfer)); return true; }
+  catch { return false; }
+}
+
+/* A golfer plays in several groups and their index spans all of them. With no
+   server, the golfer's own app keeps their entry current in every group they
+   belong to (the rules allow exactly that, and nothing more). */
+async function publishOwnDirectoryEntries(golfer) {
+  const groups = new Set([...(golfer.groups || []), ...knownGroups().map((g) => g.id)]);
+  if (assocId) groups.add(assocId);
+  for (const g of groups) await publishDirectoryEntry(golfer, g);
+}
+
+/* Owners and admins refresh the whole group's directory when they open it, so
+   entries stay right for golfers who never open the app themselves. Only
+   entries that differ are written. */
+export async function refreshGroupDirectory(golfersOnRoster) {
+  if (!fb || !assocId || !canManage()) return 0;
+  const { getDocs } = fb.mod.store;
+  let current = new Map();
+  try { current = new Map((await getDocs(col("associations", assocId, "directory"))).docs.map((d) => [d.id, d.data()])); }
+  catch { return 0; }
+  let written = 0;
+  for (const g of golfersOnRoster || []) {
+    const want = directoryEntry(g);
+    const have = current.get(g.id);
+    if (!have || have.displayName !== want.displayName || (have.handicapIndex ?? null) !== (want.handicapIndex ?? null)) {
+      if (await publishDirectoryEntry(g)) written++;
+    }
+    /* The golfer record lists its groups so admins may read it (rules, R8). */
+    if (!(g.groups || []).includes(assocId)) await addGroupToGolfer(g.id);
+  }
+  /* Somebody taken off the roster leaves the ranking too. */
+  const onRoster = new Set((golfersOnRoster || []).map((g) => g.id));
+  for (const id of current.keys()) {
+    if (!onRoster.has(id)) { try { await fb.mod.store.deleteDoc(ref("associations", assocId, "directory", id)); written++; } catch {} }
+  }
+  return written;
+}
+
+/* Adds this group to a golfer's `groups` list, as an admin of this group
+   (editedIn), without reading the record first. */
+export async function addGroupToGolfer(golferId, group = assocId) {
+  if (!fb || !golferId || !group) return false;
+  const { updateDoc, arrayUnion } = fb.mod.store;
+  try { await updateDoc(ref("golfers", golferId), { groups: arrayUnion(group), editedIn: group }); return true; }
+  catch { return false; }
 }
 
 /* Which of them play in this group. */
@@ -714,23 +853,32 @@ export function watchRoster(callback) {
 /* Deliberately bounded. Pagination is a version 3 concern, but an unbounded
    query would be the thing that quietly runs up a bill, so it is capped now. */
 export function watchRounds(callback, { max = 500 } = {}) {
-  const { onSnapshot, query, orderBy, limit } = fb.mod.store;
-  const stop = listen(
-    query(col("associations", assocId, "rounds"), orderBy("date", "desc"), limit(max)),
-    (snap) => {
-      clearError();
-      /* Archived people are filtered out HERE, at the single point every screen
-         reads from, rather than in each list separately — one place to get
-         right instead of a dozen. Hidden, never destroyed: clearing the flag
-         brings them straight back. */
-      callback(snap.docs
-        .map((d) => ({ ...d.data(), id: d.id }))
-        .filter((g) => !g.archived));
-    },
-    (e) => report(e)
-  );
-  unsubscribers.push(stop);
-  return stop;
+  const { query, orderBy, limit, where } = fb.mod.store;
+  const generation = watchGeneration;
+  const deliver = (snap) => {
+    clearError();
+    /* Archived rounds are filtered out HERE, at the single point every screen
+       reads from. Hidden, never destroyed. */
+    callback(snap.docs
+      .map((d) => ({ ...d.data(), id: d.id }))
+      .filter((g) => !g.archived)
+      .sort((a, b) => String(b.date || "").localeCompare(String(a.date || ""))));
+  };
+  if (canManage()) {
+    const stop = listen(query(col("associations", assocId, "rounds"), orderBy("date", "desc"), limit(max)), deliver, (e) => report(e));
+    unsubscribers.push(stop);
+    return stop;
+  }
+  /* A regular member may read only their own rounds (Phase A rules), so the
+     query must say so. No orderBy: a filter plus a sort would need an index. */
+  let stop = () => {};
+  findMyGolfer().then((g) => {
+    if (generation !== watchGeneration) return;
+    if (!g) { callback([]); return; }
+    stop = listen(query(col("associations", assocId, "rounds"), where("golferId", "==", g.id), limit(max)), deliver, (e) => report(e));
+    unsubscribers.push(stop);
+  });
+  return () => stop();
 }
 
 export function watchCourses(callback) {
@@ -741,6 +889,8 @@ export function watchCourses(callback) {
 }
 
 export function stopWatching() {
+  watchGeneration++;
+  myGolferCache = null;
   while (unsubscribers.length) {
     const stop = unsubscribers.pop();
     try { stop(); } catch { /* already gone */ }
@@ -1283,12 +1433,49 @@ export const clearJoinLink = () => {
 /* ---------------- games ---------------- */
 
 export function watchGames(callback, { max = 200 } = {}) {
-  const { onSnapshot, query, orderBy, limit } = fb.mod.store;
-  const stop = listen(
-    query(col("associations", assocId, "games"), orderBy("date", "desc"), limit(max)),
-    (snap) => callback(snap.docs.map((d) => d.data())), (e) => report(e));
+  const { query, orderBy, limit, where } = fb.mod.store;
+  const generation = watchGeneration;
+  if (canManage()) {
+    const stop = listen(
+      query(col("associations", assocId, "games"), orderBy("date", "desc"), limit(max)),
+      (snap) => callback(snap.docs.map((d) => d.data())), (e) => report(e));
+    unsubscribers.push(stop);
+    return stop;
+  }
+  /* A regular member sees only games they played in, or created (Phase A).
+     Two queries, merged; each is one the rules can prove. */
+  const played = new Map(), created = new Map();
+  const emit = () => callback([...new Map([...created, ...played]).values()]
+    .sort((a, b) => String(b.date || "").localeCompare(String(a.date || ""))));
+  const stops = [];
+  stops.push(listen(query(col("associations", assocId, "games"), where("createdBy", "==", uid), limit(max)),
+    (snap) => { created.clear(); snap.docs.forEach((d) => created.set(d.id, d.data())); emit(); }, (e) => report(e)));
+  findMyGolfer().then((g) => {
+    if (generation !== watchGeneration || !g) { emit(); return; }
+    stops.push(listen(query(col("associations", assocId, "games"), where("participantGolferIds", "array-contains", g.id), limit(max)),
+      (snap) => { played.clear(); snap.docs.forEach((d) => played.set(d.id, d.data())); emit(); }, (e) => report(e)));
+  });
+  const stop = () => { while (stops.length) { try { stops.pop()(); } catch {} } };
   unsubscribers.push(stop);
   return stop;
+}
+
+/* Publishes a game's shared result sheet on the game itself (Phase A): who
+   played and the scores needed for the leaderboard, never anybody's round
+   history. Written by an owner or admin whenever they look at or change the
+   game. participantGolferIds is what lets each player read it. */
+export async function publishGameResults(gameId, results) {
+  if (!fb || !assocId || !canManage() || !gameId) return false;
+  const participantGolferIds = [...new Set((results || []).map((r) => r.golferId).filter(Boolean))].sort();
+  const sheet = (results || []).map((r) => ({
+    id: String(r.id || ""), golferId: r.golferId || "", name: r.name || "", date: r.date || "",
+    gross: r.gross ?? null, adjusted: r.adjusted ?? null, courseHandicap: r.courseHandicap ?? null,
+    teeName: r.teeName || "", estimated: !!r.estimated,
+  }));
+  try {
+    await fb.mod.store.updateDoc(ref("associations", assocId, "games", gameId), { participantGolferIds, results: sheet });
+    return true;
+  } catch { return false; }
 }
 
 export function updateGame(gameId, data) {

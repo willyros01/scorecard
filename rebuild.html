@@ -91,10 +91,11 @@ async function look() {
 
   target = groups[0];
 
-  /* Everybody who exists, anywhere. */
+  /* Version 2.0, Phase A privacy: nobody may list every golfer in the
+     database any more. The candidates are the golfers who have rounds in YOUR
+     groups; each record is read on its own, and one this account may not read
+     is shown by id only. */
   golfers = [];
-  (await getDocs(collection(db, "golfers"))).forEach((d) => golfers.push({ ...d.data(), id: d.id }));
-  golfers.sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
 
   /* How many rounds each has, so you can see who is worth adding. */
   roundsByGolfer = new Map();
@@ -108,6 +109,15 @@ async function look() {
     } catch {}
   }
 
+  const { doc, getDoc } = mod;
+  for (const id of roundsByGolfer.keys()) {
+    try {
+      const snap = await getDoc(doc(db, "golfers", id));
+      golfers.push(snap.exists() ? { ...snap.data(), id } : { id, name: "Golfer " + id.slice(0, 6) });
+    } catch { golfers.push({ id, name: "Golfer " + id.slice(0, 6) + " (private)" }); }
+  }
+  golfers.sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+
   await findStrandedRounds();
   await readRoster();
 }
@@ -117,27 +127,12 @@ async function look() {
    by looking directly. This finds them so they can be moved somewhere live. */
 let stranded = [];
 async function findStrandedRounds() {
-  const { collection, getDocs, collectionGroup } = mod;
   stranded = [];
-  try {
-    /* Every round in the whole database, whichever group holds it. */
-    const all = await getDocs(collectionGroup(db, "rounds"));
-    const liveGroups = new Set(groups.map((g) => g.id));
-    all.forEach((d) => {
-      const r = d.data();
-      if (!r) return;
-      const parent = d.ref.parent.parent;
-      const holder = parent ? parent.id : null;
-      if (holder && !liveGroups.has(holder)) {
-        stranded.push({ id: d.id, data: r, from: holder });
-      }
-    });
-  } catch (e) {
-    /* collectionGroup needs an index; if it is refused, say so plainly rather
-       than pretending there is nothing there. */
-    stranded = [];
-    strandedError = String((e && e.code) || e);
-  }
+  /* Version 2.0, Phase A privacy: scanning every group's rounds is no longer
+     allowed from an app (it read the whole database). Recovering rounds from a
+     group that no longer exists is now an administrator's job with admin
+     rights, not something this page can do. */
+  strandedError = "not available from the app any more; ask the administrator";
 }
 let strandedError = "";
 

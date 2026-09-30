@@ -1136,10 +1136,16 @@ function screenSummary() {
     })()}
 
     <div class="indexes">${sortedGolfers()
-      .filter((g) => rounds.some((r) => r.golferId === g.id))
+      /* A regular member sees other golfers through the directory only, so
+         "has rounds" is judged by the published index instead. */
+      .filter((g) => (g.fromDirectory ? shownIndex(g) != null : rounds.some((r) => r.golferId === g.id)))
       .filter((g) => g.id !== db.myGolferId(allGolfers) || shownIndex(g) == null)
       .map((g) => {
       const n = rounds.filter((r) => r.golferId === g.id).length;
+      if (g.fromDirectory) return `<div class="idx">
+        <div class="name truncate">${esc(g.name)}</div>
+        <div class="big">${shownIndex(g).toFixed(1)}</div>
+      </div>`;
       return `<button class="idx" data-golfer-index="${g.id}">
         <div class="name truncate">${esc(g.name)}</div>
         <div class="big ${shownIndex(g) == null ? "none" : ""}">${shownIndex(g) == null ? "—" : shownIndex(g).toFixed(1)}</div>
@@ -1167,6 +1173,7 @@ function screenSummary() {
 /* ================= rankings ================= */
 
 function rankingSection() {
+  if (!db.canManage()) return groupRankingSection();
   const period = { year: rankPeriod.year, month: rankPeriod.month };
   const scoped = rounds.filter((r) => model.inPeriod(r, period));
   const table = model.periodRanking(scoped, golfers, { minRounds: 3 });
@@ -1201,6 +1208,35 @@ function rankingSection() {
   </section>`;
 }
 
+/* The ranking a regular member sees (Version 2.0, Phase A): every golfer in
+   the group from 1 to N by handicap index, with rank, name and index only.
+   Rows do not open anything. Golfers without an index yet come last. */
+function groupRankingSection() {
+  const rows = sortedGolfers()
+    .map((g) => ({ id: g.id, name: g.name, index: shownIndex(g) }))
+    .sort((a, b) => (a.index == null) - (b.index == null) || (a.index ?? 0) - (b.index ?? 0) || a.name.localeCompare(b.name));
+  let place = 0, seen = 0, previous;
+  for (const r of rows) {
+    if (r.index == null) { r.place = null; continue; }
+    seen++;
+    if (r.index !== previous) { place = seen; previous = r.index; }
+    r.place = place;   /* equal indexes share a place */
+  }
+  const mine = db.myGolferId(allGolfers);
+  return `<section class="panel">
+    <div class="panel-head"><h2 class="panel-title">Group ranking</h2></div>
+    ${rows.length === 0 ? `<div class="card"><p class="blank">No golfers yet.</p></div>` : `
+    <div class="card list">
+      ${rows.map((r) => `<div class="list-row${r.id === mine ? " me" : ""}">
+        <span class="rank">${r.place || "—"}</span>
+        <span class="grow"><span class="name">${esc(r.name)}</span></span>
+        <span class="netavg">${r.index == null ? "—" : r.index.toFixed(1)}<br><span class="sub">index</span></span>
+      </div>`).join("")}
+    </div>
+    <p class="hint">Ranked by handicap index, lowest first. Only names and indexes are shown; each golfer's rounds stay private.</p>`}
+  </section>`;
+}
+
 /* ================= games ================= */
 
 function screenGames() {
@@ -1216,7 +1252,9 @@ function screenGames() {
       : "No games yet. Whoever organises your group sets these up."}</p></div>` : ""}
     ${games.length ? `<div class="card list">
       ${games.map((g) => {
-        const played = rounds.filter((r) => r.gameId === g.id);
+        /* A regular member cannot see other players' rounds; the game's
+           published result sheet says who played. */
+        const played = db.canManage() ? rounds.filter((r) => r.gameId === g.id) : (g.results || []);
         return `<button class="list-row" data-game="${g.id}">
           <span class="grow">
             <span class="name">${esc(g.name || courseName(g.courseId))}</span><br>
@@ -1335,17 +1373,38 @@ function fastEntryPanel(game) {
   </section>`;
 }
 
+/* Writes the game's result sheet when it differs from what is published. */
+function publishSheetIfChanged(game, played, board) {
+  const byRound = new Map(board.map((row) => [row.roundId, row]));
+  const results = played.map((r) => {
+    const row = byRound.get(r.id) || {};
+    return { id: r.id, golferId: r.golferId, name: row.name || (golferById(r.golferId) || {}).name || "",
+             date: r.date || "", gross: r.gross ?? null, adjusted: r.adjusted ?? null,
+             courseHandicap: row.courseHandicap ?? r.courseHandicap ?? null, teeName: r.teeName || "",
+             estimated: !!row.estimated };
+  }).sort((a, b) => a.id.localeCompare(b.id));
+  const now = JSON.stringify(results);
+  const before = JSON.stringify([...(game.results || [])].sort((a, b) => String(a.id).localeCompare(String(b.id))));
+  if (now !== before) db.publishGameResults(game.id, results);
+}
+
 function gameDetail(gameId) {
   const game = games.find((g) => g.id === gameId);
   if (!game) { openGame = null; return screenGames(); }
 
-  const played = rounds.filter((r) => r.gameId === gameId);
+  /* Version 2.0, Phase A: a regular member reads the result sheet published
+     on the game (names and scores), never the players' rounds. Owners and
+     admins work from the rounds and publish the sheet as they look at it. */
+  const sheet = db.canManage() ? null : (game.results || []);
+  const played = sheet || rounds.filter((r) => r.gameId === gameId);
+  const people = sheet ? sheet.map((r) => ({ id: r.golferId, name: r.name })) : allGolfers;
   const multiDay = !!(game.endDate && game.endDate !== game.date);
-  const standings = multiDay ? model.gameStandings(played, allGolfers, game) : { days: [], players: [] };
+  const standings = multiDay ? model.gameStandings(played, people, game) : { days: [], players: [] };
   /* allGolfers, not the roster. Somebody who played in this game but has since
      been taken off the roster must still appear in its result — a past
      leaderboard should not change because the roster did. */
-  const board = model.gameLeaderboard(played, allGolfers);
+  const board = model.gameLeaderboard(played, people);
+  if (!sheet) publishSheetIfChanged(game, played, board);
 
   /* Rounds played on a day this game covers but not yet part of it.
      This is what saves entering a tournament twice: post rounds as normal on
@@ -4943,6 +5002,18 @@ function postRound() {
   flashMsg(`Round posted — differential ${round.differential.toFixed(1)}`);
 }
 
+/* Owners and admins keep the group's directory (name and index only, which is
+   all a regular member may see of other golfers) in step with the golfer
+   records, a few seconds after anything changes. Only differences are written. */
+let directoryTimer = null;
+function scheduleDirectoryRefresh() {
+  if (!db.canManage()) return;
+  clearTimeout(directoryTimer);
+  directoryTimer = setTimeout(() => {
+    db.refreshGroupDirectory(allGolfers.filter((g) => roster.includes(g.id))).catch(() => {});
+  }, 4000);
+}
+
 /* ================= start ================= */
 
 async function start(assocId) {
@@ -4957,7 +5028,7 @@ async function start(assocId) {
     lookup.setSharedKey(doc.lookupKey || "");
     render();
   });
-  db.watchGolfers((list) => { allGolfers = list; refreshScope(); render(); });
+  db.watchGolfers((list) => { allGolfers = list; refreshScope(); render(); scheduleDirectoryRefresh(); });
   db.watchRoster((ids) => { roster = ids; refreshScope(); render(); });
   db.watchRounds((list) => { rounds = list; render(); });
   db.watchCourses((list) => { courses = list; render(); });

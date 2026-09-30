@@ -5,13 +5,13 @@ name: iOS branch checks (V1-V6 and web tests)
 # the ci-logs branch of this repo.
 on:
   push:
-    branches: [ios]
+    branches: [ios, v2]
 
 permissions:
   contents: write   # to save the logs, and on the very first run the generated lockfile and bundle
 
 concurrency:
-  group: ios-checks
+  group: ios-checks-${{ github.ref_name }}
   cancel-in-progress: false
 
 defaults:
@@ -41,7 +41,7 @@ jobs:
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add package-lock.json vendor/firebase/firebase-10.12.0.js
             git commit -m "Add the generated lockfile and Firebase bundle (exact approved versions)"
-            git push origin HEAD:ios
+            git push origin HEAD:${GITHUB_REF_NAME}
           fi
       - name: Build checks V1-V6
         id: verify
