@@ -357,12 +357,14 @@ export const gameSpanLabel = (game) => {
  * admin invitation carries a different secret, and the rules grant the admin
  * role only when that second code matches. A guest link cannot be altered into
  * an admin one. */
-export const buildAssociation = ({ name, ownerUid, joinCode = newJoinCode(), adminCode = newJoinCode(), id = newId() }) => ({
+/* Version 2.0 Phase D: the admin code is no longer on the group document,
+   which every member can read. It lives in associations/{id}/secrets/admin,
+   which only the owner can read (store.js ensureAdminCode). */
+export const buildAssociation = ({ name, ownerUid, joinCode = newJoinCode(), id = newId() }) => ({
   id,
   name: String(name).trim(),
   ownerUid,
   joinCode,
-  adminCode,
   settings: { minRoundsForRanking: 3 },
 });
 

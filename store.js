@@ -295,6 +295,13 @@ export async function createAssociation({ name, displayName }) {
     throw e;
   }
 
+  /* Phase D: the admin invitation secret, where only the owner can read it.
+     Written after the membership, because the rule reads that membership.
+     If this one write fails, it is simply made the first time an admin
+     invitation is sent (ensureAdminCode). */
+  try { await setDoc(ref("associations", association.id, "secrets", "admin"), { adminCode: model.newJoinCode() }); }
+  catch { /* made later, on demand */ }
+
   assocId = association.id;
   rememberAssociation(association.id);
   rememberGroup(association.id, association.name);
@@ -1538,7 +1545,8 @@ export function noteInvitation(golferId, role) {
 export function inviteLink(role = "member", golferId = null) {
   const group = currentAssociationDoc();
   if (!group) return "";
-  const code = role === "admin" ? group.adminCode : group.joinCode;
+  /* Phase D: the admin code is the owner's secret, fetched by ensureAdminCode. */
+  const code = role === "admin" ? (adminCodeFor === group.id ? adminCodeCache : "") : group.joinCode;
   if (!code) return "";
   /* A named invitation carries the golfer, so the person joining never types
      their name and cannot misspell it into a second record with a split
@@ -1559,20 +1567,49 @@ export function inviteLink(role = "member", golferId = null) {
   return `${platform.joinBase()}?join=${group.id}.${code}${named}${as}`;
 }
 
-/* Groups created before admin invitations existed have no admin code. One is
-   generated and saved the first time an admin invitation is sent, so older
-   groups gain the feature without anybody having to do anything. */
+/* The admin invitation secret (Phase D). The owner only — the rules let
+   nobody else read it. Kept in associations/{id}/secrets/admin. A group whose
+   secret is still on the group document (made before Phase D) has it moved
+   there now: saved in its new place first, then removed from the old one, so
+   an admin invitation already sent keeps working. A group with none gets one. */
+let adminCodeCache = "";
+let adminCodeFor = "";
 export async function ensureAdminCode() {
   const group = currentAssociationDoc();
-  if (!group) return "";
-  if (group.adminCode) return group.adminCode;
-
-  const code = model.newJoinCode();
-  await commitTogether([
-    { op: "set", path: ["associations", group.id], data: { adminCode: code } },
-  ], "add admin code");
-  cachedAssociation = { ...group, adminCode: code };
+  if (!group || !isOwner()) return "";
+  if (adminCodeFor === group.id && adminCodeCache) return adminCodeCache;
+  const { getDoc } = fb.mod.store;
+  const snap = await getDoc(ref("associations", group.id, "secrets", "admin"));
+  let code = snap.exists() ? (snap.data() || {}).adminCode || "" : "";
+  if (!code) {
+    code = group.adminCode || model.newJoinCode();
+    await commitTogether([
+      { op: "set", merge: false, path: ["associations", group.id, "secrets", "admin"], data: { adminCode: code } },
+    ], "save the admin code");
+  }
+  if (group.adminCode) {
+    await commitTogether([
+      { op: "update", path: ["associations", group.id], data: { adminCode: null } },
+    ], "move the admin code");
+    cachedAssociation = { ...group, adminCode: null };
+  }
+  adminCodeCache = code;
+  adminCodeFor = group.id;
   return code;
+}
+
+/* Phase D: whether this account may create groups (Willy's). Read from the
+   list the setup script keeps; the rules refuse anybody else anyway. */
+let groupCreatorFlag = false;
+export const canCreateGroups = () => groupCreatorFlag;
+export async function loadGroupCreator() {
+  groupCreatorFlag = false;
+  if (!fb || !uid || isAnonymousSession()) return false;
+  try {
+    const snap = await fb.mod.store.getDoc(ref("groupCreators", uid));
+    groupCreatorFlag = snap.exists();
+  } catch { groupCreatorFlag = false; }
+  return groupCreatorFlag;
 }
 
 export function readJoinLink() {

@@ -114,6 +114,26 @@ await put("golferNames/mia-member", { golferId: "gM", name: "Mia Member" });
 await put("associations/PUBLIC/roster/gM", { golferId: "gM" });
 await put("associations/PUBLIC/directory/gM", { golferId: "gM", displayName: "Mia Member", handicapIndex: 10.0 });
 
+/* Phase D: Willy is the only group creator, and owns a private group G1 with
+   an admin, a regular member, and two golfers not yet joined. */
+const A1 = { email: "admin1@example.com", password: "admin1-pass-1" };
+const R1 = { email: "rex@example.com", password: "rex-pass-1" };
+A1.uid = await signUp(A1.email, A1.password);
+R1.uid = await signUp(R1.email, R1.password);
+await put(`groupCreators/${W.uid}`, { note: "set by the setup script" });
+await put("associations/G1", { name: "Saturday Group", ownerUid: W.uid, joinCode: "PRIV01" });
+await put("associations/G1/secrets/admin", { adminCode: "ADM001" });
+await put(`associations/G1/members/${W.uid}`, { uid: W.uid, role: "owner", displayName: "Owner" });
+await put(`associations/G1/members/${A1.uid}`, { uid: A1.uid, role: "admin", displayName: "Ada Admin" });
+await put(`associations/G1/members/${R1.uid}`, { uid: R1.uid, role: "member", displayName: "Rex Regular", golferId: "gR" });
+await put(`userGroups/${A1.uid}/groups/G1`, { assocId: "G1", name: "Saturday Group" });
+for (const [id, name, linked] of [["gR", "Rex Regular", R1.uid], ["gI", "Ivy Invitee", null], ["gJ", "Jay Unjoined", null]]) {
+  await put(`golfers/${id}`, { name, nameKey: name.toLowerCase().replace(/[^a-z0-9]+/g, "-"), linkedUid: linked, groups: ["G1"] });
+  await put(`golferNames/${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`, { golferId: id, name });
+  await put(`associations/G1/roster/${id}`, { golferId: id });
+  await put(`associations/G1/directory/${id}`, { golferId: id, displayName: name, handicapIndex: null });
+}
+
 const server = spawn("python3", ["-m", "http.server", String(PORT), "--bind", "127.0.0.1", "--directory", SITE], { stdio: "ignore" });
 await new Promise((r) => setTimeout(r, 1500));
 setTimeout(() => { console.log("FAIL  WATCHDOG  the app tests took longer than 10 minutes"); server.kill(); process.exit(1); }, 10 * 60 * 1000).unref();
@@ -262,6 +282,64 @@ await check("E9", "the owner sees the report and dismisses it", async () => {
   await waitForText(owner, /Report dismissed/);
   if ((await list("associations/PUBLIC/reports")).length) throw new Error("the report is still there");
   if (owner.errors.length) throw new Error(owner.errors.join(" | "));
+});
+
+/* E10: group creation is Willy's alone */
+async function switcherText(page) {
+  await page.locator("#brandSub").click();
+  await page.waitForTimeout(600);
+  const t = await text(page);
+  await page.locator('[data-close="1"]').first().click().catch(() => {});
+  return t;
+}
+await check("E10", "only the group creator is offered Start another group", async () => {
+  if (!/Start another group/.test(await switcherText(owner))) throw new Error("Willy is not offered it");
+  if (/Start another group/.test(await switcherText(pat))) throw new Error("a public-group member is offered it");
+});
+
+/* E11: Phase D — a private invitation while signed out needs an account first */
+const ivy = await newPage();
+await ivy.goto(`${APP}&join=G1.PRIV01.gI`, { waitUntil: "load" });
+await check("E11", "a named private invitation: create an account, then join as the invited golfer", async () => {
+  await waitForText(ivy, /You have been invited to a group/);
+  await ivy.fill('[name="email"]', "ivy@example.com");
+  await ivy.fill('[name="password"]', "ivy-pass-1");
+  await ivy.fill('[name="password-again"]', "ivy-pass-1");
+  await ivy.locator('[data-act="create-account"]').click();
+  await waitForText(ivy, /Ivy Invitee/);
+  await ivy.locator('[data-act="accept-named"]').click();
+  const end = Date.now() + 20000;
+  while (Date.now() < end && (await ivy.evaluate(async () => (await import("/store.js")).currentAssociation())) !== "G1") await ivy.waitForTimeout(300);
+  const uid = (await accountByEmail("ivy@example.com")).localId;
+  const member = await getDoc(`associations/G1/members/${uid}`);
+  if (!member || member.role !== "member") throw new Error(`membership: ${JSON.stringify(member)}`);
+  const golfer = await getDoc("golfers/gI");
+  if (golfer.linkedUid !== uid) throw new Error("the golfer is not linked to the new account");
+  if (ivy.errors.length) throw new Error(ivy.errors.join(" | "));
+});
+
+/* E12–E13: an admin (not the owner) */
+const ada = await newPage();
+await ada.goto(APP, { waitUntil: "load" });
+await check("E12", "an admin invites regular members only: no Admin choice on the invitation", async () => {
+  await waitForText(ada, /Sign in/);
+  await signIn(ada, A1.email, A1.password);
+  await waitForText(ada, /Saturday Group/);
+  await tab(ada, "manage");
+  await ada.locator('[data-invite-golfer="gJ"]').first().click();
+  await waitForText(ada, /Invite Jay Unjoined/);
+  if (await ada.locator('[name="invite-role"][value="admin"]').count()) throw new Error("the admin choice is offered to an admin");
+  await ada.locator('[data-close="1"]').first().click();
+  if (/Start another group/.test(await switcherText(ada))) throw new Error("an admin is offered Start another group");
+});
+await check("E13", "an admin removes a regular member of their group, and has no button for the owner", async () => {
+  await tab(ada, "admin");
+  await waitForText(ada, /Rex Regular/);
+  if (await ada.locator(`[data-drop-member="${W.uid}"]`).count()) throw new Error("a remove button for the owner");
+  await ada.locator(`[data-drop-member="${R1.uid}"]`).click();
+  await waitForText(ada, /no longer have access/);
+  if (await getDoc(`associations/G1/members/${R1.uid}`)) throw new Error("Rex is still a member");
+  if (ada.errors.length) throw new Error(ada.errors.join(" | "));
 });
 
 await browser.close();

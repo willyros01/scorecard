@@ -478,7 +478,7 @@ function screenJoin() {
         you.</p>
       </div>
 
-      <div class="card padded">
+      ${db.canCreateGroups() ? `<div class="card padded">
         <h2 class="panel-title">Start your group</h2>
         <p class="hint">Signed in as <b>${esc(db.currentEmail())}</b>. This is the same account on every device, so your groups follow you.</p>
         <label class="lbl">Your name</label>
@@ -493,7 +493,10 @@ function screenJoin() {
         <div class="inline-actions stacked">
           <button class="btn" data-act="begin" ${joining ? "disabled" : ""}>${joining ? "One moment…" : "Create the group"}</button>
         </div>
-      </div>
+      </div>` : `<div class="card padded">
+        <h2 class="panel-title">Not in a group yet</h2>
+        <p class="hint">New groups are created by The Scorecard's owner. Ask your group for an invitation link or its code.</p>
+      </div>`}
       ${migrationCard()}
     ` : ""}
     ${versionBlock()}
@@ -566,6 +569,8 @@ async function submitApplicationHere() {
 /* After any sign-in: join the PUBLIC group if an approval is waiting for this
    email. Quiet when there is none. */
 async function checkPublicApproval() {
+  /* Phase D: also learn, once per sign-in, whether this account may create groups. */
+  await db.loadGroupCreator();
   let result;
   try { result = await db.joinPublicIfApproved(); }
   catch (e) {
@@ -657,6 +662,25 @@ function openApproveSheet(key) {
     </div>
     <p class="hint">They get an email from Firebase to choose their password, then they sign in and they are in.</p>
   </div>`;
+}
+
+/* Phase D: what an admin (not the owner) sees of the members: the regular
+   members, each of whom they may remove. The owner and other admins are
+   listed without a button — only the owner changes those. */
+function adminMembersSection() {
+  const mine = db.status().uid;
+  const list = [...members].sort((a, b) => String(a.displayName || "").localeCompare(String(b.displayName || "")));
+  const label = (m) => m.role === "owner" ? "owner" : m.role === "admin" ? "admin" : "member";
+  return `<section class="panel">
+    <div class="panel-head"><h2 class="panel-title">Members</h2></div>
+    <div class="card list">
+      ${list.map((m) => `<div class="list-row">
+        <span class="grow"><span class="name">${esc(m.displayName || "Unnamed")}</span><br><span class="sub">${label(m)}${m.uid === mine ? " · you" : ""}</span></span>
+        ${m.role === "member" && m.uid !== mine ? `<button class="rowbtn warn" data-drop-member="${esc(m.uid)}">Remove from group</button>` : ""}
+      </div>`).join("")}
+    </div>
+    <p class="hint">Removing someone takes away their access to this group. Their golfer, rounds and handicap stay. Only the owner makes or removes admins.</p>
+  </section>`;
 }
 
 /* Reviewers: reports of golfers' names. */
@@ -883,7 +907,7 @@ let showCodeEntry = false;
 let joining = false;
 
 function migrationCard() {
-  if (!legacy) return "";
+  if (!legacy || !db.canCreateGroups()) return "";
   const p = legacy.preview;
   return `<div class="card padded">
     <h2 class="panel-title">Bring your existing rounds across</h2>
@@ -2250,7 +2274,7 @@ function groupSwitcher() {
         <span class="chev">${g.id === current ? "✓" : "›"}</span>
       </div>`).join("")}
     </div>
-    ${db.isOwner() || !current ? `<div class="inline-actions stacked">
+    ${db.canCreateGroups() ? `<div class="inline-actions stacked">
       <button class="btn ghost" data-act="new-group">Start another group</button>
     </div>` : ""}
     <p class="hint">A golfer's handicap is the same in every group — it is built from all their rounds, wherever they played them.</p>
@@ -2274,11 +2298,14 @@ function screenAdmin() {
      turning them away with nothing — being told "not your area" while holding
      a real admin role is exactly what looked like a broken button. */
   if (!db.isOwner()) {
-    /* Phase C: an admin of the PUBLIC group is a reviewer. */
-    if (db.isPublicGroup() && db.canManage()) {
+    /* Phase D: an admin removes regular members of this group. Phase C: an
+       admin of the PUBLIC group also reviews applications and reports. */
+    if (db.canManage()) {
       return `${flashBar()}
-        ${safe("Applications", applicationsSection)}
-        ${safe("Reports", reportsSection)}
+        ${db.isPublicGroup() ? safe("Applications", applicationsSection) : ""}
+        ${db.isPublicGroup() ? safe("Reports", reportsSection) : ""}
+        ${safe("Members", adminMembersSection)}
+        ${db.needsPassword() ? safe("Set a password", passwordPrompt) : ""}
         ${versionBlock()}`;
     }
     if (db.needsPassword()) {
@@ -3211,7 +3238,9 @@ function visibleTabs() {
   if (db.canManage()) tabs.push(["manage", "Manage", "⚙"]);
   /* Phase C: admins of the PUBLIC group review applications on this tab;
      the count of waiting ones is shown on it. */
-  if (db.isOwner() || (db.isPublicGroup() && db.canManage())) {
+  /* Phase D: admins have the tab too, to remove regular members (and, in the
+     public group, to review applications and reports). */
+  if (db.isOwner() || db.canManage()) {
     const waiting = db.isPublicGroup() ? applications.length + publicReports.length : 0;
     tabs.push(["admin", waiting ? `Admin (${waiting})` : "Admin", "★"]);
   }
@@ -3700,10 +3729,10 @@ view.addEventListener("click", async (e) => {
         <input type="radio" name="invite-role" value="member" checked>
         <span><b>Guest</b> — posts their own rounds, sees results. No password.</span>
       </label>
-      <label class="checkline">
+      ${db.isOwner() ? `<label class="checkline">
         <input type="radio" name="invite-role" value="admin">
         <span><b>Admin</b> — also manages the roster and posts for anybody. Sets a password.</span>
-      </label>
+      </label>` : ""}
       <p class="hint">A guest link keeps working for that same person on another device. An admin link works once.</p>
 
       <div class="inline-actions stacked">
@@ -4690,7 +4719,8 @@ sheetEl.addEventListener("click", async (e) => {
   const inviting = e.target.closest("[data-invite]");
   if (inviting) {
     const chosen = sheetEl.querySelector('[name="invite-role"]:checked');
-    const role = chosen ? chosen.value : "member";
+    /* Phase D: only the owner sends admin invitations. */
+    const role = chosen && chosen.value === "admin" && db.isOwner() ? "admin" : "member";
     const golferId = inviting.dataset.golfer || null;
     const named = golferId ? golferById(golferId) : null;
     sheetEl.hidden = true;
