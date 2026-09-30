@@ -1,0 +1,205 @@
+[36m[1mi  emulators:[22m[39m Starting emulators: auth, firestore
+[36m[1mi  emulators:[22m[39m Detected demo project ID "demo-scorecard", emulated services will use a demo configuration and attempts to access non-emulated services for this project will fail.
+[33m[1m⚠ [22m[39m It appears you are running in a CI environment. You can avoid downloading the Firestore Emulator repeatedly by caching the /home/runner/.cache/firebase/emulators directory.
+[36m[1mi  firestore:[22m[39m downloading cloud-firestore-emulator-v1.22.0.jar...
+
+[36m[1mi  firestore:[22m[39m Firestore Emulator logging to [1mfirestore-debug.log[22m
+[32m[1m✔  firestore:[22m[39m Firestore Emulator was started in standard edition.
+[32m[1m✔  firestore:[22m[39m Firestore Emulator UI websocket is running on 9150.
+[36m[1mi [22m[39m Running script: [1ms=0; bash sec-tests.sh || s=1; echo; bash del1-tests.sh || s=1; echo; if [ -f privacy-tests.sh ]; then bash privacy-tests.sh || s=1; fi; echo; bash acc-tests.sh || s=1; exit $s[22m
+== Scenario 1: A's forged request names B's group, golfer and invitations
+00:31:24 Deletion completion job for demo-scorecard (requests older than 0s).
+00:31:24 Requests found: 1
+00:31:24 OK dAZ4…: cleaned up group G1… (3 writes).
+00:31:24 DONE dAZ4…: account confirmed gone; request removed.
+00:31:24 Summary: done 1, blocked 0, waiting for the app 0, failed 0.
+PASS  job finished
+PASS  SEC1 B's invitation claim in G1 untouched
+PASS  SEC1 B's invitation claim in G2 untouched
+PASS  SEC2 B's golfer still linked to B
+PASS  SEC3 unrelated group G2 completely unchanged
+PASS  SEC3 B's membership in G1 untouched
+PASS  SEC3 owner's membership in G1 untouched
+PASS  SEC3 B's group list untouched
+PASS  A's own membership removed
+PASS  A's own invitation claim removed
+PASS  A's own group list removed
+PASS  A's golfer unlinked
+PASS  D1 A's golfer name kept
+PASS  D1 A's round kept
+PASS  A's sign-in deleted
+PASS  B's sign-in untouched
+PASS  A's request removed after confirmation
+== Scenario 2 (SEC4): the owner of two groups requests deletion
+00:31:25 Deletion completion job for demo-scorecard (requests older than 0s).
+00:31:25 Requests found: 1
+00:31:25 BLOCKED T8Yb…: owns 2 group(s). Nothing deleted. The owner must delete those groups first.
+00:31:25 Summary: done 0, blocked 1, waiting for the app 0, failed 0.
+PASS  job finished (a blocked request is not a failure)
+PASS  SEC4 group G1 completely unchanged
+PASS  SEC4 group G2 completely unchanged
+PASS  SEC4 owner's sign-in NOT deleted
+PASS  SEC4 request kept and marked blocked
+== Scenario 3 (SEC5): Firebase does not confirm the sign-in is gone
+00:31:27 Deletion completion job for demo-scorecard (requests older than 0s).
+00:31:27 Requests found: 1
+00:31:27 OK zwK4…: cleaned up group G1… (3 writes).
+00:31:27 NOT CONFIRMED zwK4…: Firebase still has the account. Request kept; it will be retried.
+00:31:27 FAILED zwK4… (code 11); it will be retried next run.
+00:31:27 Summary: done 0, blocked 0, waiting for the app 0, failed 1.
+PASS  job reports a problem
+PASS  SEC5 request kept until the sign-in is confirmed gone
+PASS  SEC5 request marked not confirmed
+== Scenario 4: a request younger than one hour is left for the app
+00:31:27 Deletion completion job for demo-scorecard (requests older than 3600s).
+00:31:27 Requests found: 1
+00:31:27 Summary: done 0, blocked 0, waiting for the app 1, failed 0.
+PASS  job finished
+PASS  young request untouched
+PASS  young request: membership untouched
+PASS  young request: sign-in untouched
+
+RESULT: 29 passed, 0 failed
+
+== DEL1 part 1: another account tries the same writes — each must be refused
+PASS  DEL1 a fellow member (B) cannot write A's deletion record
+PASS  DEL1 a fellow member (B) cannot delete A's membership in G1
+PASS  DEL1 a fellow member (B) cannot delete A's group list entry
+PASS  DEL1 a fellow member (B) cannot delete A's invitation claim
+PASS  DEL1 a fellow member (B) cannot unlink A's golfer
+PASS  DEL1 a fellow member (B) cannot run A's whole step-7 batch for G1
+PASS  DEL1 a stranger (X) cannot write A's deletion record
+PASS  DEL1 a stranger (X) cannot delete A's membership in G1
+PASS  DEL1 a stranger (X) cannot delete A's group list entry
+PASS  DEL1 a stranger (X) cannot delete A's invitation claim
+PASS  DEL1 a stranger (X) cannot unlink A's golfer
+PASS  DEL1 a stranger (X) cannot run A's whole step-7 batch for G1
+PASS  DEL1 nothing of A's changed after the refused attempts
+== DEL1 part 2: the account itself makes every write, in the app's order — each must be allowed
+PASS  DEL1 step 4: A (still anonymous) records its deletion request (D4)
+PASS  DEL1 Phase B: A cannot leave a group while still anonymous
+PASS  DEL1 step 5: the throwaway email is attached to A's own account
+PASS  DEL1 step 5: A marks the request re-confirmed
+PASS  DEL1 step 7: A leaves G1 in one batch (membership, group list, own invitation claim (D4), record)
+PASS  DEL1 step 7: A leaves G2 in one batch (membership, group list, own invitation claim (D4), record)
+PASS  DEL1 step 7: A unlinks its golfer and marks the record auth-deleting
+PASS  DEL1 end state: A is out of both groups; roster, B and the record remain
+PASS  DEL1 golfer unlinked and the name kept (D1)
+== DEL1 part 3: another account still cannot touch A's record; A can withdraw it (wrong-password path)
+PASS  DEL1 a fellow member cannot delete A's deletion record
+PASS  DEL1 A can delete its own record (D4, the wrong-password withdrawal)
+
+RESULT: 24 passed, 0 failed
+
+== PRIV1 rounds: no reads across the database
+PASS  PRIV1 an outsider cannot read a G1 round directly
+PASS  PRIV1 a collection-group query on every rounds collection is refused
+PASS  PRIV1 an outsider's collection-group query is refused
+== PRIV2 rounds: a regular member sees only their own
+PASS  PRIV2 A reads A's own round
+PASS  PRIV2 A cannot read B's round, even knowing its path
+PASS  PRIV2 A's query for golferId == gA is allowed
+PASS  PRIV2 A's query for every round of the group is refused
+PASS  PRIV2 A's query for golferId == gB is refused
+== PRIV3 rounds: admins see their group, not others
+PASS  PRIV3 the G1 admin lists every G1 round
+PASS  PRIV3 the G1 owner lists every G1 round
+PASS  PRIV3 the G2 owner cannot list G1 rounds
+== PRIV4 golfer records are private
+PASS  PRIV4 A reads A's own golfer record
+PASS  PRIV4 A cannot read B's golfer record
+PASS  PRIV4 the G1 admin reads B's golfer record (B plays in G1)
+PASS  PRIV4 the G2 owner cannot read B's golfer record
+PASS  PRIV4 an unclaimed golfer can be read by id (invitation greeting)
+PASS  PRIV4 nobody can list the golfers collection (member)
+PASS  PRIV4 nobody can list the golfers collection (admin)
+PASS  PRIV4 A lists golfers where linkedUid is A (find my golfer)
+PASS  PRIV4 A cannot list golfers where linkedUid is B
+== PRIV9 a member records which golfer they are, and nothing else
+PASS  PRIV9 A sets golferId gA on A's own membership
+PASS  PRIV9 A cannot claim golfer gB on A's own membership
+PASS  PRIV9 A cannot change A's own role
+PASS  PRIV9 A cannot set a golferId on B's membership
+== PRIV5 the directory: name and index for members only
+PASS  PRIV5 A lists the G1 directory
+PASS  PRIV5 the G2 owner cannot list the G1 directory
+PASS  PRIV5 A updates A's own index in the G1 directory
+PASS  PRIV5 A cannot change B's directory entry
+PASS  PRIV5 A cannot add a private field to A's own entry
+PASS  PRIV5 the G1 admin updates B's directory entry
+== PRIV6 games: participants only
+PASS  PRIV6 A (played in game1) reads game1
+PASS  PRIV6 A (did not play in game2) cannot read game2
+PASS  PRIV6 A's query for games containing gA is allowed
+PASS  PRIV6 A's query for every game is refused
+PASS  PRIV6 the G1 admin lists every game
+PASS  PRIV6 the G2 owner cannot read game1
+== PRIV7 golfer name index
+PASS  PRIV7 a single name lookup is allowed (uniqueness check)
+PASS  PRIV7 nobody can list every golfer name
+PASS  PRIV7 an outsider cannot delete A's name claim
+PASS  PRIV7 B cannot delete A's name claim
+PASS  PRIV7 the G1 admin can delete A's name claim (rename)
+== PRIV8 invitation claims
+PASS  PRIV8 an outsider cannot list G1's invitation claims
+
+RESULT: 42 passed, 0 failed
+
+== ACC1 an anonymous session is refused everywhere else, even as a member
+PASS  ACC1 anonymous cannot read its group
+PASS  ACC1 anonymous cannot read its own round
+PASS  ACC1 anonymous cannot query its own rounds
+PASS  ACC1 anonymous cannot list the directory
+PASS  ACC1 anonymous cannot read its own golfer directly
+PASS  ACC1 anonymous cannot read an unclaimed golfer
+PASS  ACC1 anonymous cannot read an invitation
+PASS  ACC1 anonymous cannot read courses
+PASS  ACC1 anonymous cannot read a join code
+PASS  ACC1 anonymous cannot look up a golfer name
+PASS  ACC1 anonymous cannot post a round
+PASS  ACC1 anonymous cannot create a group
+PASS  ACC1 anonymous cannot create a golfer
+PASS  ACC1 anonymous cannot add a group to its own group list
+PASS  ACC1 anonymous cannot change its own directory entry
+== ACC2 an anonymous session may still find its own groups and delete itself
+PASS  ACC2 anonymous lists its own group list
+FAIL  ACC2 anonymous finds its own memberships (collection group, uid == self) (HTTP 403, expected 200)
+PASS  ACC2 anonymous asks which groups it owns (ownerUid == self)
+PASS  ACC2 anonymous finds its own golfer (linkedUid == self)
+PASS  ACC2 anonymous records its own deletion request
+PASS  ACC2 anonymous reads its own deletion request
+PASS  ACC2 anonymous cannot read another account's deletion request
+PASS  ACC2 anonymous cannot list another account's group list
+PASS  ACC2 anonymous cannot find another account's golfer
+PASS  ACC2 anonymous withdraws its own deletion request
+== ACC3 email accounts work as before
+PASS  ACC3 an email member reads the group
+PASS  ACC3 an email member reads its own round
+PASS  ACC3 an email member lists the directory
+PASS  ACC3 a new email account reads courses
+PASS  ACC3 a new email account reads an invitation (to accept it)
+PASS  ACC3 a new email account greets itself by an unclaimed golfer name
+PASS  ACC3 a new email account creates its own group
+PASS  ACC3 a new email account adds it to its own group list
+== ACC4 the guest sets an email and password on the SAME account and is let back in
+PASS  ACC4 the email and password are attached to the guest's own account
+PASS  ACC4 now reads its group
+PASS  ACC4 now reads its own round
+PASS  ACC4 now queries its own rounds
+PASS  ACC4 now lists the directory
+PASS  ACC4 now reads its own golfer
+PASS  ACC4 still cannot read another member's round
+== ACC5 a fresh anonymous sign-in (a stranger) gets nothing at all
+PASS  ACC5 a stranger's anonymous session cannot read the group
+PASS  ACC5 a stranger's anonymous session cannot read an invitation
+PASS  ACC5 a stranger's anonymous session cannot create a group
+
+RESULT: 42 passed, 1 failed
+[33m[1m⚠ [22m[39m Script exited unsuccessfully (code 1)
+[36m[1mi  emulators:[22m[39m Shutting down emulators.
+[36m[1mi  firestore:[22m[39m Stopping Firestore Emulator
+[36m[1mi  auth:[22m[39m Stopping Authentication Emulator
+[36m[1mi  hub:[22m[39m Stopping emulator hub
+[36m[1mi  logging:[22m[39m Stopping Logging Emulator
+
+[1m[31mError:[39m[22m Script "[1ms=0; bash sec-tests.sh || s=1; echo; bash del1-tests.sh || s=1; echo; if [ -f privacy-tests.sh ]; then bash privacy-tests.sh || s=1; fi; echo; bash acc-tests.sh || s=1; exit $s[22m" exited with code 1
