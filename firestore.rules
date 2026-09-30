@@ -469,7 +469,12 @@ service cloud.firestore {
      * This is narrow on purpose: you may read a membership document only if it
      * is YOUR OWN, so it reveals nothing about anybody else. Read only. */
     match /{path=**}/members/{memberUid} {
-      allow read: if authed() && memberUid == request.auth.uid;
+      /* 2.22.0 fix: the app finds its memberships with a query on the uid
+         FIELD (where uid == me). The rules cannot match a field filter against
+         the document id, so that query was always refused — which stopped
+         Delete my account at its first step. The uid field is checked too. */
+      allow read: if authed()
+        && (memberUid == request.auth.uid || resource.data.get('uid', '') == request.auth.uid);
     }
 
     /* Phase A: the recursive rounds read that let ANY signed-in account read

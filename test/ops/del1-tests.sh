@@ -91,6 +91,25 @@ unlink_batch(){ # uid
   w_update "golfers/gA" '{"linkedUid":null}'
   w_set "accountDeletions/$1" '{"stage":"auth-deleting"}'; }
 
+# query_as TOKEN PARENT(relative, '' for root) COLLECTION ALLDESC FIELD VALUE -> HTTP status (field == value)
+query_as(){ local q; q="$(jq -nc --arg c "$3" --argjson a "$4" --arg f "$5" --arg v "$6" \
+    '{structuredQuery:{from:[{collectionId:$c,allDescendants:$a}],where:{fieldFilter:{field:{fieldPath:$f},op:"EQUAL",value:{stringValue:$v}}}}}')"
+  curl -g -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $1" -H 'Content-Type: application/json' \
+    --data-binary "${q}" "${FS}/${DB}${2:+/$2}:runQuery"; }
+list_as(){ curl -g -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $1" "${FS}/${DB}/$2"; }
+read_ok(){ local label="$1"; shift; local code; code="$("$@")"
+  [[ "${code}" == 200 ]] && ok "${label}" || bad "${label} (HTTP ${code}, expected 200)"; }
+read_refused(){ local label="$1"; shift; local code; code="$("$@")"
+  [[ "${code}" == 403 ]] && ok "${label}" || bad "${label} (HTTP ${code}, expected 403 refused)"; }
+
+echo "== DEL1 part 0: the reads Delete my account makes before any write (steps 1 and 4, still anonymous) — each must be allowed"
+reset; seed
+read_ok "DEL1 step 1: A asks which groups it owns (associations where ownerUid == A)" query_as "${TA}" "" associations false ownerUid "${A}"
+read_ok "DEL1 step 1: A finds its memberships (collection group members where uid == A)" query_as "${TA}" "" members true uid "${A}"
+read_ok "DEL1 step 1: A lists its own group list"                                   list_as "${TA}" "userGroups/${A}/groups"
+read_ok "DEL1 step 4: A finds its own golfer (golfers where linkedUid == A)"         query_as "${TA}" "" golfers false linkedUid "${A}"
+read_refused "DEL1 A cannot find B's memberships (uid == B)"                        query_as "${TA}" "" members true uid "${B}"
+
 echo "== DEL1 part 1: another account tries the same writes — each must be refused"
 reset; seed
 for who in "B:${TB}:a fellow member" "X:${TX}:a stranger"; do
@@ -116,6 +135,7 @@ TA="$(link_email "${TA}" "delete-${A,,}@accounts.cuberoot-systems.com")"
 [[ -n "${TA}" && "${TA}" != null ]] && ok "DEL1 step 5: the throwaway email is attached to A's own account" \
   || bad "DEL1 step 5: the throwaway email is attached to A's own account"
 allowed "DEL1 step 5: A marks the request re-confirmed"                       "${TA}" "$(rec_reauth "${A}")"
+read_ok "DEL1 step 7: A (email attached) finds its own invitation claims in G1"      query_as "${TA}" "associations/G1" invites false acceptedBy "${A}"
 for g in G1 G2; do
   mapfile -t LB < <(leave_batch "${A}" "${g}")
   allowed "DEL1 step 7: A leaves ${g} in one batch (membership, group list, own invitation claim (D4), record)" "${TA}" "${LB[@]}"
