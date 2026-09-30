@@ -2188,6 +2188,8 @@ function screenManage() {
               ? (db.isOwner()
                   ? `<button class="rowbtn wide" data-reinvite="${g.id}" title="Let them join again">Joined ✓</button>`
                   : `<button class="rowbtn wide" disabled>Joined ✓</button>`)
+              /* The public group is joined by application only, never by invitation. */
+              : db.isPublicGroup() ? ""
               : (waiting
                   ? `<button class="rowbtn wide" data-invite-golfer="${g.id}" title="Invited ${esc(invitedOn)} — send it again">Re-send</button>`
                   : `<button class="rowbtn wide primary" data-invite-golfer="${g.id}">Invite</button>`)}
@@ -2442,7 +2444,7 @@ function peopleSection() {
           ${p.state === "joined" && p.role !== "owner"
             ? `<button class="rowbtn" data-role="${p.key}:${p.role === "admin" ? "member" : "admin"}">${p.role === "admin" ? "Make guest" : "Make admin"}</button>
                <button class="rowbtn warn" data-drop-member="${p.key}">Remove</button>`
-            : p.state === "waiting"
+            : p.state === "waiting" && !db.isPublicGroup()
               ? `<button class="rowbtn" data-invite-golfer="${esc(p.golferId)}">Send again</button>`
               : ""}
         </div>`).join("") : `<p class="blank" style="padding:1rem">Nobody yet.</p>`}
@@ -2458,7 +2460,11 @@ function peopleSection() {
         </div>
       </div>` : ""}
 
-      <div class="inline-form bordered">
+      ${db.isPublicGroup() ? `<div class="inline-form bordered">
+        <p class="hint" style="margin:0">People join the public group only by applying — see
+        <b>Applications</b> above. There are no invitation links or codes for it. To make somebody a
+        reviewer, tap <b>Make admin</b> beside their name.</p>
+      </div>` : `<div class="inline-form bordered">
         <p class="hint" style="margin:0 0 0.7rem">Invitations for people who play are on the
         <b>Manage</b> tab, beside each name — that way the link carries their name and ties them to
         their existing rounds.</p>
@@ -2468,7 +2474,7 @@ function peopleSection() {
           <button class="btn compact" data-act="invite-nonplayer">Invite an admin who doesn't play</button>
           <button class="btn ghost compact" data-act="show-code">Show the code</button>
         </div>
-      </div>
+      </div>`}
     </div>
     <p class="hint"><b>Guests</b> post their own rounds and see the results. <b>Admins</b> also add courses, manage the roster and post for anybody. <b>You</b> can do everything, and only you can change these.</p>
   </section>`;
