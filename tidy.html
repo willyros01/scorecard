@@ -447,7 +447,7 @@ async function repair() {
         recentWindow: g.window,
         handicapIndex: g.correctIndex,
         roundCount: g.realCount,
-        editedIn: g.homeGroup || (groups[0] || {}).id || "",
+        editedIn: g.homeGroup || (plan.groups[0] || {}).id || "",
       }, { merge: true });
       fixed++;
       say(`${g.name}: ${g.realCount} round${g.realCount === 1 ? "" : "s"}, index ${g.correctIndex == null ? "not established" : g.correctIndex.toFixed(1)}`);
@@ -511,7 +511,7 @@ async function repair() {
         for (const spare of merge.absorb) {
           tidyBatch.set(doc(db, "golfers", spare.id),
             { archived: true, archivedAt: Date.now(), nameKey: null,
-              mergedInto: merge.keeper.id, editedIn: (groups[0] || {}).id || "" },
+              mergedInto: merge.keeper.id, editedIn: (plan.groups[0] || {}).id || "" },
             { merge: true });
           /* Free the name only if the claim is THIS record's. Duplicates share
              one name, and the claim usually belongs to the record being kept;
@@ -542,7 +542,7 @@ async function repair() {
              marked archived and hidden everywhere instead, and their name is
              released for reuse. Nothing is destroyed. */
           batch.set(doc(db, "golfers", g.id),
-            { archived: true, archivedAt: Date.now(), nameKey: null, editedIn: (groups[0] || {}).id || "" },
+            { archived: true, archivedAt: Date.now(), nameKey: null, editedIn: (plan.groups[0] || {}).id || "" },
             { merge: true });
           if (g.nameKey && await nameClaimedBy(g.nameKey, g.id)) batch.delete(doc(db, "golferNames", g.nameKey));
         }
