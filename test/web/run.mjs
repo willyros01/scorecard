@@ -310,6 +310,18 @@ for (const [name, type] of browsers) {
       await page.locator('[data-act="hide-code"]').first().click();
       await waitForText(page, /Sign in/);
     });
+    await check(`C5-${tag}`, `${name}: signed out, Apply to join the public group asks for full name and email only`, async () => {
+      await page.locator('[data-act="show-apply"]').first().click();
+      await waitForText(page, /Apply to join the public group/);
+      if (await page.locator('[name="password"]').count()) throw new Error("the application asks for a password");
+      if (!(await page.locator('[name="apply-name"]').count()) || !(await page.locator('[name="apply-email"]').count())) throw new Error("no name or email field");
+      if (!/see your full name and your handicap index, and nothing else/.test(await bodyText(page))) throw new Error("no privacy note");
+      await page.locator('[data-act="submit-application"]').click();
+      await waitForText(page, /Type your full name/);
+      await expectNoUser(page, 1000);
+      await page.locator('[data-act="hide-apply"]').first().click();
+      await waitForText(page, /Sign in/);
+    });
     await check(`W6-${tag}`, `${name}: User guide, Support and Privacy links at the foot of the screen`, async () => {
       const t = await bodyText(page);
       if (!/User guide/.test(t) || !/Support/.test(t) || !/Privacy/.test(t)) throw new Error("a link is missing");

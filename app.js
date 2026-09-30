@@ -236,6 +236,15 @@ let invitedGroupName = "";
 /* Version 2.0 Phase B: which account card a signed-out (or old guest) screen
    shows — "create" or "signin". Null means the screen's own default. */
 let accountMode = null;
+/* Version 2.0 Phase C: the PUBLIC group. */
+let showApply = false;          /* signed out: the Apply form is open */
+let applySentTo = "";           /* signed out: the application just sent */
+let applications = [];          /* reviewers: pending applications */
+let publicReports = [];         /* reviewers: reports of golfers' names */
+let blocked = [];               /* this account's blocked golfers (PUBLIC) */
+let rawGolfers = [];            /* golfers as delivered, before blocking */
+let confirmReject = null;       /* the application key awaiting a second tap */
+let confirmationSent = false;   /* the confirmation email was sent this session */
 
 /* Kept beside the handlers so adding a button and forgetting the selector
    cannot happen silently — a test compares this list against the markup. */
@@ -453,6 +462,7 @@ function screenJoin() {
     ${flashBar()}
 
     ${signedIn ? `
+      ${confirmEmailCard()}
       <div class="card padded" style="border:2px solid var(--pencil)">
         <div class="name">Expecting to see a group here?</div>
         <p class="hint">If you already belong to one, <b>do not create another</b> — a second group
@@ -487,6 +497,187 @@ function screenJoin() {
     ` : ""}
     ${versionBlock()}
   </div>`;
+}
+
+/* ---------------- Version 2.0 Phase C: the PUBLIC group ---------------- */
+
+/* Signed out: apply to the PUBLIC group with full name and email (R1). */
+function screenApply() {
+  if (applySentTo) {
+    return `<div class="stack">
+      ${flashBar()}
+      <div class="card padded">
+        <h2 class="panel-title">Application sent</h2>
+        <p class="lead">Thank you. Every application is read by a person, so it can take a day or two.</p>
+        <p class="hint">When it is approved, an email goes to <b>${esc(applySentTo)}</b> with a link to choose your password. Then open The Scorecard and sign in with that email and password.</p>
+        <p class="hint">The email comes from Firebase, which The Scorecard uses for accounts. It sometimes lands in junk mail.</p>
+        <div class="inline-actions stacked"><button class="btn ghost" data-act="hide-apply">Back to Sign in</button></div>
+      </div>
+      ${versionBlock()}
+    </div>`;
+  }
+  return `<div class="stack">
+    ${flashBar()}
+    ${offlineAccountNote()}
+    <div class="card padded">
+      <h2 class="panel-title">Apply to join the public group</h2>
+      <p class="hint">The public group is open to any golfer who wants a handicap. Give your full name and your email — no password yet. When a person has approved it, you get an email to choose your password.</p>
+      <label class="lbl">Full name</label>
+      <input class="field" name="apply-name" value="${esc(joinForm.name || "")}" placeholder="e.g. Willy Rosales" autocomplete="name" maxlength="80">
+      <label class="lbl">Email</label>
+      <input class="field" name="apply-email" type="email" value="${esc(authForm.email || "")}" placeholder="you@example.com" autocomplete="email" autocapitalize="none" maxlength="254">
+      <div class="note tip">Other members of the public group see your <b>full name</b> and your <b>handicap index</b>, and nothing else. Your rounds stay private.</div>
+      <div class="inline-actions stacked">
+        <button class="btn" data-act="submit-application" ${joining ? "disabled" : ""}>${joining ? "Sending…" : "Send my application"}</button>
+        <button class="btn ghost" data-act="hide-apply">Back</button>
+      </div>
+      <p class="hint"><button class="linkbtn" data-act="open-privacy">Privacy</button> · <button class="linkbtn" data-act="open-support">Support</button></p>
+    </div>
+    ${versionBlock()}
+  </div>`;
+}
+
+async function submitApplicationHere() {
+  const fullName = ((view.querySelector('[name="apply-name"]') || {}).value || "").trim();
+  const email = ((view.querySelector('[name="apply-email"]') || {}).value || "").trim();
+  joinForm.name = fullName; authForm = { email, password: "" };
+  if (fullName.length < 2) { flashMsg("Type your full name"); return; }
+  if (!email) { flashMsg("Type your email address"); return; }
+  joining = true;
+  busy("Sending your application");
+  render();
+  try {
+    await db.submitApplication({ fullName, email });
+    applySentTo = email;
+  } catch (err) {
+    const code = String((err && (err.code || err.message)) || "");
+    if (code.includes("app/exists")) flashMsg("There is already an application for that email. You will get an email when it is decided.");
+    else if (code.includes("app/email")) flashMsg("That email does not look right. Check it for a typo.");
+    else if (code.includes("app/name")) flashMsg("Type your full name (up to 80 characters).");
+    else flashMsg(`It was not sent: ${code || "no connection"}. Check the connection and try again.`);
+  } finally {
+    joining = false;
+    idle();
+    render();
+  }
+}
+
+/* After any sign-in: join the PUBLIC group if an approval is waiting for this
+   email. Quiet when there is none. */
+async function checkPublicApproval() {
+  let result;
+  try { result = await db.joinPublicIfApproved(); }
+  catch (e) {
+    flashMsg("Your approval for the public group was found, but joining did not finish. Open the app again to retry.");
+    return;
+  }
+  if (!result || !result.joined) return;
+  if (!db.currentAssociation()) {
+    await start(db.PUBLIC_ID);
+    tab = "enter";
+    flashMsg("Welcome to the public group. Post your rounds on the Enter tab.");
+  } else {
+    flashMsg("You are now in the public group too. Tap the group name at the top to switch to it.");
+  }
+}
+
+/* Signed in, in no group, email not confirmed: somebody approved for the
+   public group who already had an account confirms their email here. */
+function confirmEmailCard() {
+  if (db.emailConfirmed()) return "";
+  return `<div class="card padded">
+    <div class="name">Applied to the public group?</div>
+    <p class="hint">Once your application is approved, confirm your email address and you join straight away.</p>
+    <div class="inline-actions stacked">
+      <button class="btn ghost" data-act="send-confirmation">${confirmationSent ? "Send the confirmation email again" : "Send me the confirmation email"}</button>
+      ${confirmationSent ? `<button class="btn" data-act="confirmed-email">I have confirmed it — continue</button>` : ""}
+    </div>
+    ${confirmationSent ? `<p class="hint">Sent to <b>${esc(db.currentEmail())}</b>. Open the link in it, then come back and tap Continue. It sometimes lands in junk mail.</p>` : ""}
+  </div>`;
+}
+
+/* Shown under the ranking in the public group (Apple guideline 1.2). */
+function publicSafetyNote() {
+  return `${blocked.length && !db.canManage() ? `<div class="card list">
+      <div class="list-row"><span class="grow"><span class="name">Golfers you blocked</span><br><span class="sub">Hidden from your screens. Only you see this list.</span></span></div>
+      ${blocked.map((b) => `<div class="list-row"><span class="grow"><span class="name">${esc(b.name || "A golfer")}</span></span>
+        <button class="rowbtn" data-act="unblock" data-id="${esc(b.golferId)}">Unblock</button></div>`).join("")}
+    </div>` : ""}
+    <p class="hint">See a name that shouldn't be here? Tap <b>Report or block</b> under it. Reports go to the people who run the public group. You can also write to <button class="linkbtn" data-act="open-support">Support</button>.</p>`;
+}
+
+function openGolferActions(golferId) {
+  const golfer = golferById(golferId) || allGolfers.find((g) => g.id === golferId);
+  if (!golfer) return;
+  sheetEl.hidden = false;
+  sheetEl.innerHTML = `<div class="sheet-body">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <h2>${esc(golfer.name)}</h2><button class="rowbtn" data-close="1">Close</button></div>
+    <label class="lbl">Report this name to the people who run the public group</label>
+    <textarea class="field" name="report-reason" rows="3" maxlength="500" placeholder="What is wrong with it? (optional)"></textarea>
+    <div class="inline-actions stacked">
+      <button class="btn" data-pc="report" data-id="${esc(golfer.id)}">Send the report</button>
+      <button class="btn ghost" data-pc="block" data-id="${esc(golfer.id)}">Block — hide ${esc(golfer.name)} from my screens</button>
+    </div>
+    <p class="hint">Blocking only changes what you see. You can unblock under the ranking at any time.</p>
+  </div>`;
+}
+
+/* Reviewers: the waiting applications. */
+function applicationsSection() {
+  return `<section class="panel">
+    <div class="panel-head"><h2 class="panel-title">Applications</h2></div>
+    ${applications.length === 0 ? `<div class="card"><p class="blank">No applications waiting.</p></div>` : `
+    <div class="card list">
+      ${applications.map((a) => `<div class="list-row">
+        <span class="grow"><span class="name">${esc(a.fullName)}</span><br><span class="sub">${esc(a.email)}</span></span>
+        <span class="inline-actions">
+          <button class="rowbtn" data-act="review-application" data-id="${esc(a.key)}">Approve</button>
+          <button class="rowbtn ${confirmReject === a.key ? "danger" : ""}" data-act="reject-application" data-id="${esc(a.key)}">${confirmReject === a.key ? "Tap to reject" : "Reject"}</button>
+        </span>
+      </div>`).join("")}
+    </div>`}
+    <p class="hint">Approving creates their account and emails them a link to choose a password. Their golfer name must be unique; if it is taken, add a middle initial.</p>
+  </section>`;
+}
+
+function openApproveSheet(key) {
+  const a = applications.find((x) => x.key === key);
+  if (!a) return;
+  sheetEl.hidden = false;
+  sheetEl.innerHTML = `<div class="sheet-body">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <h2>Approve ${esc(a.fullName)}</h2><button class="rowbtn" data-close="1">Close</button></div>
+    <p class="hint">${esc(a.email)}</p>
+    <label class="lbl">Their golfer name in the public group</label>
+    <input class="field" name="approve-name" value="${esc(a.fullName)}" maxlength="80">
+    <div class="inline-actions stacked">
+      <button class="btn" data-pc="approve" data-id="${esc(a.key)}">Approve and send the email</button>
+    </div>
+    <p class="hint">They get an email from Firebase to choose their password, then they sign in and they are in.</p>
+  </div>`;
+}
+
+/* Reviewers: reports of golfers' names. */
+function reportsSection() {
+  return `<section class="panel">
+    <div class="panel-head"><h2 class="panel-title">Reports</h2></div>
+    ${publicReports.length === 0 ? `<div class="card"><p class="blank">No reports.</p></div>` : `
+    <div class="card list">
+      ${publicReports.map((r) => {
+        const member = members.find((m) => m.golferId === r.golferId && m.role === "member");
+        return `<div class="list-row">
+          <span class="grow"><span class="name">${esc(r.displayName || (golferById(r.golferId) || {}).name || "A golfer")}</span><br>
+            <span class="sub">${esc(r.reason || "No reason given")}</span></span>
+          <span class="inline-actions">
+            <button class="rowbtn" data-act="dismiss-report" data-id="${esc(r.id)}">Dismiss</button>
+            ${member ? `<button class="rowbtn danger" data-act="remove-reported" data-id="${esc(r.id)}">Remove from group</button>` : ""}
+          </span>
+        </div>`;
+      }).join("")}
+    </div>`}
+    <p class="hint">Removing someone takes away their access to the public group. Their rounds stay. To rename a golfer instead, use Manage.</p>
+  </section>`;
 }
 
 /* ---------------- Version 2.0 Phase B: accounts ---------------- */
@@ -531,6 +722,7 @@ function newAccountFields() {
 /* Nobody signed in. With an invitation or a code, the account comes first
    (create one, or sign in to an existing one); otherwise it is Sign in. */
 function screenSignedOut(invite) {
+  if (showApply && !invite) return screenApply();
   const joiningSomething = !!invite || showCodeEntry;
   const mode = accountMode || (joiningSomething ? "create" : "signin");
   const adminOnly = invite && invite.role === "admin" && !invite.golferId;
@@ -572,9 +764,12 @@ function screenSignedOut(invite) {
       backLabel: "New here? Create your account",
     })}
     ${joiningSomething ? (showCodeEntry && !invite ? `<div class="inline-actions stacked"><button class="btn ghost" data-act="hide-code">Back</button></div>` : "") : `
-      <p class="hint" style="text-align:center">
-        New to The Scorecard? You join a group by invitation: tap the link you were sent.
-      </p>
+      <div class="card padded">
+        <div class="name">New to The Scorecard?</div>
+        <p class="hint">Any golfer can apply to join the public group and keep a handicap there.</p>
+        <div class="inline-actions stacked"><button class="btn ghost" data-act="show-apply">Apply to join the public group</button></div>
+        <p class="hint">Invited to a private group? Tap the link you were sent instead.</p>
+      </div>
       <p class="hint" style="text-align:center">
         <button class="linkbtn" data-act="enter-code">I was given a code</button>
       </p>`}
@@ -670,6 +865,7 @@ async function upgradeAccount() {
     await loadInvitedDetails();
     tab = "enter";
     flashMsg(`Done. You are signed in as ${fields.email} — use it on every device.`);
+    await checkPublicApproval();
   } catch (err) {
     joining = false;
     openSignInProblem(err, fields.email);
@@ -1399,11 +1595,13 @@ function groupRankingSection() {
     <div class="card list">
       ${rows.map((r) => `<div class="list-row${r.id === mine ? " me" : ""}">
         <span class="rank">${r.place || "—"}</span>
-        <span class="grow"><span class="name">${esc(r.name)}</span></span>
+        <span class="grow"><span class="name">${esc(r.name)}</span>
+          ${db.isPublicGroup() && r.id !== mine ? `<br><button class="linkbtn" data-act="golfer-actions" data-id="${esc(r.id)}">Report or block</button>` : ""}</span>
         <span class="netavg">${r.index == null ? "—" : r.index.toFixed(1)}<br><span class="sub">index</span></span>
       </div>`).join("")}
     </div>
     <p class="hint">Ranked by handicap index, lowest first. Only names and indexes are shown; each golfer's rounds stay private.</p>`}
+    ${db.isPublicGroup() ? publicSafetyNote() : ""}
   </section>`;
 }
 
@@ -2053,6 +2251,13 @@ function screenAdmin() {
      turning them away with nothing — being told "not your area" while holding
      a real admin role is exactly what looked like a broken button. */
   if (!db.isOwner()) {
+    /* Phase C: an admin of the PUBLIC group is a reviewer. */
+    if (db.isPublicGroup() && db.canManage()) {
+      return `${flashBar()}
+        ${safe("Applications", applicationsSection)}
+        ${safe("Reports", reportsSection)}
+        ${versionBlock()}`;
+    }
     if (db.needsPassword()) {
       return `${flashBar()}
         ${safe("Set a password", passwordPrompt)}
@@ -2062,6 +2267,8 @@ function screenAdmin() {
   }
 
   return `${flashBar()}
+  ${db.isPublicGroup() ? safe("Applications", applicationsSection) : ""}
+  ${db.isPublicGroup() ? safe("Reports", reportsSection) : ""}
   ${safe("Set a password", passwordPrompt)}
   ${safe("People", peopleSection)}
   ${safe("Group", groupSection)}
@@ -2784,6 +2991,51 @@ function openDeleteAccount({ resume = false, problem = "" } = {}) {
   </div>`;
 }
 
+/* Version 2.0 Phase C: the report, block and approve sheets. */
+sheetEl.addEventListener("click", async (e) => {
+  const t = e.target.closest("[data-pc]");
+  if (!t) return;
+  const { pc, id } = t.dataset;
+  if (pc === "report") {
+    const golfer = allGolfers.find((g) => g.id === id) || golferById(id) || {};
+    const reason = ((sheetEl.querySelector('[name="report-reason"]') || {}).value || "").trim();
+    sheetEl.hidden = true;
+    busy("Sending the report");
+    try { await db.reportGolfer({ golferId: id, displayName: golfer.name || "", reason }); flashMsg("Report sent to the people who run the public group. Thank you."); }
+    catch { flashMsg("The report was not sent. Check the connection and try again."); }
+    finally { idle(); }
+    return render();
+  }
+  if (pc === "block") {
+    const golfer = allGolfers.find((g) => g.id === id) || golferById(id) || {};
+    sheetEl.hidden = true;
+    busy("Blocking");
+    try { await db.blockGolfer({ golferId: id, name: golfer.name || "" }); flashMsg(`${golfer.name || "They"} will no longer appear on your screens.`); }
+    catch { flashMsg("Couldn't block — the message above says why."); }
+    finally { idle(); }
+    return render();
+  }
+  if (pc === "approve") {
+    const a = applications.find((x) => x.key === id);
+    const name = ((sheetEl.querySelector('[name="approve-name"]') || {}).value || "").trim();
+    if (!a) { sheetEl.hidden = true; return render(); }
+    if (name.length < 2) { flashMsg("Type their golfer name"); return; }
+    sheetEl.hidden = true;
+    busy(`Approving ${a.fullName}`);
+    try {
+      const result = await db.approveApplication({ application: a, golferName: name });
+      flashMsg(result.existingAccount
+        ? `${a.fullName} is approved. They already had an account: they sign in with it (the email also lets them choose a new password), then confirm their email to join.`
+        : `${a.fullName} is approved. The email to choose a password has gone to ${a.email}.`);
+    } catch (err) {
+      const code = String((err && (err.code || err.message)) || "");
+      if (code.includes("name-taken")) { flashMsg(`The name "${name}" is already used. Add a middle initial or a nickname and approve again.`); openApproveSheet(id); }
+      else flashMsg(`The approval did not finish: ${code || "no connection"}. Tap Approve again — it is safe to repeat.`);
+    } finally { idle(); }
+    return render();
+  }
+});
+
 sheetEl.addEventListener("click", async (e) => {
   const button = e.target.closest("[data-del]");
   if (!button) return;
@@ -2934,7 +3186,12 @@ function visibleTabs() {
     ["games", "Games", "⚑"],
   ];
   if (db.canManage()) tabs.push(["manage", "Manage", "⚙"]);
-  if (db.isOwner()) tabs.push(["admin", "Admin", "★"]);
+  /* Phase C: admins of the PUBLIC group review applications on this tab;
+     the count of waiting ones is shown on it. */
+  if (db.isOwner() || (db.isPublicGroup() && db.canManage())) {
+    const waiting = db.isPublicGroup() ? applications.length + publicReports.length : 0;
+    tabs.push(["admin", waiting ? `Admin (${waiting})` : "Admin", "★"]);
+  }
   return tabs;
 }
 
@@ -3825,6 +4082,72 @@ view.addEventListener("click", async (e) => {
        silently did nothing at all. */
     case "enter-code": showCodeEntry = true; accountMode = null; return render();
     case "create-account": return createAccountHere();
+    case "show-apply": showApply = true; applySentTo = ""; return render();
+    case "hide-apply": showApply = false; applySentTo = ""; return render();
+    case "submit-application": return submitApplicationHere();
+    case "send-confirmation": {
+      busy("Sending the confirmation email");
+      try { await db.sendEmailConfirmation(); confirmationSent = true; flashMsg("Sent. Open the link in the email, then tap Continue."); }
+      catch (e) { flashMsg(`It was not sent: ${String((e && (e.code || e.message)) || "no connection")}.`); }
+      finally { idle(); }
+      return render();
+    }
+    case "confirmed-email": {
+      busy("Checking");
+      try {
+        const ok = await db.refreshEmailState();
+        if (!ok) { flashMsg("Not confirmed yet. Open the link in the email first."); return render(); }
+        const result = await db.joinPublicIfApproved();
+        if (result && result.joined) { await start(db.PUBLIC_ID); tab = "enter"; flashMsg("Welcome to the public group. Post your rounds on the Enter tab."); }
+        else flashMsg("Your email is confirmed. There is no approval for it yet — you will get an email when there is.");
+      } catch { flashMsg("That did not finish. Check the connection and try again."); }
+      finally { idle(); }
+      return render();
+    }
+    case "golfer-actions": return openGolferActions(d.id);
+    case "unblock": {
+      busy("Unblocking");
+      try { await db.unblockGolfer(d.id); flashMsg("Unblocked."); }
+      catch { flashMsg("Couldn't unblock — the message above says why."); }
+      finally { idle(); }
+      return render();
+    }
+    case "review-application": return openApproveSheet(d.id);
+    case "reject-application": {
+      if (confirmReject !== d.id) {
+        confirmReject = d.id;
+        setTimeout(() => { if (confirmReject === d.id) { confirmReject = null; render(); } }, 4000);
+        return render();
+      }
+      confirmReject = null;
+      const a = applications.find((x) => x.key === d.id);
+      if (!a) return render();
+      busy("Rejecting");
+      try { await db.rejectApplication(a); flashMsg(`${a.fullName}'s application was rejected. No email is sent.`); }
+      catch { flashMsg("Couldn't reject it — the message above says why."); }
+      finally { idle(); }
+      return render();
+    }
+    case "dismiss-report": {
+      busy("Dismissing");
+      try { await db.dismissReport(d.id); flashMsg("Report dismissed."); }
+      catch { flashMsg("Couldn't dismiss it — the message above says why."); }
+      finally { idle(); }
+      return render();
+    }
+    case "remove-reported": {
+      const r = publicReports.find((x) => x.id === d.id);
+      const member = r && members.find((m) => m.golferId === r.golferId && m.role === "member");
+      if (!member) return render();
+      busy("Removing them from the group");
+      try {
+        await db.removeMemberships([member.uid]);
+        await db.dismissReport(r.id);
+        flashMsg(`${r.displayName || "They"} no longer have access to the public group. Their rounds stay.`);
+      } catch { flashMsg("Couldn't remove them — the message above says why."); }
+      finally { idle(); }
+      return render();
+    }
     case "upgrade-account": return upgradeAccount();
     case "account-mode-signin": accountMode = "signin"; return render();
     case "account-mode-create": accountMode = "create"; return render();
@@ -4753,6 +5076,9 @@ async function signIn() {
         ? `Password set on ${result.email}. That is now your one account — use this email and password on every device.`
         : result.outcome === "created" ? "Account created. Use this email and password on your other devices."
         : `Signed in as ${email}.`);
+    /* Phase C: an approval for the public group waiting for this email.
+       Its own message, if any, replaces the one above. */
+    await checkPublicApproval();
   } catch (err) {
     joining = false;
     openSignInProblem(err, email);
@@ -5219,13 +5545,33 @@ async function start(assocId) {
     lookup.setSharedKey(doc.lookupKey || "");
     render();
   });
-  db.watchGolfers((list) => { allGolfers = list; refreshScope(); render(); scheduleDirectoryRefresh(); });
+  db.watchGolfers((list) => { rawGolfers = list; applyBlocks(); render(); scheduleDirectoryRefresh(); });
   db.watchRoster((ids) => { roster = ids; refreshScope(); render(); });
   db.watchRounds((list) => { rounds = list; render(); });
   db.watchCourses((list) => { courses = list; render(); });
   db.watchGames((list) => { games = list; render(); });
   db.watchMembers((list) => { members = list; render(); });
+  /* Phase C: in the PUBLIC group, blocks for everybody; applications and
+     reports for its reviewers. */
+  applications = []; publicReports = []; blocked = [];
+  if (db.isPublicGroup()) {
+    db.watchBlocks((list) => { blocked = list; applyBlocks(); render(); });
+    if (db.canManage()) {
+      db.watchApplications((list) => { applications = list; render(); });
+      db.watchReports((list) => { publicReports = list; render(); });
+    }
+  }
   render();
+}
+
+/* A regular member of the PUBLIC group never sees a golfer they blocked —
+   not in the directory, the ranking or anywhere else. Admins see everybody,
+   because they have to act on reports. */
+function applyBlocks() {
+  const hidden = new Set(db.isPublicGroup() && !db.canManage() ? blocked.map((b) => b.golferId) : []);
+  const mine = db.myGolferId(rawGolfers);
+  allGolfers = hidden.size ? rawGolfers.filter((g) => !hidden.has(g.id) || g.id === mine) : rawGolfers;
+  refreshScope();
 }
 
 /* Works out which group this account should actually be looking at.
@@ -5318,6 +5664,7 @@ async function loadInvitedDetails() {
 
   /* If the link names somebody, fetch them so the screen can greet them. */
   if (account) await loadInvitedDetails();
+  if (account) await checkPublicApproval();
 
   markBoot("ready");
   ready = true;

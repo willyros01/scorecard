@@ -12,11 +12,12 @@
  * build/verify.sh (V6) checks that every name store.js takes from
  * fb.mod.auth or fb.mod.store is listed here. */
 
-import { initializeApp } from "firebase/app";
+import { initializeApp, deleteApp } from "firebase/app";
 
 import {
   initializeAuth,
   indexedDBLocalPersistence,
+  inMemoryPersistence,
   onAuthStateChanged,
   signInAnonymously,
   signInWithEmailAndPassword,
@@ -26,6 +27,7 @@ import {
   reauthenticateWithCredential,
   updatePassword,
   sendPasswordResetEmail,
+  sendEmailVerification,
   deleteUser,
   signOut,
 } from "firebase/auth/web-extension";
@@ -56,11 +58,12 @@ import {
   arrayRemove,
 } from "firebase/firestore";
 
-export const app = { initializeApp };
+export const app = { initializeApp, deleteApp };
 
 export const auth = {
   initializeAuth,
   indexedDBLocalPersistence,
+  inMemoryPersistence,
   onAuthStateChanged,
   signInAnonymously,
   signInWithEmailAndPassword,
@@ -70,6 +73,7 @@ export const auth = {
   reauthenticateWithCredential,
   updatePassword,
   sendPasswordResetEmail,
+  sendEmailVerification,
   deleteUser,
   signOut,
 };

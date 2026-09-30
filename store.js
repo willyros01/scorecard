@@ -112,7 +112,7 @@ export async function init() {
     } else {
       database = store.getFirestore(instance);
     }
-    fb = { mod: { auth, store }, auth: authInstance, db: database };
+    fb = { mod: { app, auth, store }, auth: authInstance, db: database, config: config.firebaseConfig };
 
     await new Promise((resolve) => {
       auth.onAuthStateChanged(fb.auth, async (user) => {
@@ -1160,6 +1160,200 @@ async function refreshToken() {
   try { await fb.auth.currentUser.getIdToken(true); } catch {}
 }
 
+/* ================= Version 2.0 Phase C: the PUBLIC group ================= */
+
+/* The PUBLIC group's fixed id (the rules reserve it). */
+export const PUBLIC_ID = "PUBLIC";
+export const isPublicGroup = () => assocId === PUBLIC_ID;
+const emailKey = (email) => String(email || "").trim().toLowerCase();
+
+/* An application: full name and email, written WITHOUT signing in (R1, R3).
+   It counts only once Firestore confirms it; otherwise the person is told. */
+export async function submitApplication({ fullName, email }) {
+  if (!fb) throw new Error("The app is still starting. Try again in a moment.");
+  const name = String(fullName || "").trim().replace(/\s+/g, " ");
+  const address = String(email || "").trim();
+  const key = emailKey(address);
+  if (name.length < 2 || name.length > 80) { const e = new Error("name"); e.code = "app/name"; throw e; }
+  if (!/^[^@ ]+@[^@ ]+[.][^@ ]+$/.test(key) || address.length > 254) { const e = new Error("email"); e.code = "app/email"; throw e; }
+  const { setDoc, serverTimestamp } = fb.mod.store;
+  try {
+    await withTimeout(setDoc(ref("publicApplications", key), {
+      fullName: name, email: address, status: "pending", createdAt: serverTimestamp(),
+    }), 20000, "Your application");
+  } catch (e) {
+    const code = String((e && (e.code || e.message)) || "");
+    /* The only way a well-formed application is refused is that one already
+       exists for this email (applicants can never see or change it). */
+    if (code.includes("permission")) { const x = new Error("exists"); x.code = "app/exists"; throw x; }
+    throw e;
+  }
+  return { ok: true };
+}
+
+/* Is the signed-in email confirmed? New PUBLIC accounts confirm it by setting
+   their password from the approval email; anyone else confirms it with
+   Firebase's confirmation email. */
+export const emailConfirmed = () => {
+  const user = fb && fb.auth && fb.auth.currentUser;
+  return !!(user && !user.isAnonymous && user.email && user.emailVerified);
+};
+export async function sendEmailConfirmation() {
+  await fb.mod.auth.sendEmailVerification(fb.auth.currentUser);
+}
+/* After the person confirms in their email, fetch the new state. */
+export async function refreshEmailState() {
+  try { await fb.auth.currentUser.reload(); } catch {}
+  await refreshToken();
+  emit();
+  return emailConfirmed();
+}
+
+/* The applicant's side of an approval: if one waits for this confirmed email,
+   join the PUBLIC group as the golfer the reviewer chose. Returns
+   { joined: true } after joining, { joined: false } when there is none, or
+   { needsConfirmation: true } when the email is not confirmed yet. */
+export async function joinPublicIfApproved() {
+  if (!fb || !uid || isAnonymousSession()) return { joined: false };
+  if (!emailConfirmed()) return { needsConfirmation: true };
+  const { getDoc, getDocFromServer, deleteDoc } = fb.mod.store;
+  const key = emailKey(fb.auth.currentUser.email);
+  let approval;
+  try {
+    approval = await getDocFromServer(ref("publicApprovals", key));
+  } catch { return { joined: false }; }
+  if (!approval.exists()) return { joined: false };
+  const a = approval.data();
+  const already = await getDoc(ref("associations", PUBLIC_ID, "members", uid)).catch(() => null);
+  if (!(already && already.exists())) {
+    await commitTogether([
+      { op: "set", merge: false, path: ["associations", PUBLIC_ID, "members", uid],
+        data: { uid, role: "member", displayName: a.displayName || "", golferId: a.golferId, joinedAt: { __serverTimestamp: true } } },
+      { op: "update", path: ["golfers", a.golferId], data: { linkedUid: uid } },
+      { op: "set", path: ["userGroups", uid, "groups", PUBLIC_ID], data: { assocId: PUBLIC_ID, name: "PUBLIC", at: Date.now() } },
+    ], "join the PUBLIC group");
+  }
+  rememberGroup(PUBLIC_ID, "PUBLIC");
+  try { await deleteDoc(ref("publicApprovals", key)); } catch { /* removed next time */ }
+  return { joined: true };
+}
+
+/* ---- reviewers (admins of PUBLIC) ---- */
+
+export function watchApplications(callback) {
+  const { query, where } = fb.mod.store;
+  const stop = listen(query(col("publicApplications"), where("status", "==", "pending")),
+    (snap) => callback(snap.docs.map((d) => ({ key: d.id, ...d.data() }))
+      .sort((x, y) => ((x.createdAt && x.createdAt.seconds) || 0) - ((y.createdAt && y.createdAt.seconds) || 0))),
+    (e) => report(e));
+  unsubscribers.push(stop);
+  return stop;
+}
+
+/* 24 random characters: the new account's first password, which nobody ever
+   sees. The person chooses their own from the approval email. */
+function randomPassword() {
+  const bytes = new Uint8Array(24);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"[b % 56]).join("");
+}
+
+/* Approving (R2). In this order, so a failure part-way can simply be retried:
+   1. the name must be free (names are unique across the whole database);
+   2. one batch: the golfer, their name claim, the PUBLIC roster and directory
+      entries, the approval, and the application marked approved;
+   3. the account, made through a SEPARATE Firebase instance so the reviewer
+      stays signed in (an existing account is simply left as it is);
+   4. Firebase's own password email, which is the invitation.
+   Returns { ok, existingAccount }. */
+export async function approveApplication({ application, golferName }) {
+  const { getDoc } = fb.mod.store;
+  const name = String(golferName || "").trim().replace(/\s+/g, " ");
+  const key = model.nameKey(name);
+  if (!key) { const e = new Error("name"); e.code = "app/name"; throw e; }
+  const claim = await getDoc(ref("golferNames", key));
+  if (claim.exists()) { const e = new Error("name taken"); e.code = "app/name-taken"; throw e; }
+
+  const golfer = model.buildGolfer({ name });
+  await commitTogether([
+    { op: "set", merge: false, path: ["golfers", golfer.id], data: { ...golfer, groups: [PUBLIC_ID] } },
+    { op: "set", merge: false, path: ["golferNames", key], data: { golferId: golfer.id, name: golfer.name } },
+    { op: "set", path: ["associations", PUBLIC_ID, "roster", golfer.id], data: { golferId: golfer.id, addedAt: Date.now() } },
+    { op: "set", merge: false, path: ["associations", PUBLIC_ID, "directory", golfer.id],
+      data: { golferId: golfer.id, displayName: golfer.name, handicapIndex: null } },
+    { op: "set", merge: false, path: ["publicApprovals", application.key],
+      data: { golferId: golfer.id, displayName: golfer.name, approvedBy: uid, approvedAt: { __serverTimestamp: true } } },
+    { op: "update", path: ["publicApplications", application.key],
+      data: { status: "approved", reviewedBy: uid, reviewedAt: { __serverTimestamp: true }, golferId: golfer.id } },
+  ], "approve an application");
+
+  let existingAccount = false;
+  const name2 = `approver-${Date.now()}`;
+  const second = fb.mod.app.initializeApp(fb.config, name2);
+  try {
+    const secondAuth = fb.mod.auth.initializeAuth(second, { persistence: fb.mod.auth.inMemoryPersistence });
+    try {
+      await fb.mod.auth.createUserWithEmailAndPassword(secondAuth, application.email, randomPassword());
+    } catch (e) {
+      const code = String((e && (e.code || e.message)) || "");
+      if (!code.includes("email-already-in-use")) throw e;
+      existingAccount = true;
+    }
+    try { await fb.mod.auth.signOut(secondAuth); } catch {}
+  } finally {
+    try { await fb.mod.app.deleteApp(second); } catch {}
+  }
+  /* Sent from the reviewer's own instance: it signs nobody in or out. For an
+     existing account it is still useful — it lets them choose a new password
+     if they have forgotten it — and the approval waits for them either way. */
+  await fb.mod.auth.sendPasswordResetEmail(fb.auth, application.email);
+  return { ok: true, existingAccount, golferId: golfer.id };
+}
+
+export async function rejectApplication(application) {
+  await commitTogether([
+    { op: "update", path: ["publicApplications", application.key],
+      data: { status: "rejected", reviewedBy: uid, reviewedAt: { __serverTimestamp: true } } },
+  ], "reject an application");
+}
+
+/* ---- reports and blocks (Apple guideline 1.2) ---- */
+
+export async function reportGolfer({ golferId, displayName, reason }) {
+  const { setDoc, serverTimestamp, doc, collection } = fb.mod.store;
+  const target = doc(collection(fb.db, "associations", assocId, "reports"));
+  await withTimeout(setDoc(target, {
+    golferId, displayName: String(displayName || "").slice(0, 120),
+    reason: String(reason || "").trim().slice(0, 500), reportedBy: uid, createdAt: serverTimestamp(),
+  }), 20000, "Your report");
+}
+
+export function watchReports(callback) {
+  const stop = listen(col("associations", assocId, "reports"),
+    (snap) => callback(snap.docs.map((d) => ({ id: d.id, ...d.data() }))), (e) => report(e));
+  unsubscribers.push(stop);
+  return stop;
+}
+
+export async function dismissReport(reportId) {
+  await commitTogether([{ op: "delete", path: ["associations", assocId, "reports", reportId] }], "dismiss a report");
+}
+
+export function watchBlocks(callback) {
+  if (!uid) return () => {};
+  const stop = listen(col("userBlocks", uid, "golfers"),
+    (snap) => callback(snap.docs.map((d) => ({ golferId: d.id, ...d.data() }))), (e) => report(e));
+  unsubscribers.push(stop);
+  return stop;
+}
+export async function blockGolfer({ golferId, name }) {
+  await commitTogether([{ op: "set", merge: false, path: ["userBlocks", uid, "golfers", golferId],
+    data: { name: String(name || "").slice(0, 120), blockedAt: { __serverTimestamp: true } } }], "block a golfer");
+}
+export async function unblockGolfer(golferId) {
+  await commitTogether([{ op: "delete", path: ["userBlocks", uid, "golfers", golferId] }], "unblock a golfer");
+}
+
 /* Creating an account. Only ever from an invitation, a group code, or
    (Phase C) an approved application — never as a side effect of a typo on
    the sign-in screen. */
@@ -1273,7 +1467,14 @@ export async function loadAssociation(id) {
 }
 
 export function watchMembers(callback) {
-  const { onSnapshot } = fb.mod.store;
+  /* Phase C: only admins may list the members; everybody else reads their
+     own membership. */
+  if (!canManage()) {
+    const stop = listen(ref("associations", assocId, "members", uid),
+      (snap) => callback(snap.exists() ? [{ uid: snap.id, ...snap.data() }] : []), (e) => report(e));
+    unsubscribers.push(stop);
+    return stop;
+  }
   const stop = listen(col("associations", assocId, "members"),
     (snap) => callback(snap.docs.map((d) => ({ uid: d.id, ...d.data() }))), (e) => report(e));
   unsubscribers.push(stop);
@@ -2416,6 +2617,11 @@ export async function deleteMyAccount({ password = "", onStep = () => {} } = {})
       ];
       await commitTogether(writes, "leave group for account deletion");
     }
+    /* Phase C: this account's own list of blocked golfers goes too. */
+    try {
+      const blocks = await getDocsFromServer(collection(fb.db, "userBlocks", uid, "golfers"));
+      if (!blocks.empty) await commitTogether(blocks.docs.map((d) => ({ op: "delete", path: ["userBlocks", uid, "golfers", d.id] })), "remove blocks for account deletion");
+    } catch { /* not worth stopping the deletion for */ }
     const linked = await getDocsFromServer(query(collection(fb.db, "golfers"), where("linkedUid", "==", uid)));
     await commitTogether([
       ...linked.docs.map((d) => ({ op: "update", path: ["golfers", d.id], data: { linkedUid: null } })),
