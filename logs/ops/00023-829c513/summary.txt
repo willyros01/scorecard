@@ -1,0 +1,48 @@
+kind:    ops
+result:  failure
+branch:  v2
+commit:  829c5137e4496a737b08b744ea693c8cb2a4d696
+run:     23 (id 36742786906)
+time:    2026-09-30T16:18:40Z
+
+--- last lines of ops-tests.log ---
+      |   public group created                   : yes
+      |   admin codes moved to the owner's secret: 1
+      |   golfers given their groups list        : 3
+      |   directory entries written              : 3
+      |   memberships given their golfer         : 2
+      |   games given players and result sheet   : 1
+      | 
+      | Applied 15 change(s).
+      | OK: everything is in place.
+      | 
+PASS  GO3 apply finishes and checks itself
+PASS  GO3 the owner is the group creator
+PASS  GO3 the public group exists, owned by the owner
+PASS  GO3 the admin code moved to the owner's secret
+PASS  GO3 golfers list their group
+PASS  GO3 the directory has names and indexes (from rounds, or the typed-in index)
+PASS  GO3 memberships record their golfer
+PASS  GO3 the game lists who played and its result sheet
+PASS  GO3 names and rounds untouched
+PASS  GO4 running apply again changes nothing
+PASS  GO4 verify agrees
+PASS  GO5 a member reads their own rounds
+PASS  GO5 ... and not anybody else's
+PASS  GO5 a member reads a game they played in
+PASS  GO5 a member reads the directory
+PASS  GO5 the admin reads an unjoined golfer of the group
+PASS  GO5 the admin cannot read the admin secret
+PASS  GO5 an admin invitation sent before go-live still works
+PASS  GO5 an old guest sign-in is refused until it sets an email
+PASS  GO6 rollback puts the admin code back on the group
+
+RESULT: 24 passed, 0 failed
+[33m[1m⚠ [22m[39m Script exited unsuccessfully (code 1)
+[36m[1mi  emulators:[22m[39m Shutting down emulators.
+[36m[1mi  firestore:[22m[39m Stopping Firestore Emulator
+[36m[1mi  auth:[22m[39m Stopping Authentication Emulator
+[36m[1mi  hub:[22m[39m Stopping emulator hub
+[36m[1mi  logging:[22m[39m Stopping Logging Emulator
+
+[1m[31mError:[39m[22m Script "[1ms=0; bash sec-tests.sh || s=1; echo; bash del1-tests.sh || s=1; echo; if [ -f privacy-tests.sh ]; then bash privacy-tests.sh || s=1; fi; echo; bash acc-tests.sh || s=1; echo; bash pub-tests.sh || s=1; echo; bash grp-tests.sh || s=1; echo; if [ -d ../../node_modules/playwright ]; then node ../app/e2e.mjs ../.. || s=1; else echo "SKIP  app tests (npm ci not run)"; fi; echo; node golive-tests.mjs || s=1; exit $s[22m" exited with code 1
