@@ -1,0 +1,48 @@
+kind:    ops
+result:  failure
+branch:  v2
+commit:  8cc53c69417eb5f40c7d0dc5f6d1aa5446022a0d
+run:     8 (id 36651130768)
+time:    2026-09-30T00:37:06Z
+
+--- last lines of ops-tests.log ---
+PASS  ACC2 anonymous finds its own golfer (linkedUid == self)
+PASS  ACC2 anonymous records its own deletion request
+PASS  ACC2 anonymous reads its own deletion request
+PASS  ACC2 anonymous cannot read another account's deletion request
+PASS  ACC2 anonymous cannot list another account's group list
+PASS  ACC2 anonymous cannot find another account's golfer
+PASS  ACC2 anonymous withdraws its own deletion request
+== ACC3 email accounts work as before
+FAIL  ACC3 an email member finds its own memberships (collection group, uid == self — the app's query) (HTTP 403, expected 200)
+PASS  ACC3 an email member cannot find another account's memberships
+PASS  ACC3 an email member reads the group
+PASS  ACC3 an email member reads its own round
+PASS  ACC3 an email member lists the directory
+PASS  ACC3 a new email account reads courses
+PASS  ACC3 a new email account reads an invitation (to accept it)
+PASS  ACC3 a new email account greets itself by an unclaimed golfer name
+PASS  ACC3 a new email account creates its own group
+PASS  ACC3 a new email account adds it to its own group list
+== ACC4 the guest sets an email and password on the SAME account and is let back in
+PASS  ACC4 the email and password are attached to the guest's own account
+PASS  ACC4 now reads its group
+PASS  ACC4 now reads its own round
+PASS  ACC4 now queries its own rounds
+PASS  ACC4 now lists the directory
+PASS  ACC4 now reads its own golfer
+PASS  ACC4 still cannot read another member's round
+== ACC5 a fresh anonymous sign-in (a stranger) gets nothing at all
+PASS  ACC5 a stranger's anonymous session cannot read the group
+PASS  ACC5 a stranger's anonymous session cannot read an invitation
+PASS  ACC5 a stranger's anonymous session cannot create a group
+
+RESULT: 43 passed, 2 failed
+[33m[1m⚠ [22m[39m Script exited unsuccessfully (code 1)
+[36m[1mi  emulators:[22m[39m Shutting down emulators.
+[36m[1mi  firestore:[22m[39m Stopping Firestore Emulator
+[36m[1mi  auth:[22m[39m Stopping Authentication Emulator
+[36m[1mi  hub:[22m[39m Stopping emulator hub
+[36m[1mi  logging:[22m[39m Stopping Logging Emulator
+
+[1m[31mError:[39m[22m Script "[1ms=0; bash sec-tests.sh || s=1; echo; bash del1-tests.sh || s=1; echo; if [ -f privacy-tests.sh ]; then bash privacy-tests.sh || s=1; fi; echo; bash acc-tests.sh || s=1; exit $s[22m" exited with code 1
