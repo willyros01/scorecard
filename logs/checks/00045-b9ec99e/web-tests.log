@@ -1,8 +1,11 @@
 --- webkit ---
-PASS  W1-WK  webkit: the app starts and signs in anonymously
+PASS  W1-WK  webkit: the app starts signed out and shows Sign in (Version 2.0: no anonymous sign-in)
 PASS  W2-WK  webkit: no uncaught errors while starting
 PASS  C6-WK  webkit: no Google sign-in anywhere on the first screen
-PASS  W3-WK  webkit: "Delete my account" is at the foot of the screen
+PASS  W3-WK  webkit: signed out, there is no "Delete my account" (nothing to delete)
+PASS  B1-WK  webkit: signed out, "I was given a code" asks for an account first
+PASS  C5-WK  webkit: signed out, Apply to join the public group asks for full name and email only
+PASS  W6-WK  webkit: User guide, Support and Privacy links at the foot of the screen
 PASS  C1-WK  webkit: invitation links use the Cuberoot address (Change 1)
 PASS  C1b-WK  webkit: the guide link is the Cuberoot guide
 PASS  W4-WK  webkit: a ?join= link in the address bar is read as before
@@ -10,17 +13,23 @@ PASS  O3w-WK  webkit: offline, the first screen says so and never offers to crea
 PASS  C2-WK  webkit (app): the link that opened the app is read (cold start)
 PASS  C4b-WK  webkit (app): the same link delivered again is ignored; a new one is taken once
 PASS  C4-WK  webkit (app): a link tapped while the app is open is handled
-PASS  C9-WK  webkit (app): first screen uses the app wording and links to the moving guide
-PASS  R1-WK  webkit: rehearsal — the same anonymous account before and after the switch
+PASS  W5-WK  webkit (app): first screen uses the app wording and links to the moving guide
+PASS  B2-WK  webkit: an invitation while signed out asks to create an account first
+PASS  B3-WK  webkit: two different passwords are refused before anything is created
+PASS  B4-WK  webkit: Create my account makes an email account (not anonymous) and then shows the invitation
+PASS  R1-WK  webkit: rehearsal — the same anonymous account before and after the switch, now asked for an email and password
 SKIP  R1o-WK  webkit: rehearsal — the test owner stays signed in across the switch  —  TEST_OWNER_EMAIL / TEST_OWNER_PASSWORD not set yet
 SKIP  R2-WK  webkit: rehearsal — a round queued offline on v2.21.9 uploads once after the switch  —  TEST_OWNER_EMAIL / TEST_OWNER_PASSWORD not set yet
 SKIP  R3-WK  webkit: rehearsal — the remembered group opens straight away after the switch  —  TEST_OWNER_EMAIL / TEST_OWNER_PASSWORD not set yet
 SKIP  R4-WK  webkit: rehearsal — after the switch: no Google button, Delete my account present  —  TEST_OWNER_EMAIL / TEST_OWNER_PASSWORD not set yet
 --- chromium ---
-PASS  W1-CH  chromium: the app starts and signs in anonymously
+PASS  W1-CH  chromium: the app starts signed out and shows Sign in (Version 2.0: no anonymous sign-in)
 PASS  W2-CH  chromium: no uncaught errors while starting
 PASS  C6-CH  chromium: no Google sign-in anywhere on the first screen
-PASS  W3-CH  chromium: "Delete my account" is at the foot of the screen
+PASS  W3-CH  chromium: signed out, there is no "Delete my account" (nothing to delete)
+PASS  B1-CH  chromium: signed out, "I was given a code" asks for an account first
+PASS  C5-CH  chromium: signed out, Apply to join the public group asks for full name and email only
+PASS  W6-CH  chromium: User guide, Support and Privacy links at the foot of the screen
 PASS  C1-CH  chromium: invitation links use the Cuberoot address (Change 1)
 PASS  C1b-CH  chromium: the guide link is the Cuberoot guide
 PASS  W4-CH  chromium: a ?join= link in the address bar is read as before
@@ -30,11 +39,14 @@ PASS  C2-CH  chromium (app): the link that opened the app is read (cold start)
 PASS  C4b-CH  chromium (app): the same link delivered again is ignored; a new one is taken once
 PASS  C4-CH  chromium (app): a link tapped while the app is open is handled
 PASS  C13-CH  chromium (app): no service worker inside the app (Change 9)
-PASS  C9-CH  chromium (app): first screen uses the app wording and links to the moving guide
-PASS  R1-CH  chromium: rehearsal — the same anonymous account before and after the switch
+PASS  W5-CH  chromium (app): first screen uses the app wording and links to the moving guide
+PASS  B2-CH  chromium: an invitation while signed out asks to create an account first
+PASS  B3-CH  chromium: two different passwords are refused before anything is created
+PASS  B4-CH  chromium: Create my account makes an email account (not anonymous) and then shows the invitation
+PASS  R1-CH  chromium: rehearsal — the same anonymous account before and after the switch, now asked for an email and password
 SKIP  R1o-CH  chromium: rehearsal — the test owner stays signed in across the switch  —  TEST_OWNER_EMAIL / TEST_OWNER_PASSWORD not set yet
 SKIP  R2-CH  chromium: rehearsal — a round queued offline on v2.21.9 uploads once after the switch  —  TEST_OWNER_EMAIL / TEST_OWNER_PASSWORD not set yet
 SKIP  R3-CH  chromium: rehearsal — the remembered group opens straight away after the switch  —  TEST_OWNER_EMAIL / TEST_OWNER_PASSWORD not set yet
 SKIP  R4-CH  chromium: rehearsal — after the switch: no Google button, Delete my account present  —  TEST_OWNER_EMAIL / TEST_OWNER_PASSWORD not set yet
 
-RESULT: 28 passed, 0 failed, 8 skipped
+RESULT: 40 passed, 0 failed, 8 skipped
