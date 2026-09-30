@@ -1,12 +1,18 @@
 rules_version = '2';
 
-/* LAST CHANGED IN APP VERSION 2.22.0
+/* LAST CHANGED IN APP VERSION 2.22.0 (second change, Sep 30 2026)
  *
  * This is here only so you can compare it against what is published in the
  * Firebase console if you are ever in doubt. It does NOT track the app version:
  * most releases change no rules at all, and there is nothing to republish for
  * those. The number only moves when these rules genuinely change, and Claude
  * says so at the top of the message when that happens.
+ *
+ * What changed in 2.22.0, second change (Sep 30): an account may FIND its own
+ * membership documents with a query on their uid field, as the app does. The
+ * earlier rule only matched the document id, so the query was refused and
+ * Delete my account stopped at "Your groups couldn't be checked". Still only
+ * your own.
  *
  * What changed in 2.22.0: two additions for the iPhone app's Delete my account.
  * A person may delete their OWN invitation claim, and may read and write their
@@ -345,7 +351,12 @@ service cloud.firestore {
      * This is narrow on purpose: you may read a membership document only if it
      * is YOUR OWN, so it reveals nothing about anybody else. Read only. */
     match /{path=**}/members/{memberUid} {
-      allow read: if signedIn() && memberUid == request.auth.uid;
+      /* 2.22.0 fix: the app finds its memberships with a query on the uid
+         FIELD (where uid == me). The rules cannot match a field filter against
+         the document id, so that query was always refused — which stopped
+         Delete my account at its first step. The uid field is checked too. */
+      allow read: if signedIn()
+        && (memberUid == request.auth.uid || resource.data.get('uid', '') == request.auth.uid);
     }
 
     match /{path=**}/rounds/{roundId} {
