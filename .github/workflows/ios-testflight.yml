@@ -1,11 +1,11 @@
 name: iPhone build to TestFlight
 
-# Starts by itself when a push to the ios branch changes the version number in
+# Starts by itself when a push to the ios or v2 branch changes the version number in
 # version.js (spec Revision 4: no tags). Pushes that don't change the version
 # build nothing. The full log is saved to the ci-logs branch, pass or fail.
 on:
   push:
-    branches: [ios]
+    branches: [ios, v2]
     paths:
       - version.js
 

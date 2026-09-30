@@ -1,13 +1,18 @@
-The Scorecard for iPhone and iPad — first TestFlight build.
+The Scorecard Version 2.0 (2.30.0) — first TestFlight build.
 
-Please check, on your own device:
-1. Sign in with your usual email and Scorecard password. Your group, roster, History and handicap appear exactly as in the web app.
-2. Tap an invitation link sent from the app: it should open the app on the join screen.
-3. Post a round with Airplane Mode on, close the app, reopen it, turn the network back on: the round uploads once.
-4. Backup: Save it somewhere, then Save to Files. The file appears in iCloud Drive.
-5. Share a summary by WhatsApp, Email, Text message and Copy.
-6. There is no Google sign-in button anywhere.
-7. Offline: after opening your group once online, close the app, turn on Airplane Mode and reopen. The group, roster, rounds and handicap appear, and the status says it is showing the saved copy.
-8. Delete my account: try it only with a test account, never your own.
+Before go-live (the Version 2.0 rules are not published yet) only the owner should test, and only these:
+1. Signed out, the app shows Sign in, "Apply to join the public group" and "I was given a code". Nobody is signed in by itself.
+2. Sign in with your email and Scorecard password. Your groups, roster, History and handicaps appear.
+3. Post a round and see it in History; your handicap updates.
+(Group creation, admin invitations and the public group need the Version 2.0 rules, so they wait for go-live.)
 
-Keep using the web app as well until everything above works. Report problems with Send a report in the app.
+After go-live (go2.txt has run), also check:
+4. Tap the group name: only the owner sees "Start another group". The Invite sheet offers Admin only to the owner.
+5. Apply to the public group from a second device with a test email. The application appears on the owner's Admin tab. Approve it; the email arrives; choose a password; sign in; the test account is in the public group.
+6. As that test account: the group ranking shows names and indexes; "Report or block" works; a blocked name disappears from your screens.
+7. As the owner: the report appears on the Admin tab; Dismiss it.
+8. A regular member sees only their own rounds and the games they played in.
+9. An old guest sign-in sees "Set your email and password" and keeps their place after setting them.
+10. Delete my account: only with a test account, never your own.
+
+Report problems with Send a report in the app.

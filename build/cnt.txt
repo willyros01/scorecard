@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# The Scorecard — COUNT ONLY (prepared by Claude, Sep 30, 2026). Changes nothing.
+#
+# Run:  bash cnt.txt
+#
+# Lists every group with its members: their role, whether they sign in with an
+# email or as a guest (no email), and when they last signed in. Then a summary:
+# how many guest sign-ins are left, and whether any admin has no email.
+# Run it in Google Cloud Shell, signed in with the Google account that owns
+# the Firebase project scorecard-f41b8.
+
+# ---------------------------------------------------------------------------
+# THE GOOGLE PROJECT — defined first, before any command runs.
+# ---------------------------------------------------------------------------
+PROJECT_ID="scorecard-f41b8"
+unset CLOUDSDK_CORE_PROJECT GOOGLE_CLOUD_PROJECT
+
+set -Eeuo pipefail
+
+echo "Switching Cloud Shell to project ${PROJECT_ID} ..."
+gcloud config set project "${PROJECT_ID}" --quiet >/dev/null 2>&1 || { echo "ERROR: could not switch to project ${PROJECT_ID}. Nothing changed." >&2; exit 1; }
+CURRENT_PROJECT="$(gcloud config get-value project 2>/dev/null)"
+[[ "${CURRENT_PROJECT}" == "${PROJECT_ID}" ]] || { echo "ERROR: Cloud Shell is on '${CURRENT_PROJECT}', not ${PROJECT_ID}. Nothing changed." >&2; exit 1; }
+echo "OK: Cloud Shell is now on project ${CURRENT_PROJECT}."
+export CLOUDSDK_CORE_PROJECT="${PROJECT_ID}"
+export GOOGLE_CLOUD_PROJECT="${PROJECT_ID}"
+
+OWNER_EMAIL="willyros01@gmail.com"
+COMMIT="10e89c2dbbce20c22d036fae94a4503410ae6836"   # the v2 branch commit these tools were tested at
+RAW="https://raw.githubusercontent.com/willyros01/scorecard/${COMMIT}"
+WEB_KEY="AIzaSyA5qWtnz3QHco5YSAlHb7TXmCNg1kUdVhA"
+WORK="$(pwd)/scorecard-go2-tools"
+
+die(){ echo "ERROR: $*" >&2; exit 1; }
+for c in gcloud curl node; do command -v "$c" >/dev/null || die "$c is unavailable. Run this in Google Cloud Shell."; done
+[[ "$(node -p 'process.versions.node.split(".")[0]')" -ge 18 ]] || die "Node 18 or newer is needed."
+
+ACCOUNT="$(gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -n1)"
+[[ -n "${ACCOUNT}" ]] || die "No active Google account. Sign in to Cloud Shell first."
+APP_CONFIG="$(curl --fail --silent --show-error "${RAW}/firebase-config.js")" || die "Cannot read firebase-config.js from GitHub."
+grep -Fq "projectId: \"${PROJECT_ID}\"" <<<"${APP_CONFIG}" || die "firebase-config.js does not name ${PROJECT_ID}."
+grep -Fq "apiKey: \"${WEB_KEY}\"" <<<"${APP_CONFIG}" || die "firebase-config.js does not use the expected browser key."
+
+mkdir -p "${WORK}"
+curl --fail --silent --show-error "${RAW}/build/golive.mjs" -o "${WORK}/golive.mjs" || die "Cannot read golive.mjs from GitHub."
+curl --fail --silent --show-error "${RAW}/model.js" -o "${WORK}/model.mjs" || die "Cannot read model.js from GitHub."
+
+echo
+echo "  Google account : ${ACCOUNT}"
+echo "  Project        : ${PROJECT_ID}"
+echo "  Owner          : ${OWNER_EMAIL}"
+echo
+ACCESS_TOKEN="$(gcloud auth print-access-token)" OWNER_EMAIL="${OWNER_EMAIL}" PROJECT="${PROJECT_ID}" \
+  STATE_DIR="$(pwd)/scorecard-go2-backup" MODEL="${WORK}/model.mjs" node "${WORK}/golive.mjs" count
