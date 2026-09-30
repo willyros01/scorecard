@@ -118,6 +118,8 @@ refused "ACC2 anonymous cannot find another account's golfer"                que
 allowed "ACC2 anonymous withdraws its own deletion request"                  delete_as "${TA}" "accountDeletions/${A}"
 
 echo "== ACC3 email accounts work as before"
+allowed "ACC3 an email member finds its own memberships (collection group, uid == self — the app's query)" query_as "${TE}" "" members true uid EQUAL "${E}"
+refused "ACC3 an email member cannot find another account's memberships"     query_as "${TE}" "" members true uid EQUAL "${O}"
 allowed "ACC3 an email member reads the group"                               get_as "${TE}" "associations/G1"
 allowed "ACC3 an email member reads its own round"                           get_as "${TE}" "associations/G1/rounds/rE"
 allowed "ACC3 an email member lists the directory"                           query_as "${TE}" "associations/G1" directory false
