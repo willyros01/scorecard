@@ -244,8 +244,10 @@ export const abandonedWrites = () => outbox.abandoned();
 
 /* ---------------- associations and joining ---------------- */
 
-export async function createAssociation({ name, displayName }) {
-  const association = model.buildAssociation({ name, ownerUid: uid });
+export async function createAssociation({ name, displayName, id = null }) {
+  const association = id
+    ? model.buildAssociation({ name, ownerUid: uid, id })
+    : model.buildAssociation({ name, ownerUid: uid });
   const { setDoc, serverTimestamp } = fb.mod.store;
 
   /* Written directly rather than queued: there is no point creating a group
@@ -1272,6 +1274,96 @@ export function watchApplications(callback) {
     (e) => report(e));
   unsubscribers.push(stop);
   return stop;
+}
+
+/* ---------------- private group requests (2.30.0-beta.3) ----------------
+   An organiser asks for a private group WITHOUT signing in, like an
+   application (groupRequests/{email}). Only the group creator (Willy) reads
+   and decides them. Approving is safe to retry: the request is first claimed
+   with the new group's id, the group is made with that id (or found, on a
+   retry), and only then is the request marked approved. */
+export async function submitGroupRequest({ fullName, email, groupName, size, where, note }) {
+  if (!fb) throw new Error("The app is still starting. Try again in a moment.");
+  const clean = (v, max) => String(v || "").trim().replace(/\s+/g, " ").slice(0, max);
+  const name = clean(fullName, 200);
+  const address = String(email || "").trim();
+  const key = emailKey(address);
+  const group = clean(groupName, 200);
+  const sizeText = clean(size, 200);
+  const whereText = clean(where, 200);
+  const noteText = String(note || "").trim().slice(0, 1000);
+  if (name.length < 2 || name.length > 80) { const e = new Error("name"); e.code = "app/name"; throw e; }
+  if (!/^[^@ ]+@[^@ ]+[.][^@ ]+$/.test(key) || address.length > 254) { const e = new Error("email"); e.code = "app/email"; throw e; }
+  if (group.length < 2 || group.length > 60) { const e = new Error("group"); e.code = "app/group"; throw e; }
+  if (!sizeText || sizeText.length > 20) { const e = new Error("size"); e.code = "app/size"; throw e; }
+  if (whereText.length < 2 || whereText.length > 100) { const e = new Error("where"); e.code = "app/where"; throw e; }
+  const { setDoc, serverTimestamp } = fb.mod.store;
+  try {
+    await withTimeout(setDoc(ref("groupRequests", key), {
+      fullName: name, email: address, groupName: group, golfers: sizeText, where: whereText, note: noteText,
+      status: "pending", createdAt: serverTimestamp(),
+    }), 20000, "Your request");
+  } catch (e) {
+    const code = String((e && (e.code || e.message)) || "");
+    if (code.includes("permission")) { const x = new Error("exists"); x.code = "app/exists"; throw x; }
+    throw e;
+  }
+  return { ok: true };
+}
+
+export function watchGroupRequests(callback) {
+  const { query, where } = fb.mod.store;
+  const stop = listen(query(col("groupRequests"), where("status", "in", ["pending", "approving"])),
+    (snap) => callback(snap.docs.map((d) => ({ key: d.id, ...d.data() }))
+      .sort((x, y) => ((x.createdAt && x.createdAt.seconds) || 0) - ((y.createdAt && y.createdAt.seconds) || 0))),
+    (e) => report(e));
+  unsubscribers.push(stop);
+  return stop;
+}
+
+/* Step 1 of approving: claim the request with the new group's id. A retry
+   keeps the same id, so a second group is never made. */
+export async function claimGroupRequest(key) {
+  const { runTransaction, doc, serverTimestamp } = fb.mod.store;
+  const reqRef = doc(fb.db, "groupRequests", key);
+  return runTransaction(fb.db, async (tx) => {
+    const snap = await tx.get(reqRef);
+    if (!snap.exists()) { const e = new Error("gone"); e.code = "app/gone"; throw e; }
+    const r = snap.data();
+    if (r.status === "approved") return { already: true, groupId: r.groupId, request: r };
+    if (r.status === "declined") { const e = new Error("declined"); e.code = "app/declined"; throw e; }
+    /* A released claim keeps its group id, so a retry never makes a second group. */
+    const groupId = r.groupId || model.newId();
+    tx.update(reqRef, { status: "approving", reviewedBy: uid, reviewedAt: serverTimestamp(), groupId });
+    return { already: false, groupId, request: r };
+  });
+}
+
+/* Does this group already exist and belong to me? (A retry after the group
+   was made but before the request was marked approved.) */
+export async function ownGroupExists(id) {
+  const { getDoc } = fb.mod.store;
+  try {
+    const snap = await getDoc(ref("associations", id));
+    return snap.exists() && (snap.data() || {}).ownerUid === uid;
+  } catch { return false; }
+}
+
+export async function finishGroupRequest(key) {
+  await commitTogether([{ op: "update", path: ["groupRequests", key],
+    data: { status: "approved", reviewedBy: uid, reviewedAt: { __serverTimestamp: true } } }], "mark the request approved");
+}
+
+export async function releaseGroupRequest(key) {
+  try {
+    await commitTogether([{ op: "update", path: ["groupRequests", key],
+      data: { status: "pending", reviewedBy: uid, reviewedAt: { __serverTimestamp: true } } }], "release the request");
+  } catch {}
+}
+
+export async function declineGroupRequest(key) {
+  await commitTogether([{ op: "update", path: ["groupRequests", key],
+    data: { status: "declined", reviewedBy: uid, reviewedAt: { __serverTimestamp: true } } }], "decline the request");
 }
 
 /* 24 random characters: the new account's first password, which nobody ever

@@ -238,8 +238,16 @@ let invitedGroupName = "";
 let accountMode = null;
 const claimedOnce = new Set();   /* golfers this session has already tried to claim (screenEnter) */
 /* Version 2.0 Phase C: the PUBLIC group. */
-let showApply = false;          /* signed out: the Apply form is open */
+/* beta.3: the signed-out screens. null = the first screen (Sign in);
+   "code" = I have a code; "choose" = Become a member or start a group;
+   "member" = the public group application; "group" = a private group request. */
+let signedOutStep = null;
 let applySentTo = "";           /* signed out: the application just sent */
+let requestSentTo = "";         /* signed out: the group request just sent */
+let requestForm = { fullName: "", email: "", groupName: "", size: "", where: "", note: "" };
+let groupRequests = [];         /* the group creator: requests for private groups */
+let requestsWatched = false;
+let confirmDecline = null;      /* the group request key awaiting a second tap */
 let applications = [];          /* reviewers: pending applications */
 let publicReports = [];         /* reviewers: reports of golfers' names */
 let approvalsWaiting = [];      /* reviewers: approved, not joined yet */
@@ -507,6 +515,147 @@ function screenJoin() {
 /* ---------------- Version 2.0 Phase C: the PUBLIC group ---------------- */
 
 /* Signed out: apply to the PUBLIC group with full name and email (R1). */
+/* beta.3: shown on both application screens (approved by Willy, Oct 1). */
+function conditionsBlock(boxName) {
+  return `<h3 class="sub-title">Conditions</h3>
+    <div class="terms">
+      <p>Approval is not automatic. Every application is reviewed by a person, and The Scorecard may accept or decline any application at its discretion, without giving a reason.</p>
+      <p>Every member agrees to follow the Code of Conduct: be courteous and respectful, use your real name, enter honest scores, and post nothing offensive or abusive. The Scorecard has zero tolerance for objectionable content or abusive behaviour, and may remove any member or group that does not follow it, at any time.</p>
+    </div>
+    <label class="checkline agree">
+      <input type="checkbox" name="${boxName}">
+      <span>I have read and agree to the <button class="linkbtn" data-act="open-conduct">Code of Conduct</button> and the <button class="linkbtn" data-act="open-privacy">Privacy policy</button>.</span>
+    </label>`;
+}
+
+function stepsBlock(steps) {
+  return `<h3 class="sub-title">What happens next</h3>
+    <ol class="steps">${steps.map((t) => `<li>${t}</li>`).join("")}</ol>`;
+}
+
+/* The first screen's two buttons lead here and to the code screen. */
+function screenCodeFirst() {
+  return `<div class="stack">
+    ${flashBar()}
+    ${offlineAccountNote()}
+    <div class="card padded">
+      <h2 class="panel-title">I have a code</h2>
+      <p class="hint">Type the group code you were given. Next, you create your account or sign in, and then you join the group.</p>
+      <label class="lbl">Group code</label>
+      <input class="field mono" name="join-code" value="${esc(joinForm.code)}" placeholder="ABC234" autocapitalize="characters" autocomplete="off">
+      <div class="inline-actions stacked">
+        <button class="btn" data-act="code-continue">Continue</button>
+        <button class="btn ghost" data-act="hide-apply">Back</button>
+      </div>
+    </div>
+    ${versionBlock()}
+  </div>`;
+}
+
+function screenChoose() {
+  return `<div class="stack">
+    ${flashBar()}
+    <div class="panel-head"><h2 class="panel-title">Become a member or start a group</h2></div>
+    <p class="hint" style="margin-top:0">Choose one. Every application is read by a person, and approval is subject to the conditions shown on the next screen.</p>
+    <button class="choice" data-act="show-apply">
+      <span class="choice-title">Become a member</span>
+      <span class="hint">Join the public group and track your handicap with golfers from everywhere.</span>
+    </button>
+    <button class="choice" data-act="show-request">
+      <span class="choice-title">Start your own group</span>
+      <span class="hint">A private group for your friends or your club, with you as its admin.</span>
+    </button>
+    <p class="hint">Invited to a private group? Tap the link you were sent instead.</p>
+    <div class="inline-actions stacked"><button class="btn ghost" data-act="hide-apply">Back</button></div>
+    ${versionBlock()}
+  </div>`;
+}
+
+function screenGroupRequest() {
+  if (requestSentTo) {
+    return `<div class="stack">
+      ${flashBar()}
+      <div class="card padded">
+        <h2 class="panel-title">Request sent</h2>
+        <p class="lead">Thank you. Every request is read by a person, so it can take a few days.</p>
+        <p class="hint">If it is approved, an email goes to <b>${esc(requestSentTo)}</b> with your invitation link. Check your junk mail too.</p>
+        <div class="inline-actions stacked"><button class="btn ghost" data-act="hide-apply">Back to Sign in</button></div>
+      </div>
+      ${versionBlock()}
+    </div>`;
+  }
+  const f = requestForm;
+  return `<div class="stack">
+    ${flashBar()}
+    ${offlineAccountNote()}
+    <div class="card padded">
+      <h2 class="panel-title">Start your own group</h2>
+      <p class="hint">Tell us about your group. When it is approved, the group is created and you become its admin.</p>
+      <label class="lbl">Your full name</label>
+      <input class="field" name="rq-name" value="${esc(f.fullName)}" placeholder="e.g. Willy Rosales" autocomplete="name" maxlength="80">
+      <label class="lbl">Your email</label>
+      <input class="field" name="rq-email" type="email" value="${esc(f.email)}" placeholder="you@example.com" autocomplete="email" autocapitalize="none" maxlength="254">
+      <label class="lbl">Group name</label>
+      <input class="field" name="rq-group" value="${esc(f.groupName)}" placeholder="e.g. Tuesday Morning Golfers" maxlength="60">
+      <label class="lbl">About how many golfers</label>
+      <input class="field" name="rq-size" value="${esc(f.size)}" inputmode="numeric" placeholder="e.g. 20" maxlength="20">
+      <label class="lbl">Where you play</label>
+      <input class="field" name="rq-where" value="${esc(f.where)}" placeholder="Club or city" maxlength="100">
+      <label class="lbl">Anything else (optional)</label>
+      <textarea class="field" name="rq-note" rows="3" maxlength="1000">${esc(f.note)}</textarea>
+      ${stepsBlock([
+        "You send this request.",
+        "The Scorecard's owner reviews it, usually within a few days, and may email you with questions.",
+        "If it is approved, your group is created and you get an email with your invitation link. Tap it, create your account, and you join your group as its admin.",
+        "From the Admin area, you send invitation links to your golfers.",
+        "Your golfers tap the link, create their account and join your group. Only members of your group see its rounds and ranking.",
+      ])}
+      <p class="hint">As the group's admin, you invite and remove regular members. The Scorecard's owner remains the owner of every group.</p>
+      <p class="hint">If your request is not approved, you will not receive an email.</p>
+      ${conditionsBlock("rq-agree")}
+      <div class="inline-actions stacked">
+        <button class="btn" data-act="submit-request" ${joining ? "disabled" : ""}>${joining ? "Sending…" : "Send my request"}</button>
+        <button class="btn ghost" data-act="show-choose">Back</button>
+      </div>
+    </div>
+    ${versionBlock()}
+  </div>`;
+}
+
+async function submitRequestHere() {
+  const val = (n) => ((view.querySelector(`[name="${n}"]`) || {}).value || "");
+  requestForm = { fullName: val("rq-name").trim(), email: val("rq-email").trim(), groupName: val("rq-group").trim(),
+    size: val("rq-size").trim(), where: val("rq-where").trim(), note: val("rq-note").trim() };
+  const f = requestForm;
+  if (f.fullName.length < 2) { flashMsg("Type your full name"); return render(); }
+  if (!f.email) { flashMsg("Type your email address"); return render(); }
+  if (f.groupName.length < 2) { flashMsg("Type the group name"); return render(); }
+  if (!f.size) { flashMsg("Type about how many golfers"); return render(); }
+  if (f.where.length < 2) { flashMsg("Type where you play"); return render(); }
+  const agreed = view.querySelector('[name="rq-agree"]');
+  if (!agreed || !agreed.checked) { flashMsg("Tick the box to agree to the Code of Conduct and the Privacy policy"); return render(); }
+  joining = true;
+  busy("Sending your request");
+  render();
+  try {
+    await db.submitGroupRequest(f);
+    requestSentTo = f.email;
+  } catch (err) {
+    const code = String((err && (err.code || err.message)) || "");
+    if (code.includes("app/exists")) flashMsg("There is already a request for that email. If it is approved, you will get an email.");
+    else if (code.includes("app/email")) flashMsg("That email does not look right. Check it for a typo.");
+    else if (code.includes("app/name")) flashMsg("Type your full name (up to 80 characters).");
+    else if (code.includes("app/group")) flashMsg("Type the group name (up to 60 characters).");
+    else if (code.includes("app/size")) flashMsg("Type about how many golfers (up to 20 characters).");
+    else if (code.includes("app/where")) flashMsg("Type where you play (up to 100 characters).");
+    else flashMsg(`It was not sent: ${code || "no connection"}. Check the connection and try again.`);
+  } finally {
+    joining = false;
+    idle();
+    render();
+  }
+}
+
 function screenApply() {
   if (applySentTo) {
     return `<div class="stack">
@@ -525,18 +674,26 @@ function screenApply() {
     ${flashBar()}
     ${offlineAccountNote()}
     <div class="card padded">
-      <h2 class="panel-title">Apply to join the public group</h2>
-      <p class="hint">The public group is open to any golfer who wants a handicap. Give your full name and your email — no password yet. When a person has approved it, you get an email to choose your password.</p>
+      <h2 class="panel-title">Become a member</h2>
+      <p class="hint">Give your full name and your email. No password yet. When a person has approved it, you get an email to choose your password.</p>
       <label class="lbl">Full name</label>
       <input class="field" name="apply-name" value="${esc(joinForm.name || "")}" placeholder="e.g. Willy Rosales" autocomplete="name" maxlength="80">
       <label class="lbl">Email</label>
       <input class="field" name="apply-email" type="email" value="${esc(authForm.email || "")}" placeholder="you@example.com" autocomplete="email" autocapitalize="none" maxlength="254">
       <div class="note tip">Other members of the public group see your <b>full name</b> and your <b>handicap index</b>, and nothing else. Your rounds stay private.</div>
+      ${stepsBlock([
+        "You send this application.",
+        "A person reviews it, usually within one or two days.",
+        "If it is approved, you get an email with a link to choose your password. It comes from Firebase, which The Scorecard uses for accounts, and it sometimes lands in junk mail.",
+        "You choose your password, open The Scorecard and sign in with your email and that password.",
+        "You are in the public group and can start entering your rounds.",
+      ])}
+      <p class="hint">If your application is not approved, you will not receive an email.</p>
+      ${conditionsBlock("ap-agree")}
       <div class="inline-actions stacked">
         <button class="btn" data-act="submit-application" ${joining ? "disabled" : ""}>${joining ? "Sending…" : "Send my application"}</button>
-        <button class="btn ghost" data-act="hide-apply">Back</button>
+        <button class="btn ghost" data-act="show-choose">Back</button>
       </div>
-      <p class="hint"><button class="linkbtn" data-act="open-privacy">Privacy</button> · <button class="linkbtn" data-act="open-support">Support</button></p>
     </div>
     ${versionBlock()}
   </div>`;
@@ -548,6 +705,8 @@ async function submitApplicationHere() {
   joinForm.name = fullName; authForm = { email, password: "" };
   if (fullName.length < 2) { flashMsg("Type your full name"); return; }
   if (!email) { flashMsg("Type your email address"); return; }
+  const agreed = view.querySelector('[name="ap-agree"]');
+  if (!agreed || !agreed.checked) { flashMsg("Tick the box to agree to the Code of Conduct and the Privacy policy"); return; }
   joining = true;
   busy("Sending your application");
   render();
@@ -556,7 +715,7 @@ async function submitApplicationHere() {
     applySentTo = email;
   } catch (err) {
     const code = String((err && (err.code || err.message)) || "");
-    if (code.includes("app/exists")) flashMsg("There is already an application for that email. You will get an email when it is decided.");
+    if (code.includes("app/exists")) flashMsg("There is already an application for that email. If it is approved, you will get an email.");
     else if (code.includes("app/email")) flashMsg("That email does not look right. Check it for a typo.");
     else if (code.includes("app/name")) flashMsg("Type your full name (up to 80 characters).");
     else flashMsg(`It was not sent: ${code || "no connection"}. Check the connection and try again.`);
@@ -572,6 +731,7 @@ async function submitApplicationHere() {
 async function checkPublicApproval() {
   /* Phase D: also learn, once per sign-in, whether this account may create groups. */
   await db.loadGroupCreator();
+  watchRequestsIfCreator();
   let result;
   try { result = await db.joinPublicIfApproved(); }
   catch (e) {
@@ -659,6 +819,102 @@ function applicationsSection() {
     </div>` : ""}
     <p class="hint">Approving creates their account and emails them a link to choose a password. Their golfer name must be unique; if it is taken, add a middle initial.</p>
   </section>`;
+}
+
+/* beta.3: requests for private groups, for the group creator (Willy). */
+function groupRequestsSection() {
+  return `<section class="panel">
+    <div class="panel-head"><h2 class="panel-title">Group requests</h2></div>
+    ${groupRequests.length === 0 ? `<div class="card"><p class="blank">No group requests waiting.</p></div>` : `
+    <div class="card list">
+      ${groupRequests.map((r) => {
+        const inProgress = r.status === "approving";
+        return `<div class="list-row request-row">
+        <span class="grow"><span class="name">${esc(r.groupName)}</span><br>
+          <span class="sub">${esc(r.fullName)} · ${esc(r.email)}</span><br>
+          <span class="sub">About ${esc(r.golfers)} golfers · ${esc(r.where)}</span>
+          ${r.note ? `<br><span class="sub">${esc(r.note)}</span>` : ""}
+          ${inProgress ? `<br><span class="sub">Approval not finished — tap Finish.</span>` : ""}</span>
+        <span class="inline-actions">
+          <button class="rowbtn" data-act="approve-request" data-id="${esc(r.key)}">${inProgress ? "Finish" : "Approve"}</button>
+          <button class="rowbtn ${confirmDecline === r.key ? "danger" : ""}" data-act="decline-request" data-id="${esc(r.key)}">${confirmDecline === r.key ? "Tap to decline" : "Decline"}</button>
+        </span>
+      </div>`;
+      }).join("")}
+    </div>`}
+    <p class="hint">Approve creates the group with you as its owner (not on its roster), then opens an email to the organiser with an admin invitation link. Decline sends no email.</p>
+  </section>`;
+}
+
+function watchRequestsIfCreator() {
+  if (requestsWatched || !db.canCreateGroups()) return;
+  requestsWatched = true;
+  db.watchGroupRequests((list) => { groupRequests = list; render(); });
+}
+
+async function approveRequestHere(key) {
+  const r = groupRequests.find((x) => x.key === key);
+  if (!r) return render();
+  busy("Creating the group");
+  render();
+  let claim;
+  try { claim = await db.claimGroupRequest(key); }
+  catch (e) {
+    idleAll();
+    const code = String((e && (e.code || e.message)) || "");
+    flashMsg(code.includes("app/declined") ? "That request was declined already."
+      : code.includes("app/gone") ? "That request no longer exists."
+      : `It was not approved: ${code || "no connection"}. Nothing was changed.`);
+    return render();
+  }
+  const groupId = claim.groupId;
+  const req = claim.request || r;
+  try {
+    if (!claim.already) {
+      /* A retry finds the group already made and does not make another. */
+      if (!(await db.ownGroupExists(groupId))) {
+        const me = members.find((m) => m.uid === db.status().uid);
+        await db.createAssociation({ name: req.groupName, displayName: (me && me.displayName) || "Willy", id: groupId });
+      }
+      await db.finishGroupRequest(key);
+    }
+  } catch (e) {
+    await db.releaseGroupRequest(key);
+    idleAll();
+    flashMsg(`The group was not created: ${String((e && (e.code || e.message)) || "no connection")}. Tap Approve to try again.`);
+    return render();
+  }
+  try {
+    await start(groupId);
+    tab = "admin";
+    await db.ensureAdminCode();
+    const link = db.inviteLink("admin");
+    idleAll();
+    if (!link) {
+      flashMsg(`"${req.groupName}" is created and the request is approved. Send the organiser an admin invitation from Admin: Invite an admin who doesn't play.`);
+      return render();
+    }
+    const guide = platform.guideUrl();
+    const text = [
+      `Hello ${req.fullName},`,
+      "",
+      `Your request for a private group on The Scorecard is approved. Your group "${req.groupName}" is ready, and you are invited to run it as its admin.`,
+      "",
+      `Join here: ${link}`,
+      "",
+      "Tap the link, create your account (your email and a password), and you join your group as its admin. From the Admin area you then send invitation links to your golfers.",
+      "",
+      `How it works, in one page: ${guide}`,
+      "",
+      "The link works once, so keep it to yourself.",
+    ].join("\n");
+    openShare(text, "Your private group is approved", { to: req.email });
+    flashMsg(`"${req.groupName}" is created. Send the email to ${req.email}.`);
+  } catch (e) {
+    idleAll();
+    flashMsg(`"${req.groupName}" is created and the request is approved, but the invitation could not be prepared. Open the group, then Admin, and send an admin invitation.`);
+    render();
+  }
 }
 
 function openApproveSheet(key) {
@@ -761,14 +1017,19 @@ function newAccountFields() {
 /* Nobody signed in. With an invitation or a code, the account comes first
    (create one, or sign in to an existing one); otherwise it is Sign in. */
 function screenSignedOut(invite) {
-  if (showApply && !invite) return screenApply();
+  if (!invite && !showCodeEntry) {
+    if (signedOutStep === "code") return screenCodeFirst();
+    if (signedOutStep === "choose") return screenChoose();
+    if (signedOutStep === "member") return screenApply();
+    if (signedOutStep === "group") return screenGroupRequest();
+  }
   const joiningSomething = !!invite || showCodeEntry;
   const mode = accountMode || (joiningSomething ? "create" : "signin");
   const adminOnly = invite && invite.role === "admin" && !invite.golferId;
   const heading = invite
     ? (adminOnly ? "You have been invited to help run a group" : "You have been invited to a group")
     : showCodeEntry ? "Join with a code" : "Sign in";
-  const next = invite ? "Then you will see your invitation." : "Then you will type the group code.";
+  const next = invite ? "Then you will see your invitation." : "Then you join the group with your code.";
 
   if (joiningSomething && mode === "create") {
     return `<div class="stack">
@@ -795,23 +1056,15 @@ function screenSignedOut(invite) {
       heading,
       lead: joiningSomething
         ? `<p class="hint">Sign in with your email and Scorecard password. ${next}</p>`
-        : platform.isApp()
-          ? `<p class="hint">Use your email and Scorecard password. It is the same account on every device.</p>
-             <p class="hint"><button class="linkbtn" data-act="open-guide">Used The Scorecard in Safari? Read this first</button></p>`
-          : `<p class="hint">Use your email and Scorecard password. It is the same account in Safari, on your home screen and in the iPhone app.</p>`,
+        : "",
       backAct: joiningSomething ? "account-mode-create" : "",
       backLabel: "New here? Create your account",
     })}
     ${joiningSomething ? (showCodeEntry && !invite ? `<div class="inline-actions stacked"><button class="btn ghost" data-act="hide-code">Back</button></div>` : "") : `
-      <div class="card padded">
-        <div class="name">New to The Scorecard?</div>
-        <p class="hint">Any golfer can apply to join the public group and keep a handicap there.</p>
-        <div class="inline-actions stacked"><button class="btn ghost" data-act="show-apply">Apply to join the public group</button></div>
-        <p class="hint">Invited to a private group? Tap the link you were sent instead.</p>
-      </div>
-      <p class="hint" style="text-align:center">
-        <button class="linkbtn" data-act="enter-code">I was given a code</button>
-      </p>`}
+      <div class="inline-actions stacked first-choices">
+        <button class="btn ghost" data-act="enter-code">I have a code</button>
+        <button class="btn ghost" data-act="show-choose">Become a member or start a group</button>
+      </div>`}
     ${versionBlock()}
   </div>`;
 }
@@ -2119,6 +2372,7 @@ function openShare(text, title, options = {}) {
   </div>`;
   sheetEl.dataset.text = text;
   sheetEl.dataset.title = title;
+  sheetEl.dataset.to = options.to || "";
   sheetEl.dataset.filename = `${title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${today()}.txt`;
 }
 
@@ -2333,6 +2587,7 @@ function screenAdmin() {
   }
 
   return `${flashBar()}
+  ${db.canCreateGroups() ? safe("Group requests", groupRequestsSection) : ""}
   ${db.isPublicGroup() ? safe("Applications", applicationsSection) : ""}
   ${db.isPublicGroup() ? safe("Reports", reportsSection) : ""}
   ${safe("Set a password", passwordPrompt)}
@@ -4159,10 +4414,26 @@ view.addEventListener("click", async (e) => {
     /* Named apart from the Admin tab's "show-code" on purpose: both lived in
        this one switch, so the first case matched and the Show the code button
        silently did nothing at all. */
-    case "enter-code": showCodeEntry = true; accountMode = null; return render();
+    case "enter-code":
+      /* Signed out: the code screen comes first (beta.3). Signed in: as before. */
+      if (!db.isSignedIn()) { signedOutStep = "code"; return render(); }
+      showCodeEntry = true; accountMode = null; return render();
+    case "code-continue": {
+      const typed = ((view.querySelector('[name="join-code"]') || {}).value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+      if (!typed) { flashMsg("Type the group code"); return render(); }
+      joinForm.code = typed;
+      signedOutStep = null; showCodeEntry = true; accountMode = null;
+      return render();
+    }
+    case "show-choose": signedOutStep = "choose"; applySentTo = ""; requestSentTo = ""; return render();
+    case "show-request": signedOutStep = "group"; requestSentTo = ""; return render();
+    case "submit-request": return submitRequestHere();
+    case "open-conduct":
+      platform.openExternal(platform.conductUrl(), "tab");
+      return;
     case "create-account": return createAccountHere();
-    case "show-apply": showApply = true; applySentTo = ""; return render();
-    case "hide-apply": showApply = false; applySentTo = ""; return render();
+    case "show-apply": signedOutStep = "member"; applySentTo = ""; return render();
+    case "hide-apply": signedOutStep = null; applySentTo = ""; requestSentTo = ""; return render();
     case "submit-application": return submitApplicationHere();
     case "send-confirmation": {
       busy("Sending the confirmation email");
@@ -4192,6 +4463,22 @@ view.addEventListener("click", async (e) => {
       return render();
     }
     case "review-application": return openApproveSheet(d.id);
+    case "approve-request": return approveRequestHere(d.id);
+    case "decline-request": {
+      if (confirmDecline !== d.id) {
+        confirmDecline = d.id;
+        setTimeout(() => { if (confirmDecline === d.id) { confirmDecline = null; render(); } }, 4000);
+        return render();
+      }
+      confirmDecline = null;
+      const r = groupRequests.find((x) => x.key === d.id);
+      if (!r) return render();
+      busy("Declining");
+      try { await db.declineGroupRequest(r.key); flashMsg(`The request for "${r.groupName}" was declined. No email is sent.`); }
+      catch (e) { flashMsg(`It was not declined: ${String((e && (e.code || e.message)) || "no connection")}.`); }
+      finally { idle(); }
+      return render();
+    }
     case "resend-approval-email": {
       busy("Sending the email");
       try { await db.resendApprovalEmail(d.id); flashMsg(`The password email has gone to ${d.id} again.`); }
@@ -4237,7 +4524,10 @@ view.addEventListener("click", async (e) => {
     case "upgrade-account": return upgradeAccount();
     case "account-mode-signin": accountMode = "signin"; return render();
     case "account-mode-create": accountMode = "create"; return render();
-    case "hide-code": showCodeEntry = false; return render();
+    case "hide-code":
+      showCodeEntry = false;
+      if (!db.isSignedIn()) signedOutStep = "code";
+      return render();
     case "create-group": return createGroup();
     case "import-v1": return importV1();
 
@@ -5069,7 +5359,7 @@ sheetEl.addEventListener("click", async (e) => {
     return;
   }
   if (how === "email") {
-    platform.openExternal(`mailto:?subject=${encodeURIComponent(sheetEl.dataset.title || "")}&body=${encodeURIComponent(text)}`);
+    platform.openExternal(`mailto:${sheetEl.dataset.to || ""}?subject=${encodeURIComponent(sheetEl.dataset.title || "")}&body=${encodeURIComponent(text)}`);
     return;
   }
   if (how === "sms") {
@@ -5641,6 +5931,8 @@ async function start(assocId) {
   /* Phase C: in the PUBLIC group, blocks for everybody; applications and
      reports for its reviewers. */
   applications = []; publicReports = []; blocked = []; approvalsWaiting = [];
+  groupRequests = []; requestsWatched = false;
+  watchRequestsIfCreator();
   if (db.isPublicGroup()) {
     db.watchBlocks((list) => { blocked = list; applyBlocks(); render(); });
     if (db.canManage()) {

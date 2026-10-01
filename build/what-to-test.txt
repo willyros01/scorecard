@@ -1,19 +1,10 @@
-The Scorecard Version 2.0 (2.30.0) — build 7, with the go-live fixes.
+The Scorecard Version 2.0 (2.30.0-beta.3): the new first screen and the private group requests.
 
-Before go-live (the Version 2.0 rules are not published yet) only the owner should test, and only these:
-1. Signed out, the app shows Sign in, "Apply to join the public group" and "I was given a code". Nobody is signed in by itself.
-2. Sign in with your email and Scorecard password. Your groups, roster, History and handicaps appear.
-3. Post a round and see it in History; your handicap updates.
-(Group creation, admin invitations and the public group need the Version 2.0 rules, so they wait for go-live.)
-
-After go-live (go2.txt has run), also check:
-4. Tap the group name: only the owner sees "Start another group". The Invite sheet offers Admin only to the owner.
-5. Apply to the public group from a second device with a test email. The application appears on the owner's Admin tab. Approve it; the email arrives; choose a password; sign in; the test account is in the public group. Until they join, they are listed under "Approved, not joined yet" with "Send the email again".
-5b. Send a named invitation to a test golfer and open the link signed out on another device: it greets them by name and group after they create their account.
-6. As that test account: the group ranking shows names and indexes; "Report or block" works; a blocked name disappears from your screens.
-7. As the owner: the report appears on the Admin tab; Dismiss it.
-8. A regular member sees only their own rounds and the games they played in.
-9. An old guest sign-in sees "Set your email and password" and keeps their place after setting them.
-10. Delete my account: only with a test account, never your own.
+1. Signed out, the first screen shows only Sign in (email, password, Sign in, Forgot the password) and two buttons: "I have a code" and "Become a member or start a group".
+2. "I have a code": type the code, Continue, then create your account or sign in; the code is filled in for you.
+3. "Become a member or start a group" offers two choices. "Become a member" is the public group application; "Start your own group" is the private group request. Each shows What happens next and the Conditions, and is sent only when the box is ticked.
+4. Send a group request from a second device with a test email. As the owner, it appears on the Admin tab under Group requests. Approve it: the group is created and an email to the organiser opens with the admin invitation link. Decline sends no email.
+5. Open that link on the second device: create the account and join the new group as its admin.
+6. Everything from build 7 still works: sign in, post a round, the public group, invitations.
 
 Report problems with Send a report in the app.

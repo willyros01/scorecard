@@ -1,6 +1,10 @@
 rules_version = '2';
 
-/* LAST CHANGED FOR VERSION 2.0, PHASE D + GO-LIVE FIXES (Oct 1) — not published yet
+/* LAST CHANGED FOR VERSION 2.0, PHASE D + GO-LIVE FIXES (Oct 1), PLUS PRIVATE GROUP REQUESTS (beta.3)
+ *
+ * beta.3 (Oct 1, approved by Willy): groupRequests/{email}. Anyone, even
+ * signed out, may create ONE request for a private group (pending). Only the
+ * group creator reads, decides (approving → approved, or declined) and deletes.
  *
  * Go-live fixes (review of Sep 30, approved by Willy):
  *   1. No signed-in account may read an unclaimed golfer any more. A named
@@ -697,6 +701,53 @@ service cloud.firestore {
             && request.resource.data.status in ['approved', 'pending'])
           || (resource.data.status == 'pending'
             && request.resource.data.status == 'rejected')
+        );
+    }
+
+    /* beta.3: a request for a private group, written signed out. Only the
+       group creator (Willy) reads and decides it. Approving claims it first
+       with the new group's id (pending → approving), then marks it approved;
+       it can be released back to pending, or declined while not approved. */
+    match /groupRequests/{emailKey} {
+      allow create: if request.resource.data.keys().hasOnly(['fullName', 'email', 'groupName', 'golfers', 'where', 'note', 'status', 'createdAt'])
+        && request.resource.data.keys().hasAll(['fullName', 'email', 'groupName', 'golfers', 'where', 'note', 'status', 'createdAt'])
+        && request.resource.data.fullName is string
+        && request.resource.data.fullName.size() >= 2
+        && request.resource.data.fullName.size() <= 80
+        && request.resource.data.email is string
+        && request.resource.data.email.size() <= 254
+        && request.resource.data.email.lower() == emailKey
+        && emailKey.matches('^[^@ ]+@[^@ ]+[.][^@ ]+$')
+        && request.resource.data.groupName is string
+        && request.resource.data.groupName.size() >= 2
+        && request.resource.data.groupName.size() <= 60
+        && request.resource.data.golfers is string
+        && request.resource.data.golfers.size() >= 1
+        && request.resource.data.golfers.size() <= 20
+        && request.resource.data.where is string
+        && request.resource.data.where.size() >= 2
+        && request.resource.data.where.size() <= 100
+        && request.resource.data.note is string
+        && request.resource.data.note.size() <= 1000
+        && request.resource.data.status == 'pending'
+        && request.resource.data.createdAt == request.time;
+      allow read, delete: if groupCreator();
+      allow update: if groupCreator()
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['status', 'reviewedBy', 'reviewedAt', 'groupId'])
+        && request.resource.data.reviewedBy == request.auth.uid
+        && request.resource.data.reviewedAt == request.time
+        && (
+          (resource.data.status in ['pending', 'approving']
+            && request.resource.data.status == 'approving'
+            && request.resource.data.groupId is string
+            && request.resource.data.groupId.size() > 0
+            && request.resource.data.groupId.size() <= 64)
+          || (resource.data.status == 'approving'
+            && request.resource.data.status in ['approved', 'pending']
+            && request.resource.data.groupId == resource.data.groupId)
+          || (resource.data.status in ['pending', 'approving']
+            && request.resource.data.status == 'declined')
         );
     }
 

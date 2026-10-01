@@ -174,16 +174,25 @@ const newPage = async () => {
 /* E1–E2: the applicant, signed out */
 const pat = await newPage();
 await pat.goto(APP, { waitUntil: "load" });
-await check("E1", "signed out: Sign in and Apply, and no sign-in happens by itself", async () => {
-  await waitForText(pat, /Apply to join the public group/);
+await check("E1", "signed out: Sign in, I have a code, Become a member or start a group; no sign-in happens by itself", async () => {
+  await waitForText(pat, /Become a member or start a group/);
+  if (!/I have a code/.test(await text(pat))) throw new Error("no I have a code button");
   await pat.waitForTimeout(2000);
   const signedIn = await pat.evaluate(async () => (await import("/store.js")).hasUser());
   if (signedIn) throw new Error("somebody is signed in");
 });
 await check("E2", "the applicant applies with full name and email; the application is stored as pending", async () => {
+  await pat.locator('[data-act="show-choose"]').click();
   await pat.locator('[data-act="show-apply"]').click();
+  await waitForText(pat, /What happens next/);
   await pat.fill('[name="apply-name"]', APPLICANT.name);
   await pat.fill('[name="apply-email"]', APPLICANT.email);
+  await pat.locator('[data-act="submit-application"]').click();
+  await waitForText(pat, /Tick the box to agree/);
+  if (await getDoc(`publicApplications/${APPLICANT.email}`)) throw new Error("sent without agreeing to the conditions");
+  await pat.fill('[name="apply-name"]', APPLICANT.name);
+  await pat.fill('[name="apply-email"]', APPLICANT.email);
+  await pat.locator('[name="ap-agree"]').check();
   await pat.locator('[data-act="submit-application"]').click();
   await waitForText(pat, /Application sent/);
   const a = await getDoc(`publicApplications/${APPLICANT.email}`);
@@ -192,11 +201,14 @@ await check("E2", "the applicant applies with full name and email; the applicati
 });
 await check("E2b", "a second application for the same email is refused with a clear message", async () => {
   await pat.locator('[data-act="hide-apply"]').click();
+  await pat.locator('[data-act="show-choose"]').click();
   await pat.locator('[data-act="show-apply"]').click();
   await pat.fill('[name="apply-name"]', "Someone Else");
   await pat.fill('[name="apply-email"]', APPLICANT.email);
+  await pat.locator('[name="ap-agree"]').check();
   await pat.locator('[data-act="submit-application"]').click();
   await waitForText(pat, /already an application for that email/);
+  await pat.locator('[data-act="show-choose"]').click();
   await pat.locator('[data-act="hide-apply"]').click();
 });
 
@@ -419,6 +431,93 @@ await check("E13", "an admin removes a regular member of their group, and has no
   await waitForText(ada, /no longer have access/);
   if (await getDoc(`associations/G1/members/${R1.uid}`)) throw new Error("Rex is still a member");
   if (ada.errors.length) throw new Error(ada.errors.join(" | "));
+});
+
+/* E15–E17: beta.3, a request for a private group, approved by Willy */
+const ORG = { name: "Olga Organiser", email: "olga@example.com", password: "olga-pass-1", group: "Tuesday Golfers" };
+const olga = await newPage();
+await olga.goto(APP, { waitUntil: "load" });
+await check("E15", "signed out: Start your own group sends a request (only after agreeing to the conditions)", async () => {
+  await waitForText(olga, /Become a member or start a group/);
+  await olga.locator('[data-act="show-choose"]').click();
+  await olga.locator('[data-act="show-request"]').click();
+  await waitForText(olga, /Start your own group/);
+  const fill = async () => {
+    await olga.fill('[name="rq-name"]', ORG.name);
+    await olga.fill('[name="rq-email"]', ORG.email);
+    await olga.fill('[name="rq-group"]', ORG.group);
+    await olga.fill('[name="rq-size"]', "20");
+    await olga.fill('[name="rq-where"]', "Glen Abbey");
+  };
+  await fill();
+  await olga.locator('[data-act="submit-request"]').click();
+  await waitForText(olga, /Tick the box to agree/);
+  if (await getDoc(`groupRequests/${ORG.email}`)) throw new Error("sent without agreeing to the conditions");
+  await fill();
+  await olga.locator('[name="rq-agree"]').check();
+  await olga.locator('[data-act="submit-request"]').click();
+  await waitForText(olga, /Request sent/);
+  const r = await getDoc(`groupRequests/${ORG.email}`);
+  if (!r || r.status !== "pending" || r.groupName !== ORG.group || r.golfers !== "20" || r.where !== "Glen Abbey") throw new Error(JSON.stringify(r));
+  if (await accountByEmail(ORG.email)) throw new Error("an account was created by the request");
+  await olga.locator('[data-act="hide-apply"]').click();
+  await olga.locator('[data-act="show-choose"]').click();
+  await olga.locator('[data-act="show-request"]').click();
+  await fill();
+  await olga.locator('[name="rq-agree"]').check();
+  await olga.locator('[data-act="submit-request"]').click();
+  await waitForText(olga, /already a request for that email/);
+  if (olga.errors.length) throw new Error(olga.errors.join(" | "));
+});
+
+const wil = await newPage();
+await wil.goto(APP, { waitUntil: "load" });
+let adminLink = "";
+await check("E16", "Willy approves: the group is created with him as owner, the request is approved, and an admin invitation is ready to email to the organiser", async () => {
+  await waitForText(wil, /Sign in/);
+  await signIn(wil, W.email, W.password);
+  await waitForText(wil, /Admin/);
+  await tab(wil, "admin");
+  await waitForText(wil, /Group requests/);
+  await waitForText(wil, new RegExp(ORG.group));
+  await wil.locator('[data-act="approve-request"]').first().click();
+  await waitForText(wil, /Your private group is approved/, 30000);
+  const r = await getDoc(`groupRequests/${ORG.email}`);
+  if (!r || r.status !== "approved" || !r.groupId) throw new Error(`request: ${JSON.stringify(r)}`);
+  const g = await getDoc(`associations/${r.groupId}`);
+  if (!g || g.name !== ORG.group || g.ownerUid !== W.uid) throw new Error(`group: ${JSON.stringify(g)}`);
+  const m = await getDoc(`associations/${r.groupId}/members/${W.uid}`);
+  if (!m || m.role !== "owner") throw new Error(`Willy's membership: ${JSON.stringify(m)}`);
+  if (await getDoc(`associations/${r.groupId}/roster/${W.uid}`)) throw new Error("Willy was put on the roster");
+  const to = await wil.evaluate(() => (document.querySelector("[data-to]") || {}).dataset ? document.querySelector("[data-to]").dataset.to : "");
+  if (to !== ORG.email) throw new Error(`the email is addressed to "${to}"`);
+  const msg = await wil.evaluate(() => (document.querySelector("pre.msg") || {}).innerText || "");
+  const found = /join=([A-Za-z0-9._-]+)&as=admin/.exec(msg);
+  if (!found || !found[1].startsWith(`${r.groupId}.`)) throw new Error(`no admin invitation link in: ${msg.slice(0, 300)}`);
+  adminLink = `${APP}&join=${found[1]}&as=admin`;
+  await wil.locator('[data-close="1"]').first().click().catch(() => {});
+  if (wil.errors.length) throw new Error(wil.errors.join(" | "));
+});
+
+await check("E17", "the organiser taps the link, creates an account and joins the new group as its admin", async () => {
+  if (!adminLink) throw new Error("no link from E16");
+  const r = await getDoc(`groupRequests/${ORG.email}`);
+  const org = await newPage();
+  await org.goto(adminLink, { waitUntil: "load" });
+  await waitForText(org, /invited to help run a group/);
+  await org.fill('[name="email"]', ORG.email);
+  await org.fill('[name="password"]', ORG.password);
+  await org.fill('[name="password-again"]', ORG.password);
+  await org.locator('[data-act="create-account"]').click();
+  await waitForText(org, /invited to help run the group/);
+  await org.fill('[name="join-name"]', ORG.name);
+  await org.locator('[data-act="accept-invite"]').click();
+  const uid = (await accountByEmail(ORG.email)).localId;
+  const end = Date.now() + 20000;
+  let m = null;
+  while (Date.now() < end && !(m = await getDoc(`associations/${r.groupId}/members/${uid}`))) await org.waitForTimeout(400);
+  if (!m || m.role !== "admin") throw new Error(`membership: ${JSON.stringify(m)}`);
+  if (org.errors.length) throw new Error(org.errors.join(" | "));
 });
 
 /* E14: Tidy, run by Willy, under the Version 2.0 rules */
