@@ -1446,7 +1446,7 @@ export const accountCheckError = () => lastAccountCheckError;
 export async function emailHasAccount(email) {
   if (!fb) return false;
   try {
-    const snap = await fb.mod.store.getDocFromServer(ref("accountEmails", emailKey(email)));
+    const snap = await withTimeout(fb.mod.store.getDoc(ref("accountEmails", emailKey(email))), 10000, "The email check");
     lastAccountCheckError = "";
     return snap.exists();
   } catch (e) { lastAccountCheckError = String((e && (e.code || e.message)) || "unknown"); return false; }

@@ -197,7 +197,11 @@ await check("E2", "the applicant applies with full name and email; the applicati
   await pat.fill('[name="apply-email"]', APPLICANT.email);
   await pat.locator('[name="ap-agree"]').check();
   await pat.locator('[data-act="submit-application"]').click();
-  await waitForText(pat, /Application sent/);
+  try { await waitForText(pat, /Application sent/); }
+  catch (e) {
+    const why = await pat.evaluate(async (em) => { const db = await import("/store.js"); const has = await db.emailHasAccount(em); return `has=${has} error=${db.accountCheckError()}`; }, APPLICANT.email);
+    throw new Error(`${e.message} | check: ${why}`);
+  }
   const a = await getDoc(`publicApplications/${APPLICANT.email}`);
   if (!a || a.status !== "pending" || a.fullName !== APPLICANT.name) throw new Error(JSON.stringify(a));
   if (await accountByEmail(APPLICANT.email)) throw new Error("an account was created before approval");

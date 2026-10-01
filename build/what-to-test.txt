@@ -1,10 +1,12 @@
-The Scorecard Version 2.0 (2.30.0-beta.3): the new first screen and the private group requests.
+The Scorecard Version 2.0 (2.30.0-beta.4): the cockpit and the applications switch.
 
-1. Signed out, the first screen shows only Sign in (email, password, Sign in, Forgot the password) and two buttons: "I have a code" and "Become a member or start a group".
-2. "I have a code": type the code, Continue, then create your account or sign in; the code is filled in for you.
-3. "Become a member or start a group" offers two choices. "Become a member" is the public group application; "Start your own group" is the private group request. Each shows What happens next and the Conditions, and is sent only when the box is ticked.
-4. Send a group request from a second device with a test email. As the owner, it appears on the Admin tab under Group requests. Approve it: the group is created and an email to the organiser opens with the admin invitation link. Decline sends no email.
-5. Open that link on the second device: create the account and join the new group as its admin.
-6. Everything from build 7 still works: sign in, post a round, the public group, invitations.
+1. Admin now has tabs at the top: Cockpit, Applications, Members, Settings. Members is People, exactly as before. Settings holds Group, Backup, Course lookup and Account.
+2. Cockpit (owner): members and sign-ins across all groups, what is waiting for you, every group (tap one to see it), rounds per month, housekeeping. Last seen starts counting from this version.
+3. A group admin sees the Cockpit of their own group and the Members tab.
+4. Summary: a "My season" card with your rounds this year and your index.
+5. Applications (public group open): the Manual / Auto switch, applications with the name already numbered when taken, reports, and the block list.
+6. Become a member with an email that already has an account: the form says so at once and nothing is sent.
+7. With the switch on Auto, apply from a second device with a test email: a link arrives; tap it, choose a password, and the test account is in the public group. Turn the switch back to Manual afterwards.
+8. The header stays the same size whatever the A / A+ / A++ setting; a long press on a tab name no longer selects it.
 
 Report problems with Send a report in the app.
