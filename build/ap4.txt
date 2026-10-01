@@ -101,11 +101,13 @@ auth_on(){
 }
 auth_is_on(){
   get "${AUTH_CONFIG}" > "${STATE}/auth-check.json" 2>/dev/null || return 1
-  jq -e --arg d "${LINK_DOMAIN}" '(.signIn.email.enabled == true) and (.signIn.email.passwordRequired == false) and ((.authorizedDomains // []) | index($d) != null)' "${STATE}/auth-check.json" >/dev/null
+  # Google leaves a "false" setting out of its answer, so a missing
+  # passwordRequired means false (email link allowed).
+  jq -e --arg d "${LINK_DOMAIN}" '(.signIn.email.enabled == true) and ((.signIn.email.passwordRequired // false) == false) and ((.authorizedDomains // []) | index($d) != null)' "${STATE}/auth-check.json" >/dev/null
 }
 auth_back(){
   [[ -s "${STATE}/auth-before.json" ]] || return 0
-  jq '{signIn:{email:{enabled:(.signIn.email.enabled // true),passwordRequired:(.signIn.email.passwordRequired // true)}}}' "${STATE}/auth-before.json" > "${STATE}/auth-back.json" || return 1
+  jq '{signIn:{email:{enabled:(.signIn.email.enabled // false),passwordRequired:(.signIn.email.passwordRequired // false)}}}' "${STATE}/auth-before.json" > "${STATE}/auth-back.json" || return 1
   send PATCH "${AUTH_CONFIG}?updateMask=signIn.email.enabled,signIn.email.passwordRequired" "${STATE}/auth-back.json" >/dev/null || return 1
   jq '{authorizedDomains:(.authorizedDomains // [])}' "${STATE}/auth-before.json" > "${STATE}/auth-back-domains.json" || return 1
   send PATCH "${AUTH_CONFIG}?updateMask=authorizedDomains" "${STATE}/auth-back-domains.json" >/dev/null || return 1

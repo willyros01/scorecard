@@ -81,7 +81,11 @@ if "identitytoolkit.googleapis.com/admin/v2" in url:
         "signIn": {"email": {"enabled": True, "passwordRequired": True}},
         "authorizedDomains": ["localhost", "scorecard-f41b8.firebaseapp.com"]}
     if method == "GET":
-        reply(json.dumps(cfg))
+        # Like Google: settings that are false are left out of the answer.
+        shown = json.loads(json.dumps(cfg))
+        em = shown.get("signIn", {}).get("email", {})
+        for k in [k for k, v in em.items() if v is False]: del em[k]
+        reply(json.dumps(shown))
     if method == "PATCH":
         flag = FAKE / "fail-auth"
         if flag.exists(): flag.unlink(); reply("", 500)
