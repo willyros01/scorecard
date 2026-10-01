@@ -45,7 +45,7 @@ export GOOGLE_CLOUD_PROJECT="${PROJECT_ID}"
 
 MODE="${1:-apply}"
 OWNER_EMAIL="willyros01@gmail.com"
-COMMIT="10e89c2dbbce20c22d036fae94a4503410ae6836"                                        # v2 branch, tested
+COMMIT="752914a95d2a7e845636b902a197a28fc34a9795"                                        # v2 branch, tested
 LIVE_COMMIT="58948239af100eac8b9a80df95af0ceff4959931"     # ios branch: the rules rf1.txt published
 RAW="https://raw.githubusercontent.com/willyros01/scorecard"
 WEB_KEY="AIzaSyA5qWtnz3QHco5YSAlHb7TXmCNg1kUdVhA"

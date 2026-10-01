@@ -57,11 +57,11 @@ Decisions kept from before: free app; Version 1 was to be unlisted; one GolfCour
 4. **Immediately after**, Claude switches the web to Version 2.0 (merge `v2` into `main`, keeping `finish-deletions.yml`; Pages deploys `main`). Until then the old web app shows members nothing. Rollback: redeploy `v2.21.9-live`.
 5. Guests who don't set a password get the "Set your email and password" screen in the same browser; if they use another device, the owner re-invites them with a named link (golfer and rounds kept).
 
-`cnt.txt` and `go2.txt` pin the tested `v2` commit (`COMMIT=` line). If anything on `v2` changes after that, re-test and update the pin.
+`cnt.txt` and `go2.txt` pin the tested `v2` commit (`COMMIT=` line; on 1 Oct: `752914a`, all checks green). If anything on `v2` changes after that, re-test and update the pin.
 
 ## 6. TestFlight
 
-- `ios-testflight.yml` builds when `version.js` changes on `ios` or `v2`; build number = the workflow's run number; "What to Test" from `build/what-to-test.txt` (`build/asc.mjs notes`). Version 2.0 starts at **2.30.0** (`2.30.0-beta.1`).
+- `ios-testflight.yml` builds when `version.js` changes on `ios` or `v2`; build number = the workflow's run number; "What to Test" from `build/what-to-test.txt` (`build/asc.mjs notes`). Version 2.0 starts at **2.30.0**: build 6 = `2.30.0-beta.1` (30 Sep), build 7 = `2.30.0-beta.2` with the go-live fixes (1 Oct).
 - Before go-live the TestFlight app uses the live database with today's rules: sign-in, groups, rounds work; the public group, group creation and admin invitations need the v2 rules.
 - Willy still has to fill the TestFlight Test Information contact fields (values given in chat; phone not in repo).
 

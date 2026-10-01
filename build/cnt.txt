@@ -26,7 +26,7 @@ export CLOUDSDK_CORE_PROJECT="${PROJECT_ID}"
 export GOOGLE_CLOUD_PROJECT="${PROJECT_ID}"
 
 OWNER_EMAIL="willyros01@gmail.com"
-COMMIT="10e89c2dbbce20c22d036fae94a4503410ae6836"   # the v2 branch commit these tools were tested at
+COMMIT="752914a95d2a7e845636b902a197a28fc34a9795"   # the v2 branch commit these tools were tested at
 RAW="https://raw.githubusercontent.com/willyros01/scorecard/${COMMIT}"
 WEB_KEY="AIzaSyA5qWtnz3QHco5YSAlHb7TXmCNg1kUdVhA"
 WORK="$(pwd)/scorecard-go2-tools"
