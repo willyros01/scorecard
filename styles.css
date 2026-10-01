@@ -784,3 +784,62 @@ body { font-size: 1rem; }
 .checkline.agree { align-items: flex-start; line-height: 1.5; }
 .checkline.agree input { margin-top: 2px; }
 .request-row { align-items: flex-start; }
+
+/* ---- beta.4: the header keeps one fixed size whatever the text-size setting
+   (only the body grows), so the group name and the three buttons always fit.
+   On a narrow phone a plain "Connected" becomes a green dot; tap it for the
+   words. Anything else (offline, a problem) keeps its words. ---- */
+.top .brand { flex: 1 1 auto; min-width: 0; }
+.top .brand h1 { font-size: 22px; line-height: 1.15; }
+.top .brand p, .top .whoami { font-size: 10.5px; overflow-wrap: anywhere; }
+.top .top-actions { flex: 0 0 auto; }
+.top .chip { font-size: 13px; padding: 7px 11px; min-height: 34px; white-space: nowrap; }
+.top .chip .status-dot { display: none; width: 12px; height: 12px; border-radius: 50%; background: #7EE0A8; vertical-align: middle; }
+@media (max-width: 480px) {
+  .top { gap: 8px; padding-left: 12px; padding-right: 12px; }
+  .top .top-actions { gap: 5px; }
+  .top .chip { padding: 7px 9px; }
+  .top .chip.plain .status-label { display: none; }
+  .top .chip.plain .status-dot { display: inline-block; }
+}
+
+/* ---- beta.4: a person's name and role never sit under the buttons. When the
+   buttons need the room (large text, narrow phone), they move to their own
+   line below the name. Nothing else about the row changes. ---- */
+.list-row.person-row { flex-wrap: wrap; row-gap: 0.5rem; }
+.list-row.person-row .grow { flex: 1 1 11rem; }
+.list-row.person-row .rowbtn { margin-left: 0; }
+
+/* ---- beta.4: tab names, buttons and the header are controls, not text:
+   a long press no longer selects them or shows Copy / Look Up. ---- */
+.tabs, .tabs button, .top, button, .btn, .rowbtn, .chip, .linkbtn { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+
+/* ---- beta.4: Admin's four tabs, the cockpit and the applications switch ---- */
+.subtabs { display: grid; gap: 4px; padding: 4px; margin: 0 0 1.1rem; background: var(--sand); border-radius: 12px; }
+.subtabs.n1 { grid-template-columns: minmax(0, 1fr); }
+.subtabs.n2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.subtabs.n3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.subtabs.n4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.subtab { border: 0; border-radius: 9px; background: transparent; color: var(--ink); font-weight: 600; font-size: 0.9rem; min-height: 46px; padding: 0.4rem 0.2rem; overflow-wrap: anywhere; }
+.subtab.on { background: var(--paper); color: var(--pine); box-shadow: 0 1px 2px rgba(20,38,31,.15); }
+[data-theme="dark"] .subtab.on { color: var(--pine-ink); }
+.subtab-count { display: inline-block; min-width: 1.3em; padding: 0 0.3em; border-radius: 999px; background: var(--pencil); color: #fff; font-size: 0.78rem; }
+.ck-tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.6rem; }
+.ck-tile { background: var(--paper); border: 1px solid var(--rule); border-radius: 14px; padding: 0.75rem; display: flex; flex-direction: column; gap: 2px; }
+.ck-num { font-size: 1.9rem; font-weight: 700; color: var(--pine); line-height: 1.1; }
+[data-theme="dark"] .ck-num { color: #7EBEA0; }
+.ck-tile.warn .ck-num { color: var(--pencil); }
+.ck-lab { font-size: 0.92rem; color: var(--muted); line-height: 1.3; }
+.ck-when { text-align: right; white-space: nowrap; font-size: 0.92rem; color: var(--ink); }
+.ck-group { cursor: pointer; }
+.ck-bars { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0.5rem; align-items: end; height: 150px; padding: 0.4rem 0; }
+.ck-barcol { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; gap: 3px; }
+.ck-bar { display: block; width: 100%; min-height: 3px; background: var(--pine); border-radius: 6px 6px 0 0; }
+[data-theme="dark"] .ck-bar { background: #7EBEA0; }
+.ck-barnum { font-size: 0.85rem; font-weight: 700; }
+.ck-barlab { font-size: 0.85rem; color: var(--muted); }
+.seg { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; padding: 4px; background: var(--sand); border-radius: 12px; }
+.seg-b { border: 0; border-radius: 9px; min-height: 48px; font-weight: 700; background: transparent; color: var(--ink); }
+.seg-b.on { background: var(--pine); color: #fff; }
+.note.in-use { margin-top: 0.6rem; }
+.my-season .ck-tiles { margin-top: 0.2rem; }

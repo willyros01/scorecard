@@ -76,6 +76,28 @@ if "firebaserules.googleapis.com" in url:
         reply(json.dumps({"source": {"files": [{"name": "firestore.rules", "content": content}]}}))
 
 if "identitytoolkit.googleapis.com/admin/v2" in url:
+    cfg_file = FAKE / "auth-config.json"
+    cfg = json.loads(cfg_file.read_text()) if cfg_file.exists() else {
+        "signIn": {"email": {"enabled": True, "passwordRequired": True}},
+        "authorizedDomains": ["localhost", "scorecard-f41b8.firebaseapp.com"]}
+    if method == "GET":
+        # Like Google: settings that are false are left out of the answer.
+        shown = json.loads(json.dumps(cfg))
+        em = shown.get("signIn", {}).get("email", {})
+        for k in [k for k, v in em.items() if v is False]: del em[k]
+        reply(json.dumps(shown))
+    if method == "PATCH":
+        flag = FAKE / "fail-auth"
+        if flag.exists(): flag.unlink(); reply("", 500)
+        b = body()
+        if "signIn" in b:
+            cfg.setdefault("signIn", {}).setdefault("email", {}).update(b["signIn"].get("email", {}))
+        if "authorizedDomains" in b:
+            cfg["authorizedDomains"] = b["authorizedDomains"]
+        if "notification" in b:
+            cfg["notification"] = b["notification"]
+        cfg_file.write_text(json.dumps(cfg))
+        reply(json.dumps(cfg))
     reply("{}")
 
 sys.stderr.write(f"fake curl: no rule for {method} {url}\n")

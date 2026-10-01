@@ -47,6 +47,8 @@ let pendingQuery = "";
 function keyOf(query) {
   try {
     const params = new URLSearchParams(query);
+    /* beta.4: the "finish joining" sign-in link of an automatic application. */
+    if (params.get("mode") === "signIn" && params.get("oobCode")) return `apply:${params.get("oobCode")}`;
     const join = params.get("join");
     if (!join) return "";
     return join + (params.get("as") === "admin" ? "&as=admin" : "");
@@ -75,6 +77,10 @@ export function takeLink(url) {
 
 /* What store.js readJoinLink() reads. Browser: the address bar, as always. */
 export const linkQuery = () => (isApp() ? pendingQuery : location.search);
+
+/* beta.4: the whole address of a sign-in link, as Firebase needs it. In the
+   app it arrived through takeLink(); in a browser it is the address bar. */
+export const signInLinkUrl = () => (isApp() ? `${JOIN_BASE}${pendingQuery}` : location.href);
 
 /* Called once a join has succeeded. */
 export function clearLinkQuery() {
