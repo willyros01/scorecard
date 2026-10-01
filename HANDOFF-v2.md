@@ -63,7 +63,7 @@ Decisions kept from before: free app; Version 1 was to be unlisted; one GolfCour
 - **Block lists** (`blockedEmails`, `blockedDomains`, `blockedNames`) in the Applications tab; ap4 seeds 14 throwaway domains.
 - **Name numbering** (Willy): the approve sheet pre-fills the next free name: "Name", then "Name 1", "Name 2"…
 - **Small fixes**: fixed-size header (only the body follows A/A+/A++); on narrow phones a plain "Connected" shows as a green dot; person rows wrap their buttons below the name; tab names and buttons are not selectable; a refused group-requests read is quiet.
-- **Release**: `bash ap4.txt` first (checks rq3's rules are live; adds account emails, the switch, throwaway domains, the collection-group index on rounds.date; switches on email link sign-in and allows www.cuberoot-systems.com; publishes the rules; recovers by itself; `rollback`). Then the web (merge v2 → main) and TestFlight. Tests: CK1–CK9 (rules), AP1–AP8 (script), E4b updated, E18–E23 (app).
+- **Release**: `bash ap4.txt` first (checks rq3's rules are live; adds account emails, the switch, throwaway domains, the collection-group index on rounds.date; switches on email link sign-in and allows www.cuberoot-systems.com; publishes the rules; recovers by itself; `rollback`). Then the web (merge v2 → main) and TestFlight. Tests: CK1–CK9 (rules), AP1–AP8 (script), E4b updated, E18–E23 (app). All green at 0cb05b5; ap4.txt pinned to it. TestFlight build of 2.30.0-beta.4 started Oct 1. **Next step: Willy runs bash ap4.txt, then Claude merges v2 into main (web).**
 
 ## 4. Tests (all run by themselves on every push to `v2`)
 
