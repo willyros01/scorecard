@@ -37,10 +37,16 @@ The approved design is "Scorecard Onboarding Privacy Architecture — Revision 2
 
 Decisions kept from before: free app; Version 1 was to be unlisted; one GolfCourseAPI key; approvals are manual; golfer names are unique (reviewer adds a middle initial); only one set of Firestore rules can be live (no per-app rules — explained to Willy).
 
+### Go-live fixes (1 October, from the external review Willy forwarded on 30 Sep)
+
+1. **No unclaimed-golfer read.** Golfer records are readable only by their own account and the admins of their groups. A named invitation greets the invitee from `associations/{id}/invitations/{golferId}` (name, index, group name, role), written by the owner/admin app when the invitation is sent (admins: member invitations only), read one at a time by id, listed only by the group's admins. The go-live data step creates these records for invitations already sent and not used.
+2. **Safe PUBLIC approval.** `pending → approving` (claim, in a transaction: reviewer id, golfer id, golfer name, server time) → account created → one batch (golfer, name claim, roster, directory, `publicApprovals` (rules: only under that reviewer's claim, create once) and `approving → approved`) → password email. Retry by the same reviewer reuses the golfer id ("Finish" button). A second reviewer is refused while the claim is under 10 minutes old. Reject only while pending. "Approved, not joined yet" list with "Send the email again".
+3. **Go-live robustness.** Marker `migrations/v2` (no app access): data-started / data-failed / data-done / rules-published / verified / failed / rolled-back, with every admin code saved before it moves. `go2.txt` recovers by itself if the data step, the rules publication or the check fails (old rules back, tried 3 times; admin codes back; marker), and can simply be run again. `bash go2.txt status` shows the marker.
+
 ## 4. Tests (all run by themselves on every push to `v2`)
 
 - `ios-checks.yml`: build checks V1–V6 (V3 = committed Firebase bundle equals a fresh build; the bootstrap step rebuilds and commits the bundle when `build/firebase-entry.js` or the lockfile changes — fingerprint in `vendor/firebase/bundle.source`), then web tests `test/web/run.mjs` in WebKit and Chromium against the live project (throwaway `webtest-…` accounts only).
-- `ops-tests.yml`: Firebase emulators; `test/ops/run.sh` runs SEC1–5, DEL1, PRIV, ACC, PUB, GRP (rules), then `test/app/e2e.mjs` (the real app on `localhost:8000/?emulators=1`, E1–E14), then `test/ops/golive-tests.mjs` (GO1–GO6).
+- `ops-tests.yml`: Firebase emulators; `test/ops/run.sh` runs SEC1–5, DEL1, PRIV, ACC, PUB, GRP (rules), then `test/app/e2e.mjs` (the real app on `localhost:8000/?emulators=1`, E1–E14), then `test/ops/golive-tests.mjs` (GO1–GO9), then `test/ops/go2-tests.sh` (GL1–GL5: go2.txt end to end with stand-ins for Google in `test/ops/go2-fakes/`, including each failure and its recovery).
 - `?emulators=1` works only on localhost (store.js `EMULATORS`, tidy.html). The published site and the iPhone app always use the live project.
 
 ## 5. Go-live (not done yet — needs Willy's go-ahead at each step)

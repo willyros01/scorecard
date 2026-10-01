@@ -263,8 +263,22 @@ await check("E4d", "two reviewers approving the same application at once: exactl
   await waitForText(owner, /both@example\.com/);
   await waitForText(rita, /both@example\.com/);
   for (const p of [owner, rita]) await p.locator('[data-act="review-application"][data-id="both@example.com"]').click();
+  /* Every message each page shows, kept, since a message stays only 3 seconds. */
+  for (const p of [owner, rita]) await p.evaluate(() => {
+    window.__seen = [];
+    new MutationObserver(() => window.__seen.push(document.body.innerText.slice(0, 400))).observe(document.body, { childList: true, subtree: true, characterData: true });
+  });
   await Promise.all([owner, rita].map((p) => p.locator('[data-pc="approve"]').click()));
-  await Promise.all([owner, rita].map((p) => waitForText(p, /Bo Both is approved|already approved|Another reviewer is approving/)));
+  const said = async (p) => { const end = Date.now() + 25000;
+    while (Date.now() < end) {
+      const seen = (await p.evaluate(() => window.__seen.join("\n"))) + (await text(p));
+      const m = seen.match(/Bo Both is approved|already approved|Another reviewer is approving|did not finish[^\n]*/);
+      if (m) return m[0];
+      await p.waitForTimeout(300);
+    }
+    return "nothing"; };
+  const messages = await Promise.all([owner, rita].map(said));
+  if (messages.some((m) => !/Bo Both is approved|already approved|Another reviewer is approving/.test(m))) throw new Error(`messages: ${messages.join(" / ")}`);
   const app = await getDoc("publicApplications/both@example.com");
   if (app.status !== "approved") throw new Error(`application is ${app.status}`);
   const golfers = (await list("golfers")).filter((g) => g.name === "Bo Both");

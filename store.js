@@ -1307,7 +1307,9 @@ export async function approveApplication({ application, golferName }) {
   if (!key) { const e = new Error("name"); e.code = "app/name"; throw e; }
   const appRef = doc(fb.db, "publicApplications", application.key);
 
-  /* 1. Claim. */
+  /* 1. Claim. If two reviewers claim at the same moment, the rules refuse
+     the second; that refusal is reported as "busy" or "already approved",
+     whichever is now true. */
   const claimed = await runTransaction(fb.db, async (tx) => {
     const snap = await tx.get(appRef);
     if (!snap.exists()) { const e = new Error("gone"); e.code = "app/gone"; throw e; }
@@ -1323,6 +1325,13 @@ export async function approveApplication({ application, golferName }) {
     }
     tx.update(appRef, { status: "approving", reviewedBy: uid, approvingAt: serverTimestamp(), golferId, golferName: name });
     return { already: false, golferId };
+  }).catch(async (e) => {
+    if (String((e && e.code) || "").startsWith("app/")) throw e;
+    const now = await getDoc(appRef).catch(() => null);
+    const a = now && now.exists() ? now.data() : null;
+    if (a && a.status === "approved") return { already: true, golferId: a.golferId };
+    if (a && a.status === "approving" && a.reviewedBy !== uid) { const b = new Error("busy"); b.code = "app/busy"; throw b; }
+    throw e;
   });
   if (claimed.already) return { ok: true, already: true, golferId: claimed.golferId };
   const golferId = claimed.golferId;
