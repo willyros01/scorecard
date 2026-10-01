@@ -4913,9 +4913,11 @@ view.addEventListener("click", async (e) => {
       return;
     case "create-account": return createAccountHere();
     case "show-apply":
-      signedOutStep = "member"; applySentTo = ""; applyInUse = "";
-      render();
+      /* The switch is read first, so the form is drawn once: a redraw after
+         somebody started typing would wipe what they typed. */
+      applySentTo = ""; applyInUse = "";
       applySettings = await db.readApplicationSettings();
+      signedOutStep = "member";
       return render();
     case "hide-apply": signedOutStep = null; applySentTo = ""; requestSentTo = ""; return render();
     case "submit-application": return submitApplicationHere();

@@ -1424,7 +1424,7 @@ const DEFAULT_SETTINGS = { mode: "manual", dailyLimit: 20 };
 export async function readApplicationSettings() {
   if (!fb) return { ...DEFAULT_SETTINGS };
   try {
-    const snap = await fb.mod.store.getDoc(ref("settings", "publicApplications"));
+    const snap = await withTimeout(fb.mod.store.getDoc(ref("settings", "publicApplications")), 6000, "The switch");
     if (!snap.exists()) return { ...DEFAULT_SETTINGS };
     const d = snap.data() || {};
     return { mode: d.mode === "auto" ? "auto" : "manual", dailyLimit: Number.isInteger(d.dailyLimit) ? d.dailyLimit : 20 };
