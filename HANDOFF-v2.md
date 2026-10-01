@@ -1,4 +1,4 @@
-# The Scorecard — Version 2.0 handoff (state at 30 September 2026)
+# The Scorecard — Version 2.0 handoff (state at 1 October 2026, afternoon)
 
 Written so that anyone (Claude, ChatGPT or a person) can continue the work. Read it fully before changing anything.
 
@@ -16,9 +16,9 @@ Written so that anyone (Claude, ChatGPT or a person) can continue the work. Read
 
 | Branch | What it is |
 |---|---|
-| `main` | The live web app, **2.21.9**, served by GitHub Pages. Frozen except the deletion job (`finish-deletions.yml`). Tag `v2.21.9-live`. |
+| `main` | The live web app, served by GitHub Pages. **Version 2.0 since 1 Oct 9:55** (v2 merged into main after go2.txt). Before that 2.21.9 (tag `v2.21.9-live`, the rollback point). Keeps the deletion job (`finish-deletions.yml`). |
 | `ios` | **Version 1** of the iPhone/iPad app (2.22.0-ios.5, TestFlight builds 1–5). Its `firestore.rules` are the **rules published today** (rf1.txt, 30 Sep). |
-| `v2` | **Version 2.0** (this document). Built on `ios`. Not live. TestFlight builds come from here from 2.30.0 on. |
+| `v2` | **Version 2.0** (this document). Built on `ios`. Live on the web since 1 Oct (merge into `main`). TestFlight builds come from here from 2.30.0 on. |
 | `ci-logs` | Logs saved by every CI run (`logs/checks`, `logs/ops`, `logs/testflight`, `logs/deletions`). Read with `git fetch origin +refs/heads/ci-logs`. |
 
 ## 3. What Version 2.0 is (all built and tested on `v2`)
@@ -43,13 +43,23 @@ Decisions kept from before: free app; Version 1 was to be unlisted; one GolfCour
 2. **Safe PUBLIC approval.** `pending → approving` (claim, in a transaction: reviewer id, golfer id, golfer name, server time) → account created → one batch (golfer, name claim, roster, directory, `publicApprovals` (rules: only under that reviewer's claim, create once) and `approving → approved`) → password email. Retry by the same reviewer reuses the golfer id ("Finish" button). A second reviewer is refused while the claim is under 10 minutes old. Reject only while pending. "Approved, not joined yet" list with "Send the email again".
 3. **Go-live robustness.** Marker `migrations/v2` (no app access): data-started / data-failed / data-done / rules-published / verified / failed / rolled-back, with every admin code saved before it moves. `go2.txt` recovers by itself if the data step, the rules publication or the check fails (old rules back, tried 3 times; admin codes back; marker), and can simply be run again. `bash go2.txt status` shows the marker.
 
+### beta.3 (1 October, approved by Willy from the prototype "Scorecard sign-in prototype")
+
+- **First screen** (signed out): Sign in only (email, password, Sign in, Forgot the password) plus two buttons: **I have a code** and **Become a member or start a group**. The "Used The Scorecard in Safari?" link was removed from it (still in the User guide).
+- **I have a code**: the code is typed first, then the account (create or sign in); the code is then filled in on the join screen.
+- **Become a member or start a group**: two choices. **Become a member** = the public group application. **Start your own group** = a request for a private group (`groupRequests/{email}`: full name, email, group name, about how many golfers (`golfers`), where they play, note). Both forms show "What happens next" and the **Conditions** (approval at The Scorecard's discretion; Code of Conduct; zero tolerance for objectionable content or abusive behaviour) and are sent only when "I have read and agree to the Code of Conduct and the Privacy policy" is ticked. Declined applicants and requests get **no email** (Willy's decision).
+- **Code of Conduct**: `https://www.cuberoot-systems.com/scorecard/conduct/` (Cuberoot repo, `scorecard/conduct/index.html`), `platform.conductUrl()`.
+- **Group requests** (Admin tab, only for the group creator): Approve claims the request with a new group id (`pending → approving`), creates the group with that id (Willy owner, not on the roster; a retry finds it and does not make another), marks it `approved`, opens the new group and an email to the organiser with an **admin invitation link** (the existing admin invitation, `invite-nonplayer` style). The organiser taps it, creates an account and joins as the group's admin. Decline (two taps) sends no email.
+- Rules: `groupRequests` block in `firestore.rules` (create signed out, one per email; only `groupCreator()` reads, decides, deletes). Published with **`bash rq3.txt`** (`build/rq3.txt`, pinned to the tested commit 747678b; checks the live rules are go2's (752914a) first; recovers by itself; `bash rq3.txt rollback`). Tests: GRQ1–GRQ5 (rules), E15–E17 (app), RQ1–RQ6 (the script), web B1/C5/C7/W1/W5.
+- **Order at release:** Willy runs `bash rq3.txt` first, then Claude merges `v2` into `main` (until then a request sent from the web would be refused). TestFlight build of 2.30.0-beta.3 can go any time.
+
 ## 4. Tests (all run by themselves on every push to `v2`)
 
 - `ios-checks.yml`: build checks V1–V6 (V3 = committed Firebase bundle equals a fresh build; the bootstrap step rebuilds and commits the bundle when `build/firebase-entry.js` or the lockfile changes — fingerprint in `vendor/firebase/bundle.source`), then web tests `test/web/run.mjs` in WebKit and Chromium against the live project (throwaway `webtest-…` accounts only).
 - `ops-tests.yml`: Firebase emulators; `test/ops/run.sh` runs SEC1–5, DEL1, PRIV, ACC, PUB, GRP (rules), then `test/app/e2e.mjs` (the real app on `localhost:8000/?emulators=1`, E1–E14), then `test/ops/golive-tests.mjs` (GO1–GO9), then `test/ops/go2-tests.sh` (GL1–GL5: go2.txt end to end with stand-ins for Google in `test/ops/go2-fakes/`, including each failure and its recovery).
 - `?emulators=1` works only on localhost (store.js `EMULATORS`, tidy.html). The published site and the iPhone app always use the live project.
 
-## 5. Go-live (not done yet — needs Willy's go-ahead at each step)
+## 5. Go-live (DONE 1 Oct: go2.txt ran at 9:53, web switched at 9:55; kept for reference)
 
 1. Willy messages his group to set a password now in 2.21.9 (tap their name at the top → "Set a password"), and a reminder a week later.
 2. `bash cnt.txt` (build/cnt.txt) — **count only**: members per group, guests without email, admins without email, last sign-in.
@@ -61,7 +71,7 @@ Decisions kept from before: free app; Version 1 was to be unlisted; one GolfCour
 
 ## 6. TestFlight
 
-- `ios-testflight.yml` builds when `version.js` changes on `ios` or `v2`; build number = the workflow's run number; "What to Test" from `build/what-to-test.txt` (`build/asc.mjs notes`). Version 2.0 starts at **2.30.0**: build 6 = `2.30.0-beta.1` (30 Sep), build 7 = `2.30.0-beta.2` with the go-live fixes (1 Oct).
+- `ios-testflight.yml` builds when `version.js` changes on `ios` or `v2`; build number = the workflow's run number; "What to Test" from `build/what-to-test.txt` (`build/asc.mjs notes`). Version 2.0 starts at **2.30.0**: build 6 = `2.30.0-beta.1` (30 Sep), build 7 = `2.30.0-beta.2` with the go-live fixes (1 Oct); next build = `2.30.0-beta.3` (new first screen and group requests).
 - Before go-live the TestFlight app uses the live database with today's rules: sign-in, groups, rounds work; the public group, group creation and admin invitations need the v2 rules.
 - Willy still has to fill the TestFlight Test Information contact fields (values given in chat; phone not in repo).
 
