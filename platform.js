@@ -25,6 +25,7 @@ export const webBase = () => WEB_BASE;
 export const guideUrl = () => GUIDE_URL;
 /* The privacy policy and support pages, also on the Cuberoot site. */
 export const privacyUrl = () => "https://www.cuberoot-systems.com/scorecard/privacy/";
+export const conductUrl = () => "https://www.cuberoot-systems.com/scorecard/conduct/";
 export const supportUrl = () => "https://www.cuberoot-systems.com/scorecard/support/";
 /* Invitation links. On an iPhone with the app installed this address opens
    the app; anywhere else the Cuberoot page forwards to the web app with the

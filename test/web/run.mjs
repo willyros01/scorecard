@@ -294,7 +294,9 @@ for (const [name, type] of browsers) {
       await waitForText(page, /Sign in/);
       await expectNoUser(page);
       const t = await bodyText(page);
-      if (!/I was given a code/.test(t)) throw new Error("no code link");
+      if (!/I have a code/.test(t)) throw new Error("no I have a code button");
+      if (!/Become a member or start a group/.test(t)) throw new Error("no Become a member or start a group button");
+      if (/Apply to join|Used The Scorecard in Safari/.test(t)) throw new Error("the first screen still has the old choices");
       if (/Create the group|Start your group/.test(t)) throw new Error("offered a group while signed out");
     });
     await check(`W2-${tag}`, `${name}: no uncaught errors while starting`, async () => {
@@ -302,31 +304,58 @@ for (const [name, type] of browsers) {
     });
     await check(`C6-${tag}`, `${name}: no Google sign-in anywhere on the first screen`, async () => !/google/i.test(await bodyText(page)));
     await check(`W3-${tag}`, `${name}: signed out, there is no "Delete my account" (nothing to delete)`, async () => !/Delete my account/.test(await bodyText(page)));
-    await check(`B1-${tag}`, `${name}: signed out, "I was given a code" asks for an account first`, async () => {
+    await check(`B1-${tag}`, `${name}: signed out, "I have a code" asks for the code, then for an account`, async () => {
       await page.locator('[data-act="enter-code"]').first().click();
+      await waitForText(page, /Type the group code you were given/);
+      await page.locator('[data-act="code-continue"]').first().click();
+      await waitForText(page, /Type the group code/);
+      await page.fill('[name="join-code"]', "abc234");
+      await page.locator('[data-act="code-continue"]').first().click();
       await waitForText(page, /Join with a code/);
       const t = await bodyText(page);
       if (!/Create my account/.test(t) || !/I already have an account/.test(t)) throw new Error("no create-account card");
       await page.locator('[data-act="hide-code"]').first().click();
-      await waitForText(page, /Sign in/);
+      await waitForText(page, /Type the group code you were given/);
+      await page.locator('[data-act="hide-apply"]').first().click();
+      await waitForText(page, /Become a member or start a group/);
+      await expectNoUser(page, 500);
     });
-    await check(`C5-${tag}`, `${name}: signed out, Apply to join the public group asks for full name and email only`, async () => {
+    await check(`C5-${tag}`, `${name}: signed out, Become a member asks for full name and email only, with the steps and conditions`, async () => {
+      await page.locator('[data-act="show-choose"]').first().click();
+      await waitForText(page, /Start your own group/);
       await page.locator('[data-act="show-apply"]').first().click();
-      await waitForText(page, /Apply to join the public group/);
+      await waitForText(page, /What happens next/);
+      const t0 = await bodyText(page);
+      if (!/Conditions/.test(t0) || !/zero tolerance/.test(t0) || !/I have read and agree to the Code of Conduct/.test(t0)) throw new Error("no conditions");
       if (await page.locator('[name="password"]').count()) throw new Error("the application asks for a password");
       if (!(await page.locator('[name="apply-name"]').count()) || !(await page.locator('[name="apply-email"]').count())) throw new Error("no name or email field");
       if (!/see your full name and your handicap index, and nothing else/.test(await bodyText(page))) throw new Error("no privacy note");
       await page.locator('[data-act="submit-application"]').click();
       await waitForText(page, /Type your full name/);
       await expectNoUser(page, 1000);
+      await page.locator('[data-act="show-choose"]').first().click();
+      await waitForText(page, /Start your own group/);
+    });
+    await check(`C7-${tag}`, `${name}: signed out, Start your own group shows the request form, steps and conditions (nothing is sent)`, async () => {
+      await page.locator('[data-act="show-request"]').first().click();
+      await waitForText(page, /Tell us about your group/);
+      for (const f of ["rq-name", "rq-email", "rq-group", "rq-size", "rq-where", "rq-note", "rq-agree"]) {
+        if (!(await page.locator(`[name="${f}"]`).count())) throw new Error(`no ${f}`);
+      }
+      const t = await bodyText(page);
+      if (!/What happens next/.test(t) || !/you join your group as its admin/.test(t) || !/zero tolerance/.test(t)) throw new Error("no steps or conditions");
+      await page.locator('[data-act="submit-request"]').click();
+      await waitForText(page, /Type your full name/);
+      await expectNoUser(page, 500);
+      await page.locator('[data-act="show-choose"]').first().click();
       await page.locator('[data-act="hide-apply"]').first().click();
-      await waitForText(page, /Sign in/);
+      await waitForText(page, /Become a member or start a group/);
     });
     await check(`W6-${tag}`, `${name}: User guide, Support and Privacy links at the foot of the screen`, async () => {
       const t = await bodyText(page);
       if (!/User guide/.test(t) || !/Support/.test(t) || !/Privacy/.test(t)) throw new Error("a link is missing");
-      const urls = await page.evaluate(async () => { const m = await import("/platform.js"); return [m.guideUrl(), m.supportUrl(), m.privacyUrl()]; });
-      if (urls.join(" ") !== "https://www.cuberoot-systems.com/scorecard/guide/ https://www.cuberoot-systems.com/scorecard/support/ https://www.cuberoot-systems.com/scorecard/privacy/") throw new Error(urls.join(" "));
+      const urls = await page.evaluate(async () => { const m = await import("/platform.js"); return [m.guideUrl(), m.supportUrl(), m.privacyUrl(), m.conductUrl()]; });
+      if (urls.join(" ") !== "https://www.cuberoot-systems.com/scorecard/guide/ https://www.cuberoot-systems.com/scorecard/support/ https://www.cuberoot-systems.com/scorecard/privacy/ https://www.cuberoot-systems.com/scorecard/conduct/") throw new Error(urls.join(" "));
     });
     await check(`C1-${tag}`, `${name}: invitation links use the Cuberoot address (Change 1)`, async () => {
       const link = await page.evaluate(async () => (await import("/store.js")).joinLink({ id: "G1", joinCode: "ABC123" }));
@@ -410,9 +439,11 @@ for (const [name, type] of browsers) {
     const page = await context.newPage();
     await page.goto(`${BASE}/`, { waitUntil: "load" });
     let user = null;
-    await check(`W5-${tag}`, `${name} (app): first screen uses the app wording and links to the moving guide`, async () => {
-      await waitForText(page, /same account on every device/);
-      if (!/Used The Scorecard in Safari\? Read this first/.test(await bodyText(page))) throw new Error("no moving-guide link");
+    await check(`W5-${tag}`, `${name} (app): the first screen is Sign in with the two buttons, and nothing else to choose`, async () => {
+      await waitForText(page, /Become a member or start a group/);
+      const t = await bodyText(page);
+      if (!/I have a code/.test(t) || !/Forgot the password/.test(t)) throw new Error("a choice is missing");
+      if (/Apply to join|Used The Scorecard in Safari/.test(t)) throw new Error("old choices still shown");
     });
     await deleteTestAccount(user);
     await context.close();

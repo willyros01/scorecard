@@ -766,3 +766,21 @@ body { font-size: 1rem; }
   .fast-idx { width: 3.6rem; }
   .fast-score { width: 4.2rem; }
 }
+
+/* ---- beta.3: signed-out screens (first screen, choices, application steps and conditions) ---- */
+.first-choices { margin-top: 0.4rem; }
+.choice {
+  display: flex; flex-direction: column; gap: 0.3rem; width: 100%; text-align: left;
+  background: var(--paper); border: 1px solid var(--rule); border-radius: 14px;
+  padding: 1rem; color: var(--ink); font: inherit; cursor: pointer;
+}
+.choice .hint { margin: 0; }
+.choice-title { font-size: 1.15rem; font-weight: 600; color: var(--pine); }
+[data-theme="dark"] .choice-title { color: var(--pine-ink); }
+.sub-title { margin: 1.1rem 0 0.4rem; font-size: 1.05rem; font-weight: 700; color: var(--ink); }
+.steps { margin: 0; padding-left: 1.4rem; display: flex; flex-direction: column; gap: 0.45rem; line-height: 1.5; color: var(--ink); }
+.terms { background: var(--card); border: 1px solid var(--rule); border-radius: 10px; padding: 0.2rem 0.85rem; line-height: 1.5; color: var(--ink); font-size: 0.97rem; }
+.terms p { margin: 0.65rem 0; }
+.checkline.agree { align-items: flex-start; line-height: 1.5; }
+.checkline.agree input { margin-top: 2px; }
+.request-row { align-items: flex-start; }
