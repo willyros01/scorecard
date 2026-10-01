@@ -1201,6 +1201,9 @@ export async function submitApplication({ fullName, email }) {
   const key = emailKey(address);
   if (name.length < 2 || name.length > 80) { const e = new Error("name"); e.code = "app/name"; throw e; }
   if (!/^[^@ ]+@[^@ ]+[.][^@ ]+$/.test(key) || address.length > 254) { const e = new Error("email"); e.code = "app/email"; throw e; }
+  /* beta.4: an email that already has an account is stopped here, on screen
+     (the rules refuse it too). Nothing is saved and no email goes out. */
+  if (await emailHasAccount(address)) { const e = new Error("in use"); e.code = "app/in-use"; throw e; }
   const { setDoc, serverTimestamp } = fb.mod.store;
   try {
     await withTimeout(setDoc(ref("publicApplications", key), {
@@ -1316,7 +1319,10 @@ export function watchGroupRequests(callback) {
   const stop = listen(query(col("groupRequests"), where("status", "in", ["pending", "approving"])),
     (snap) => callback(snap.docs.map((d) => ({ key: d.id, ...d.data() }))
       .sort((x, y) => ((x.createdAt && x.createdAt.seconds) || 0) - ((y.createdAt && y.createdAt.seconds) || 0))),
-    (e) => report(e));
+    /* beta.4: a refused look for group requests (rules not published yet)
+       stays quiet: the section simply shows none, and nothing else is
+       affected. It used to raise the red "Firestore refused" bar. */
+    (e) => { if (!String((e && (e.code || e.message)) || "").includes("permission")) report(e); callback([]); });
   unsubscribers.push(stop);
   return stop;
 }
@@ -1364,6 +1370,238 @@ export async function releaseGroupRequest(key) {
 export async function declineGroupRequest(key) {
   await commitTogether([{ op: "update", path: ["groupRequests", key],
     data: { status: "declined", reviewedBy: uid, reviewedAt: { __serverTimestamp: true } } }], "decline the request");
+}
+
+/* ======================= beta.4: the cockpit ======================= */
+
+/* "Last seen": the member's own app stamps its membership, at most once every
+   12 hours per group. Quiet if refused (rules not published yet). */
+const LAST_SEEN_EVERY_MS = 12 * 3600 * 1000;
+export async function stampLastSeen() {
+  if (!fb || !uid || !assocId || !myMember || isAnonymousSession()) return;
+  const at = myMember.lastSeenAt && typeof myMember.lastSeenAt.toMillis === "function" ? myMember.lastSeenAt.toMillis() : 0;
+  if (Date.now() - at < LAST_SEEN_EVERY_MS) return;
+  try {
+    await commitTogether([{ op: "update", path: ["associations", assocId, "members", uid],
+      data: { lastSeenAt: { __serverTimestamp: true } } }], "note last seen");
+    myMember = { ...myMember, lastSeenAt: { toMillis: () => Date.now() } };
+  } catch { /* harmless: tried again next time */ }
+}
+
+const isoDay = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const millisOf = (t) => (t && typeof t.toMillis === "function" ? t.toMillis() : (t && t.seconds ? t.seconds * 1000 : (typeof t === "number" ? t : 0)));
+
+/* The owner cockpit's raw material, read when it opens (the group creator
+   only): every group, every membership, and the rounds of the last 6 months.
+   About as many reads as there are memberships plus recent rounds. */
+export async function loadOwnerCockpit() {
+  const { getDocs, query, where, collectionGroup } = fb.mod.store;
+  const since = new Date(); since.setMonth(since.getMonth() - 6); since.setDate(1);
+  const groupsSnap = await getDocs(col("associations"));
+  const membersSnap = await getDocs(collectionGroup(fb.db, "members"));
+  let rounds = [], roundsError = "";
+  try {
+    const rs = await getDocs(query(collectionGroup(fb.db, "rounds"), where("date", ">=", isoDay(since))));
+    rounds = rs.docs.map((d) => {
+      const r = d.data() || {};
+      return { assocId: (d.ref.parent && d.ref.parent.parent && d.ref.parent.parent.id) || r.assocId || "",
+        date: String(r.date || ""), golferId: r.golferId || "", courseName: r.courseName || "" };
+    });
+  } catch (e) { roundsError = String((e && (e.code || e.message)) || "unavailable"); }
+  const groups = groupsSnap.docs.map((d) => ({ id: d.id, name: (d.data() || {}).name || d.id, ownerUid: (d.data() || {}).ownerUid || "" }));
+  const members = membersSnap.docs.map((d) => {
+    const m = d.data() || {};
+    return { assocId: (d.ref.parent && d.ref.parent.parent && d.ref.parent.parent.id) || "",
+      uid: m.uid || d.id, role: m.role || "member", displayName: m.displayName || "",
+      lastSeen: millisOf(m.lastSeenAt), joinedAt: millisOf(m.joinedAt) };
+  }).filter((m) => m.assocId);
+  return { groups, members, rounds, roundsError, since: isoDay(since), me: uid, loadedAt: Date.now() };
+}
+
+/* ======================= beta.4: the applications switch ======================= */
+
+const DEFAULT_SETTINGS = { mode: "manual", dailyLimit: 20 };
+export async function readApplicationSettings() {
+  if (!fb) return { ...DEFAULT_SETTINGS };
+  try {
+    const snap = await fb.mod.store.getDoc(ref("settings", "publicApplications"));
+    if (!snap.exists()) return { ...DEFAULT_SETTINGS };
+    const d = snap.data() || {};
+    return { mode: d.mode === "auto" ? "auto" : "manual", dailyLimit: Number.isInteger(d.dailyLimit) ? d.dailyLimit : 20 };
+  } catch { return { ...DEFAULT_SETTINGS }; }
+}
+
+export async function saveApplicationSettings({ mode, dailyLimit }) {
+  const limit = Math.max(1, Math.min(500, Math.round(Number(dailyLimit) || 20)));
+  await commitTogether([{ op: "set", merge: false, path: ["settings", "publicApplications"],
+    data: { mode: mode === "auto" ? "auto" : "manual", dailyLimit: limit, updatedBy: uid, updatedAt: { __serverTimestamp: true } } }],
+  "change the applications switch");
+  return { mode: mode === "auto" ? "auto" : "manual", dailyLimit: limit };
+}
+
+/* Does this email already have an account? (One document, by its id.) */
+export async function emailHasAccount(email) {
+  if (!fb) return false;
+  try {
+    const snap = await fb.mod.store.getDoc(ref("accountEmails", emailKey(email)));
+    return snap.exists();
+  } catch { return false; }
+}
+
+/* Every signed-in account records its own email once, so the form can tell an
+   applicant "this email already has an account". */
+export async function ensureAccountEmail() {
+  const user = fb && fb.auth && fb.auth.currentUser;
+  if (!user || user.isAnonymous || !user.email) return;
+  const key = emailKey(user.email);
+  try {
+    const snap = await fb.mod.store.getDoc(ref("accountEmails", key));
+    if (snap.exists()) return;
+    await fb.mod.store.setDoc(ref("accountEmails", key), { at: fb.mod.store.serverTimestamp() });
+  } catch { /* tried again at the next sign-in */ }
+}
+
+export async function removeAccountEmail() {
+  const user = fb && fb.auth && fb.auth.currentUser;
+  if (!user || !user.email) return;
+  try { await fb.mod.store.deleteDoc(ref("accountEmails", emailKey(user.email))); } catch {}
+}
+
+/* Block lists (reviewers). kind: "emails" | "domains" | "names". */
+const BLOCK_COLLECTION = { emails: "blockedEmails", domains: "blockedDomains", names: "blockedNames" };
+export const blockKey = (kind, value) => {
+  const v = String(value || "").trim().toLowerCase();
+  if (kind === "names") return model.nameKey(v);
+  if (kind === "domains") return v.replace(/^.*@/, "").replace(/^\.+|\.+$/g, "");
+  return v;
+};
+export function watchBlockList(callback) {
+  const lists = { emails: [], domains: [], names: [] };
+  for (const kind of Object.keys(BLOCK_COLLECTION)) {
+    const stop = listen(col(BLOCK_COLLECTION[kind]),
+      (snap) => { lists[kind] = snap.docs.map((d) => d.id).sort(); callback({ ...lists }); },
+      () => { /* not a reviewer, or rules not published yet: show none */ });
+    unsubscribers.push(stop);
+  }
+}
+export async function addBlock(kind, value) {
+  const key = blockKey(kind, value);
+  if (!BLOCK_COLLECTION[kind] || !key || key.includes("/")) { const e = new Error("bad"); e.code = "app/bad"; throw e; }
+  await commitTogether([{ op: "set", merge: false, path: [BLOCK_COLLECTION[kind], key],
+    data: { addedBy: uid, addedAt: { __serverTimestamp: true } } }], "add to the block list");
+  return key;
+}
+export async function removeBlock(kind, key) {
+  await commitTogether([{ op: "delete", path: [BLOCK_COLLECTION[kind], key] }], "remove from the block list");
+}
+
+/* Willy's numbering rule (Oct 1): the first golfer keeps the plain name, the
+   next is "Name 1", then "Name 2". Returns the first one that is free. */
+export async function nextFreeName(name) {
+  const base = String(name || "").trim().replace(/\s+/g, " ");
+  const { getDoc } = fb.mod.store;
+  for (let n = 0; n < 100; n++) {
+    const candidate = n === 0 ? base : `${base} ${n}`;
+    const snap = await getDoc(ref("golferNames", model.nameKey(candidate))).catch(() => null);
+    if (!(snap && snap.exists())) return candidate;
+  }
+  return base;
+}
+
+/* The Level 1 name check the app can make before anything is sent (the rules
+   make it again): two or more words, plain letters, 4-60 characters. */
+export const plainName = (name) => /^[A-Za-z][A-Za-z'-]*( [A-Za-z][A-Za-z'-]*)+$/.test(String(name || "")) && String(name).length >= 4 && String(name).length <= 60;
+
+/* Auto: the sign-in link that confirms the email. Nothing is created until it
+   is tapped. */
+const APPLY_EMAIL_KEY = "golf:v2:applyEmail";
+export async function sendApplicationLink(email) {
+  const url = EMULATORS ? `${location.origin}${location.pathname}?emulators=1&apply=1` : `${platform.joinBase()}?apply=1`;
+  await fb.mod.auth.sendSignInLinkToEmail(fb.auth, String(email || "").trim(), { url, handleCodeInApp: true });
+  try { localStorage.setItem(APPLY_EMAIL_KEY, String(email || "").trim()); } catch {}
+}
+export const rememberedApplyEmail = () => { try { return localStorage.getItem(APPLY_EMAIL_KEY) || ""; } catch { return ""; } };
+export const isApplyLink = () => {
+  try { return !!(fb && fb.mod.auth.isSignInWithEmailLink(fb.auth, platform.signInLinkUrl())); } catch { return false; }
+};
+
+/* The applicant tapped the link: sign in with it (this creates the account,
+   with the email confirmed), then set their chosen password. */
+export async function finishApplyLink({ email, password }) {
+  const address = String(email || "").trim();
+  const cred = await fb.mod.auth.signInWithEmailLink(fb.auth, address, platform.signInLinkUrl());
+  await fb.mod.auth.updatePassword(cred.user, password);
+  try { localStorage.removeItem(APPLY_EMAIL_KEY); } catch {}
+  try { history.replaceState(null, "", EMULATORS ? `${location.pathname}?emulators=1` : location.pathname); } catch {}
+  platform.clearLinkQuery();
+  await refreshToken();
+  await ensureAccountEmail();
+  return { ok: true };
+}
+
+/* Auto: join the public group by yourself. Every Level 1 check is made again
+   by the rules; if any fails, nothing is written and the application simply
+   waits for a reviewer. Returns { joined } or { waiting, reason }. */
+export async function autoJoinPublic() {
+  const user = fb && fb.auth && fb.auth.currentUser;
+  if (!user || !user.email || !user.emailVerified) return { waiting: true, reason: "email" };
+  const { getDoc } = fb.mod.store;
+  const key = emailKey(user.email);
+  const settings = await readApplicationSettings();
+  if (settings.mode !== "auto") return { waiting: true, reason: "manual" };
+  let app;
+  try {
+    const snap = await getDoc(ref("publicApplications", key));
+    if (!snap.exists()) return { waiting: true, reason: "none" };
+    app = snap.data() || {};
+  } catch { return { waiting: true, reason: "unreadable" }; }
+  if (app.status !== "pending") return { waiting: true, reason: app.status || "unknown" };
+  if (!plainName(app.fullName)) return { waiting: true, reason: "name" };
+  const nk = model.nameKey(app.fullName);
+  const taken = await getDoc(ref("golferNames", nk)).catch(() => null);
+  if (taken && taken.exists()) return { waiting: true, reason: "name-taken" };
+  const day = String(Math.floor(Date.now() / 86400000));
+  const counter = await getDoc(ref("autoApprovals", day)).catch(() => null);
+  const count = counter && counter.exists() ? Number((counter.data() || {}).count) || 0 : 0;
+  if (count + 1 > settings.dailyLimit) return { waiting: true, reason: "limit" };
+  const golfer = model.buildGolfer({ name: app.fullName, linkedUid: uid });
+  try {
+    await commitTogether([
+      { op: "set", merge: false, path: ["golfers", golfer.id], data: { ...golfer, linkedUid: uid, groups: [PUBLIC_ID] } },
+      { op: "set", merge: false, path: ["golferNames", nk], data: { golferId: golfer.id, name: golfer.name } },
+      { op: "set", merge: false, path: ["autoApprovals", day], data: { count: count + 1 } },
+      { op: "set", merge: false, path: ["publicApprovals", key],
+        data: { golferId: golfer.id, displayName: golfer.name, nameKey: nk, approvedBy: uid, approvedAt: { __serverTimestamp: true }, auto: true } },
+    ], "approve automatically");
+  } catch { return { waiting: true, reason: "refused" }; }
+  await joinPublicIfApproved();
+  await finishPublicJoin();
+  return { joined: true };
+}
+
+/* After joining by an automatic approval: the roster and directory entries,
+   and the application marked approved. Safe to run again. */
+export async function finishPublicJoin() {
+  const user = fb && fb.auth && fb.auth.currentUser;
+  if (!user || !user.email || !user.emailVerified) return;
+  const { getDoc } = fb.mod.store;
+  const key = emailKey(user.email);
+  const member = await getDoc(ref("associations", PUBLIC_ID, "members", uid)).catch(() => null);
+  if (!(member && member.exists())) return;
+  const golferId = (member.data() || {}).golferId;
+  if (!golferId) return;
+  const app = await getDoc(ref("publicApplications", key)).catch(() => null);
+  if (!(app && app.exists()) || (app.data() || {}).status !== "pending") return;
+  const name = (app.data() || {}).fullName || "";
+  await commitTogether([
+    { op: "set", path: ["associations", PUBLIC_ID, "roster", golferId], data: { golferId, addedAt: Date.now() } },
+  ], "add yourself to the public roster");
+  await commitTogether([
+    { op: "set", merge: false, path: ["associations", PUBLIC_ID, "directory", golferId],
+      data: { golferId, displayName: name, handicapIndex: null } },
+    { op: "update", path: ["publicApplications", key],
+      data: { status: "approved", golferId, golferName: name, reviewedAt: { __serverTimestamp: true }, auto: true } },
+  ], "finish joining the public group");
 }
 
 /* 24 random characters: the new account's first password, which nobody ever
@@ -2843,6 +3081,9 @@ export async function deleteMyAccount({ password = "", onStep = () => {} } = {})
     /* 6. Ownership again, now that the sign-in is fresh. */
     try { if ((await ownedGroupIds()).length) return { ok: false, reason: "OWNER", message: "You own a group. Delete the group first, then delete your account." }; }
     catch { return { ok: false, reason: "OFFLINE", message: "Your groups couldn't be checked. Your account is NOT deleted yet — tap Try again when online." }; }
+
+    /* beta.4: the email is free again once the account goes. */
+    await removeAccountEmail();
 
     /* 7. Clean-up: one all-or-nothing batch per group, progress recorded in
        the same batch. Each batch has at most 4 writes. */

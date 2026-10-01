@@ -241,8 +241,12 @@ const claimedOnce = new Set();   /* golfers this session has already tried to cl
 /* beta.3: the signed-out screens. null = the first screen (Sign in);
    "code" = I have a code; "choose" = Become a member or start a group;
    "member" = the public group application; "group" = a private group request. */
+let adminTab = "cockpit";       /* beta.4: Cockpit | Applications | Members | Settings */
 let signedOutStep = null;
 let applySentTo = "";           /* signed out: the application just sent */
+let applySentAuto = false;      /* beta.4: that application got the sign-in link (Auto) */
+let applyInUse = "";            /* beta.4: the email typed already has an account */
+let applySettings = null;       /* beta.4: { mode, dailyLimit }, read when the form opens */
 let requestSentTo = "";         /* signed out: the group request just sent */
 let requestForm = { fullName: "", email: "", groupName: "", size: "", where: "", note: "" };
 let groupRequests = [];         /* the group creator: requests for private groups */
@@ -657,6 +661,20 @@ async function submitRequestHere() {
 }
 
 function screenApply() {
+  const auto = !!(applySettings && applySettings.mode === "auto");
+  if (applySentTo && applySentAuto) {
+    return `<div class="stack">
+      ${flashBar()}
+      <div class="card padded">
+        <h2 class="panel-title">Check your email</h2>
+        <p class="lead">Thank you. A link to finish joining has gone to <b>${esc(applySentTo)}</b>.</p>
+        <p class="hint">Open that email on this phone or computer and tap the link. It confirms your email; then you choose your password and you are in the public group, once the last checks pass. Otherwise your application waits for a person to look at it.</p>
+        <p class="hint">The email comes from Firebase, which The Scorecard uses for accounts. It sometimes lands in junk mail.</p>
+        <div class="inline-actions stacked"><button class="btn ghost" data-act="hide-apply">Back to Sign in</button></div>
+      </div>
+      ${versionBlock()}
+    </div>`;
+  }
   if (applySentTo) {
     return `<div class="stack">
       ${flashBar()}
@@ -675,13 +693,23 @@ function screenApply() {
     ${offlineAccountNote()}
     <div class="card padded">
       <h2 class="panel-title">Become a member</h2>
-      <p class="hint">Give your full name and your email. No password yet. When a person has approved it, you get an email to choose your password.</p>
+      <p class="hint">${auto
+        ? "Give your full name and your email. No password yet. You get an email with a link to finish joining."
+        : "Give your full name and your email. No password yet. When a person has approved it, you get an email to choose your password."}</p>
       <label class="lbl">Full name</label>
       <input class="field" name="apply-name" value="${esc(joinForm.name || "")}" placeholder="e.g. Willy Rosales" autocomplete="name" maxlength="80">
       <label class="lbl">Email</label>
       <input class="field" name="apply-email" type="email" value="${esc(authForm.email || "")}" placeholder="you@example.com" autocomplete="email" autocapitalize="none" maxlength="254">
+      ${applyInUse ? `<div class="note warn in-use"><b>This email already has an account.</b> Sign in with it instead, or tap Forgot the password on the Sign in screen. Nothing was sent.</div>
+        <div class="inline-actions stacked"><button class="btn" data-act="hide-apply">Back to Sign in</button></div>` : ""}
       <div class="note tip">Other members of the public group see your <b>full name</b> and your <b>handicap index</b>, and nothing else. Your rounds stay private.</div>
-      ${stepsBlock([
+      ${auto ? stepsBlock([
+        "You send this application.",
+        "You get an email with a link. It comes from Firebase, which The Scorecard uses for accounts, and it sometimes lands in junk mail.",
+        "You tap the link, which confirms your email, and choose your password.",
+        "If the automatic checks pass, you are in the public group straight away. If not, a person reviews your application, usually within one or two days.",
+        "You can start entering your rounds.",
+      ]) : stepsBlock([
         "You send this application.",
         "A person reviews it, usually within one or two days.",
         "If it is approved, you get an email with a link to choose your password. It comes from Firebase, which The Scorecard uses for accounts, and it sometimes lands in junk mail.",
@@ -699,6 +727,64 @@ function screenApply() {
   </div>`;
 }
 
+/* beta.4: the applicant tapped the link in their email. */
+function screenFinishApply() {
+  return `<div class="stack">
+    ${flashBar()}
+    ${offlineAccountNote()}
+    <div class="card padded">
+      <h2 class="panel-title">Finish joining</h2>
+      <p class="hint">Your email is confirmed by this link. Type the same email, choose a password for The Scorecard, and you are done.</p>
+      <label class="lbl">Email</label>
+      <input class="field" name="email" type="email" value="${esc(authForm.email || db.rememberedApplyEmail())}" placeholder="you@example.com" autocomplete="username" autocapitalize="none">
+      <label class="lbl">Choose a password for this app</label>
+      <input class="field" name="password" type="password" placeholder="At least 6 characters" autocomplete="new-password">
+      <label class="lbl">The same password again</label>
+      <input class="field" name="password-again" type="password" placeholder="At least 6 characters" autocomplete="new-password">
+      <p class="hint"><b>Not your email password.</b> Pick a different one, for The Scorecard only.</p>
+      <div class="inline-actions stacked">
+        <button class="btn" data-act="finish-apply" ${joining ? "disabled" : ""}>${joining ? "Finishing…" : "Finish joining"}</button>
+      </div>
+    </div>
+    ${versionBlock()}
+  </div>`;
+}
+
+async function finishApplyHere() {
+  const fields = readNewAccountFields();
+  if (!fields) return;
+  joining = true;
+  busy("Finishing");
+  render();
+  try {
+    await db.finishApplyLink(fields);
+  } catch (err) {
+    joining = false; idle();
+    const code = String((err && (err.code || err.message)) || "");
+    if (/invalid-action-code|expired-action-code/.test(code)) {
+      db.clearJoinLink();
+      flashMsg("This link has expired or was already used. If you set a password, sign in with it; otherwise apply again.");
+    } else if (/invalid-email|user-mismatch/.test(code)) {
+      flashMsg("That is not the email the link was sent to. Type the email you applied with.");
+    } else {
+      flashMsg(`It did not finish: ${code || "no connection"}. Tap Finish joining again.`);
+    }
+    return render();
+  }
+  let result = { waiting: true };
+  try { result = await db.autoJoinPublic(); } catch { result = { waiting: true }; }
+  joining = false;
+  idleAll();
+  if (result.joined) {
+    await start(db.PUBLIC_ID);
+    tab = "enter";
+    flashMsg("Welcome to the public group. Post your rounds on the Enter tab.");
+  } else {
+    flashMsg("Your email is confirmed and your password is set. Your application now waits for a person to review it. You will get an email when it is approved.");
+  }
+  render();
+}
+
 async function submitApplicationHere() {
   const fullName = ((view.querySelector('[name="apply-name"]') || {}).value || "").trim();
   const email = ((view.querySelector('[name="apply-email"]') || {}).value || "").trim();
@@ -710,12 +796,22 @@ async function submitApplicationHere() {
   joining = true;
   busy("Sending your application");
   render();
+  applyInUse = "";
   try {
     await db.submitApplication({ fullName, email });
+    /* beta.4: with the switch on Auto and a plain name, the sign-in link goes
+       out now. If it cannot be sent, the application still waits for a
+       person, exactly as in Manual. */
+    applySentAuto = false;
+    const settings = applySettings || await db.readApplicationSettings();
+    if (settings.mode === "auto" && db.plainName(fullName)) {
+      try { await db.sendApplicationLink(email); applySentAuto = true; } catch { applySentAuto = false; }
+    }
     applySentTo = email;
   } catch (err) {
     const code = String((err && (err.code || err.message)) || "");
-    if (code.includes("app/exists")) flashMsg("There is already an application for that email. If it is approved, you will get an email.");
+    if (code.includes("app/in-use")) applyInUse = email;
+    else if (code.includes("app/exists")) flashMsg("There is already an application for that email. If it is approved, you will get an email.");
     else if (code.includes("app/email")) flashMsg("That email does not look right. Check it for a typo.");
     else if (code.includes("app/name")) flashMsg("Type your full name (up to 80 characters).");
     else flashMsg(`It was not sent: ${code || "no connection"}. Check the connection and try again.`);
@@ -732,11 +828,20 @@ async function checkPublicApproval() {
   /* Phase D: also learn, once per sign-in, whether this account may create groups. */
   await db.loadGroupCreator();
   watchRequestsIfCreator();
+  /* beta.4: record this account's email (for "already has an account"). */
+  db.ensureAccountEmail();
   let result;
   try { result = await db.joinPublicIfApproved(); }
   catch (e) {
     flashMsg("Your approval for the public group was found, but joining did not finish. Open the app again to retry.");
     return;
+  }
+  /* beta.4: an automatic join that stopped part-way finishes here; an
+     application still pending tries Auto again (the switch, the checks and
+     the daily limit are all re-checked). */
+  if (result && result.joined) { try { await db.finishPublicJoin(); } catch {} }
+  else if (db.emailConfirmed()) {
+    try { const auto = await db.autoJoinPublic(); if (auto && auto.joined) result = { joined: true }; } catch {}
   }
   if (!result || !result.joined) return;
   if (!db.currentAssociation()) {
@@ -931,7 +1036,19 @@ function openApproveSheet(key) {
       <button class="btn" data-pc="approve" data-id="${esc(a.key)}">Approve and send the email</button>
     </div>
     <p class="hint">They get an email from Firebase to choose their password, then they sign in and they are in.</p>
+    <p class="hint" data-name-note></p>
   </div>`;
+  /* beta.4 (Willy, Oct 1): if the name is taken, the next free number is
+     filled in: the first golfer keeps the plain name, then "Name 1", "Name 2". */
+  if (!a.golferName) {
+    db.nextFreeName(a.fullName).then((free) => {
+      const input = sheetEl.querySelector('[name="approve-name"]');
+      if (!input || sheetEl.hidden || input.value !== a.fullName || free === a.fullName) return;
+      input.value = free;
+      const note = sheetEl.querySelector("[data-name-note]");
+      if (note) note.textContent = `A golfer called ${a.fullName} already exists, so the next number is filled in. You can change it.`;
+    }).catch(() => {});
+  }
 }
 
 /* Phase D: what an admin (not the owner) sees of the members: the regular
@@ -944,7 +1061,7 @@ function adminMembersSection() {
   return `<section class="panel">
     <div class="panel-head"><h2 class="panel-title">Members</h2></div>
     <div class="card list">
-      ${list.map((m) => `<div class="list-row">
+      ${list.map((m) => `<div class="list-row person-row">
         <span class="grow"><span class="name">${esc(m.displayName || "Unnamed")}</span><br><span class="sub">${label(m)}${m.uid === mine ? " · you" : ""}</span></span>
         ${m.role === "member" && m.uid !== mine ? `<button class="rowbtn warn" data-drop-member="${esc(m.uid)}">Remove from group</button>` : ""}
       </div>`).join("")}
@@ -1017,6 +1134,8 @@ function newAccountFields() {
 /* Nobody signed in. With an invitation or a code, the account comes first
    (create one, or sign in to an existing one); otherwise it is Sign in. */
 function screenSignedOut(invite) {
+  /* beta.4: arrived from the "finish joining" email of an Auto application. */
+  if (!invite && db.isApplyLink()) return screenFinishApply();
   if (!invite && !showCodeEntry) {
     if (signedOutStep === "code") return screenCodeFirst();
     if (signedOutStep === "choose") return screenChoose();
@@ -1752,6 +1871,8 @@ function screenHistory() {
 /* ================= summary ================= */
 
 function screenSummary() {
+  /* beta.4: "My season" at the top for anyone who plays in this group. */
+  const season = (() => { try { return mySeasonCard(); } catch { return ""; } })();
   if (!rounds.length) {
     return `${flashBar()}
     <section class="panel">
@@ -1785,6 +1906,7 @@ function screenSummary() {
   const stat = (l) => `${l.length} round${l.length === 1 ? "" : "s"} · avg ${(l.reduce((a, r) => a + r.gross, 0) / l.length).toFixed(1)} · best diff ${Math.min(...l.map((r) => +r.differential)).toFixed(1)}`;
 
   return `${flashBar()}
+  ${season}
   <section class="panel">
     <div class="panel-head"><h2 class="panel-title">Handicap Index</h2>
       <button class="linkbtn" data-act="share-indexes">Share</button></div>
@@ -2562,22 +2684,353 @@ function groupSwitcher() {
   </div>`;
 }
 
+/* ======================= beta.4: Admin tabs and the cockpit =======================
+   Approved by Willy (Oct 1): the Admin tab gets four tabs at its top. Every
+   section of the old Admin page moves, unchanged, into one of them: People to
+   Members (exactly as before), Group / Import / Backup / Course lookup /
+   Account to Settings, Group requests / Applications / Reports to
+   Applications. A group admin who is not the owner sees Cockpit and Members
+   (plus Applications in the public group). */
+
+function adminTabs() {
+  const tabs = [{ id: "cockpit", label: "Cockpit" }];
+  if (db.canCreateGroups() || db.isPublicGroup()) tabs.push({ id: "applications", label: "Applications" });
+  tabs.push({ id: "members", label: "Members" });
+  if (db.isOwner()) tabs.push({ id: "settings", label: "Settings" });
+  return tabs;
+}
+
+function adminTabBar(tabs, active) {
+  return `<div class="subtabs n${tabs.length}" role="tablist">${tabs.map((t) =>
+    `<button class="subtab ${t.id === active ? "on" : ""}" role="tab" aria-selected="${t.id === active}" data-act="admin-tab" data-id="${t.id}">${t.label}${
+      t.id === "applications" && waitingCount() ? ` <span class="subtab-count">${waitingCount()}</span>` : ""}</button>`).join("")}</div>`;
+}
+
+function waitingCount() {
+  return (db.canCreateGroups() ? groupRequests.length : 0)
+    + (db.isPublicGroup() ? applications.length + publicReports.length : 0);
+}
+
+const daysAgo = (ms) => {
+  if (!ms) return "";
+  const start = new Date(); start.setHours(0, 0, 0, 0);
+  if (ms >= start.getTime()) return "Today";
+  const d = Math.ceil((start.getTime() - ms) / 86400000);
+  return d <= 1 ? "Yesterday" : `${d} days ago`;
+};
+const seenMs = (m) => (m && m.lastSeenAt ? (typeof m.lastSeenAt.toMillis === "function" ? m.lastSeenAt.toMillis()
+  : (m.lastSeenAt.seconds ? m.lastSeenAt.seconds * 1000 : 0)) : (m && m.lastSeen) || 0);
+const monthKey = (offset = 0) => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() + offset);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; };
+const MONTH_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+function tile(n, label, warn = false) {
+  return `<div class="ck-tile${warn ? " warn" : ""}"><span class="ck-num">${n}</span><span class="ck-lab">${label}</span></div>`;
+}
+
+/* ---- the mini cockpit: one group, from what the app already holds ---- */
+function miniCockpitSection() {
+  const now = Date.now();
+  const week = now - 7 * 86400000;
+  const claimed = new Set(members.map((m) => m.golferId).filter(Boolean));
+  const waiting = sortedGolfers().filter((g) => g.invitedAt && !g.linkedUid && !claimed.has(g.id));
+  const groupRounds = rounds.filter((r) => typeof r.date === "string");
+  const thisMonth = groupRounds.filter((r) => r.date.slice(0, 7) === monthKey(0)).length;
+  const lastMonth = groupRounds.filter((r) => r.date.slice(0, 7) === monthKey(-1)).length;
+  const last = [...groupRounds].sort((a, b) => b.date.localeCompare(a.date))[0];
+  const seen = [...members].sort((a, b) => seenMs(b) - seenMs(a));
+  const active = members.filter((m) => seenMs(m) >= week).length;
+  return `<section class="panel">
+    <div class="panel-head"><h2 class="panel-title">${esc(association ? association.name : "This group")}</h2></div>
+    <p class="hint" style="margin-top:0">This group only.</p>
+    <div class="ck-tiles">
+      ${tile(members.length, "Members")}
+      ${tile(active, "Active in 7 days")}
+      ${tile(waiting.length, "Invitations not used", waiting.length > 0)}
+      ${tile(thisMonth, "Rounds this month")}
+    </div>
+  </section>
+  <section class="panel">
+    <div class="panel-head"><h2 class="panel-title">Last seen</h2></div>
+    <div class="card list">${seen.map((m) => `<div class="list-row">
+      <span class="grow"><span class="name">${esc(m.displayName || "Unnamed")}</span><br><span class="sub">${esc(m.role === "member" ? "member" : m.role)}</span></span>
+      <span class="ck-when">${seenMs(m) ? daysAgo(seenMs(m)) : "Not seen yet"}</span></div>`).join("") || `<p class="blank">Nobody yet.</p>`}</div>
+    <p class="hint">"Not seen yet" means not since this version, which started counting on its first day.</p>
+  </section>
+  ${waiting.length ? `<section class="panel">
+    <div class="panel-head"><h2 class="panel-title">Never opened the app</h2></div>
+    <div class="card list">${waiting.map((g) => `<div class="list-row person-row">
+      <span class="grow"><span class="name">${esc(g.name)}</span><br><span class="sub">Invited${g.invitedAt ? ` ${esc(new Date(g.invitedAt).toLocaleDateString())}` : ""}</span></span>
+      ${db.isPublicGroup() ? "" : `<button class="rowbtn" data-invite-golfer="${esc(g.id)}">Invite again</button>`}</div>`).join("")}</div>
+  </section>` : ""}
+  <section class="panel">
+    <div class="panel-head"><h2 class="panel-title">Rounds</h2></div>
+    <div class="ck-tiles">${tile(thisMonth, "This month")}${tile(lastMonth, "Last month")}</div>
+    <p class="hint">${last ? `Last round: ${esc((golferById(last.golferId) || {}).name || "a golfer")}, ${esc(last.date)}${last.courseName ? `, ${esc(last.courseName)}` : ""}.` : "No rounds yet."}</p>
+  </section>`;
+}
+
+/* ---- the owner cockpit: every group (the group creator only) ---- */
+let ownerCockpit = null;          /* loaded data, or null */
+let ownerCockpitState = "idle";   /* idle | loading | ready | failed */
+let ownerCockpitError = "";
+let cockpitGroup = null;          /* a group opened from the Groups list */
+let appSettings = null;           /* { mode, dailyLimit } for the Applications tab */
+
+async function loadOwnerCockpitHere() {
+  ownerCockpitState = "loading"; render();
+  try {
+    ownerCockpit = await db.loadOwnerCockpit();
+    ownerCockpitState = "ready";
+  } catch (e) {
+    ownerCockpitState = "failed";
+    ownerCockpitError = String((e && (e.code || e.message)) || "no connection");
+  }
+  if (!appSettings) { try { appSettings = await db.readApplicationSettings(); } catch {} }
+  render();
+}
+
+function ownerSummary(data) {
+  const now = Date.now();
+  const startToday = new Date(); startToday.setHours(0, 0, 0, 0);
+  const people = new Map();
+  for (const m of data.members) {
+    const p = people.get(m.uid) || { uid: m.uid, name: m.displayName, lastSeen: 0, groups: [] };
+    p.lastSeen = Math.max(p.lastSeen, m.lastSeen || 0);
+    if (!p.name && m.displayName) p.name = m.displayName;
+    p.groups.push(m.assocId);
+    people.set(m.uid, p);
+  }
+  const everyone = [...people.values()];
+  const groupName = new Map(data.groups.map((g) => [g.id, g.id === db.PUBLIC_ID ? "Public group" : g.name]));
+  const byGroup = data.groups.map((g) => {
+    const ms = data.members.filter((m) => m.assocId === g.id);
+    const rs = data.rounds.filter((r) => r.assocId === g.id);
+    const owner = ms.find((m) => m.uid === g.ownerUid) || ms.find((m) => m.role === "owner");
+    const lastRound = rs.map((r) => r.date).sort().pop() || "";
+    return {
+      id: g.id, name: groupName.get(g.id), ownerUid: g.ownerUid,
+      ownerName: g.ownerUid === data.me ? "you" : ((owner && owner.displayName) || "someone else"),
+      members: ms.length, admins: ms.filter((m) => m.role === "admin").length,
+      active30: ms.filter((m) => m.lastSeen >= now - 30 * 86400000).length,
+      roundsThisMonth: rs.filter((r) => r.date.slice(0, 7) === monthKey(0)).length,
+      lastRound,
+      quiet: !rs.some((r) => r.date >= isoDaysAgo(90)),
+    };
+  }).sort((a, b) => (b.active30 - a.active30) || (b.roundsThisMonth - a.roundsThisMonth) || a.name.localeCompare(b.name));
+  const months = [-5, -4, -3, -2, -1, 0].map((o) => {
+    const k = monthKey(o);
+    return { key: k, label: MONTH_SHORT[+k.slice(5, 7) - 1], count: data.rounds.filter((r) => r.date.slice(0, 7) === k).length };
+  });
+  return {
+    people: everyone.length,
+    active7: everyone.filter((p) => p.lastSeen >= now - 7 * 86400000).length,
+    today: everyone.filter((p) => p.lastSeen >= startToday.getTime()).length,
+    active30: everyone.filter((p) => p.lastSeen >= now - 30 * 86400000).length,
+    notSeen: everyone.filter((p) => !p.lastSeen).length,
+    recent: everyone.filter((p) => p.lastSeen).sort((a, b) => b.lastSeen - a.lastSeen).slice(0, 5)
+      .map((p) => ({ ...p, groupLabel: p.groups.map((id) => groupName.get(id)).filter(Boolean).slice(0, 2).join(", ") })),
+    groups: byGroup, months,
+    roundsThisMonth: data.rounds.filter((r) => r.date.slice(0, 7) === monthKey(0)).length,
+    notMine: byGroup.filter((g) => g.ownerUid !== data.me),
+    quiet: byGroup.filter((g) => g.quiet),
+  };
+}
+const isoDaysAgo = (n) => { const d = new Date(Date.now() - n * 86400000);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+
+function ownerCockpitSection() {
+  if (ownerCockpitState === "idle") { setTimeout(loadOwnerCockpitHere, 0); return `<section class="panel"><p class="hint">Counting…</p></section>`; }
+  if (ownerCockpitState === "loading" && !ownerCockpit) return `<section class="panel"><p class="hint">Counting…</p></section>`;
+  if (ownerCockpitState === "failed" && !ownerCockpit) return `<section class="panel"><div class="note warn">The cockpit could not be counted (${esc(ownerCockpitError)}). The database rules for this version may not be published yet.</div>
+    <div class="inline-actions stacked"><button class="btn ghost" data-act="cockpit-refresh">Try again</button></div></section>`;
+  if (cockpitGroup) return otherGroupCockpit(cockpitGroup);
+  const s = ownerSummary(ownerCockpit);
+  const waitingApps = db.isPublicGroup() ? applications.length : null;
+  const maxMonth = Math.max(1, ...s.months.map((m) => m.count));
+  return `<section class="panel">
+    <div class="panel-head"><h2 class="panel-title">Cockpit</h2>
+      <button class="linkbtn" data-act="cockpit-refresh">${ownerCockpitState === "loading" ? "Counting…" : "Refresh"}</button></div>
+    <p class="hint" style="margin-top:0">All groups. Counted when you open it.</p>
+    <div class="ck-tiles">
+      ${tile(s.people, "Members, all groups")}
+      ${tile(s.active7, "Active in 7 days")}
+      ${tile(waitingCount(), "Waiting for you", waitingCount() > 0)}
+      ${tile(s.roundsThisMonth, "Rounds this month")}
+    </div>
+  </section>
+  <section class="panel">
+    <div class="panel-head"><h2 class="panel-title">Sign-ins</h2></div>
+    <div class="ck-tiles">
+      ${tile(s.today, "Today")}
+      ${tile(s.active30, "In 30 days")}
+      ${tile(s.notSeen, "Not seen yet")}
+      ${tile(s.groups.length, "Groups")}
+    </div>
+    ${s.recent.length ? `<div class="card list" style="margin-top:0.7rem">${s.recent.map((p) => `<div class="list-row">
+      <span class="grow"><span class="name">${esc(p.name || "Unnamed")}</span><br><span class="sub">${esc(p.groupLabel)}</span></span>
+      <span class="ck-when">${daysAgo(p.lastSeen)}</span></div>`).join("")}</div>` : ""}
+    <p class="hint">"Not seen yet" counts from this version on; Firebase's own sign-in history is in cnt.txt.</p>
+  </section>
+  <section class="panel">
+    <div class="panel-head"><h2 class="panel-title">Waiting for you</h2></div>
+    <div class="card list">
+      <div class="list-row"><span class="grow name">Applications</span><span class="ck-when">${waitingApps == null ? "open the public group" : waitingApps}</span></div>
+      <div class="list-row"><span class="grow name">Group requests</span><span class="ck-when">${groupRequests.length}</span></div>
+      <div class="list-row"><span class="grow name">Switch, public group</span><span class="ck-when">${appSettings ? (appSettings.mode === "auto" ? "Auto" : "Manual") : "…"}</span></div>
+    </div>
+    <div class="inline-actions stacked"><button class="btn" data-act="admin-tab" data-id="applications">Open Applications</button></div>
+  </section>
+  <section class="panel">
+    <div class="panel-head"><h2 class="panel-title">Groups</h2><span class="panel-count">${s.groups.length}</span></div>
+    <div class="card list">${s.groups.map((g) => `<button class="list-row ck-group" data-act="cockpit-group" data-id="${esc(g.id)}">
+      <span class="grow"><span class="name">${esc(g.name)}</span><br>
+        <span class="sub">${g.members} member${g.members === 1 ? "" : "s"} · ${g.admins} admin${g.admins === 1 ? "" : "s"} · owner ${esc(g.ownerName)}${g.lastRound ? ` · last round ${esc(g.lastRound)}` : ""}</span></span>
+      <span class="ck-when">${g.active30} active<br>${g.roundsThisMonth} rounds</span></button>`).join("")}</div>
+    <p class="hint">Active = seen in the last 30 days. Rounds = this month. Tap a group to see it.</p>
+  </section>
+  <section class="panel">
+    <div class="panel-head"><h2 class="panel-title">Rounds, all groups</h2></div>
+    ${ownerCockpit.roundsError ? `<div class="note">The rounds count needs a database index that the rules script adds. It appears once that has run.</div>` : `
+    <div class="ck-bars" role="img" aria-label="Rounds per month, last 6 months">${s.months.map((m) => `<div class="ck-barcol">
+      <span class="ck-barnum">${m.count}</span><span class="ck-bar" style="height:${Math.round((m.count / maxMonth) * 100)}%"></span><span class="ck-barlab">${m.label}</span></div>`).join("")}</div>
+    <p class="hint">${MONTH_SHORT[new Date().getMonth()]} so far.</p>`}
+  </section>
+  <section class="panel">
+    <div class="panel-head"><h2 class="panel-title">Housekeeping</h2></div>
+    <div class="card list">
+      <div class="list-row"><span class="grow name">Groups quiet for 90 days</span><span class="ck-when">${s.quiet.length}</span></div>
+      <div class="list-row"><span class="grow name">Groups not owned by you</span><span class="ck-when">${s.notMine.length}</span></div>
+      <div class="list-row"><span class="grow"><span class="name">Old guest sign-ins</span><br><span class="sub">Counted by cnt.txt only</span></span></div>
+    </div>
+    ${s.notMine.length ? `<details class="danger-drawer" style="margin-top:0.6rem"><summary>See the ${s.notMine.length} groups not owned by you</summary>
+      <div class="card list">${s.notMine.map((g) => `<div class="list-row"><span class="grow"><span class="name">${esc(g.name)}</span><br>
+        <span class="sub">owner ${esc(g.ownerName)} · ${g.members} member${g.members === 1 ? "" : "s"}${g.lastRound ? ` · last round ${esc(g.lastRound)}` : " · no rounds in 6 months"}</span></span></div>`).join("")}</div></details>` : ""}
+    <div class="inline-actions stacked"><button class="btn ghost" data-act="open-tool" data-tool="tidy">Open Tidy</button></div>
+    <p class="hint">Nothing here deletes anything.</p>
+  </section>`;
+}
+
+/* A group opened from the owner's Groups list (it may be one Willy is not in). */
+function otherGroupCockpit(groupId) {
+  const data = ownerCockpit;
+  const g = data.groups.find((x) => x.id === groupId);
+  const ms = data.members.filter((m) => m.assocId === groupId).sort((a, b) => (b.lastSeen || 0) - (a.lastSeen || 0));
+  const rs = data.rounds.filter((r) => r.assocId === groupId);
+  const week = Date.now() - 7 * 86400000;
+  const lastRound = [...rs].sort((a, b) => b.date.localeCompare(a.date))[0];
+  return `<section class="panel">
+    <div class="inline-actions"><button class="btn ghost compact" data-act="cockpit-group" data-id="">Back to all groups</button></div>
+    <div class="panel-head" style="margin-top:0.8rem"><h2 class="panel-title">${esc(g ? (g.id === db.PUBLIC_ID ? "Public group" : g.name) : "Group")}</h2></div>
+    <div class="ck-tiles">
+      ${tile(ms.length, "Members")}
+      ${tile(ms.filter((m) => m.lastSeen >= week).length, "Active in 7 days")}
+      ${tile(rs.filter((r) => r.date.slice(0, 7) === monthKey(0)).length, "Rounds this month")}
+      ${tile(rs.filter((r) => r.date.slice(0, 7) === monthKey(-1)).length, "Rounds last month")}
+    </div>
+  </section>
+  <section class="panel">
+    <div class="panel-head"><h2 class="panel-title">Last seen</h2></div>
+    <div class="card list">${ms.map((m) => `<div class="list-row">
+      <span class="grow"><span class="name">${esc(m.displayName || "Unnamed")}</span><br><span class="sub">${esc(m.role)}</span></span>
+      <span class="ck-when">${m.lastSeen ? daysAgo(m.lastSeen) : "Not seen yet"}</span></div>`).join("") || `<p class="blank">Nobody.</p>`}</div>
+    <p class="hint">${lastRound ? `Last round: ${esc(lastRound.date)}${lastRound.courseName ? `, ${esc(lastRound.courseName)}` : ""}.` : "No rounds in the last 6 months."} To manage this group's people, open the group itself.</p>
+  </section>`;
+}
+
+/* ---- the Applications tab ---- */
+let blockLists = { emails: [], domains: [], names: [] };
+let blockWatched = false;
+
+function applicationsTab() {
+  const parts = [];
+  if (db.canCreateGroups()) parts.push(safe("Group requests", groupRequestsSection));
+  if (db.isPublicGroup()) {
+    if (!appSettings) setTimeout(async () => { appSettings = await db.readApplicationSettings(); render(); }, 0);
+    if (!blockWatched && db.canManage()) { blockWatched = true; db.watchBlockList((l) => { blockLists = l; render(); }); }
+    parts.push(safe("Switch", switchSection));
+    parts.push(safe("Applications", applicationsSection));
+    parts.push(safe("Reports", reportsSection));
+    parts.push(safe("Block list", blockListSection));
+  } else if (db.canCreateGroups()) {
+    parts.push(`<section class="panel"><div class="note">Applications to the public group, its switch and its block list are here when the public group is open. Tap the group name at the top to switch to it.</div></section>`);
+  }
+  return parts.join("");
+}
+
+function switchSection() {
+  const mode = appSettings ? appSettings.mode : null;
+  return `<section class="panel">
+    <div class="panel-head"><h2 class="panel-title">Public group applications</h2></div>
+    <div class="seg" role="radiogroup" aria-label="Applications switch">
+      <button class="seg-b ${mode === "manual" ? "on" : ""}" role="radio" aria-checked="${mode === "manual"}" data-act="set-switch" data-id="manual">Manual</button>
+      <button class="seg-b ${mode === "auto" ? "on" : ""}" role="radio" aria-checked="${mode === "auto"}" data-act="set-switch" data-id="auto">Auto</button>
+    </div>
+    <p class="hint">${mode === "auto"
+      ? `Auto: when every check passes, the applicant is emailed a sign-in link. Tapping it confirms the email, they choose a password and they are in. Any failed check waits for you. At most ${appSettings.dailyLimit} a day.`
+      : mode === "manual" ? "Manual: every application waits for you, as today." : "Reading the switch…"}</p>
+  </section>`;
+}
+
+function blockListSection() {
+  const kinds = [["emails", "Blocked emails", "name@example.com"], ["domains", "Blocked email domains", "example.com"], ["names", "Blocked names", "Full name"]];
+  return `<section class="panel">
+    <div class="panel-head"><h2 class="panel-title">Block list</h2></div>
+    <p class="hint" style="margin-top:0">An application matching any of these is never approved automatically; it waits for you.</p>
+    ${kinds.map(([kind, title, ph]) => `<div class="card padded" style="margin-top:0.6rem">
+      <div class="name">${title} <span class="panel-count">${blockLists[kind].length}</span></div>
+      ${blockLists[kind].length ? `<div class="list">${blockLists[kind].map((k) => `<div class="list-row person-row">
+        <span class="grow mono">${esc(k)}</span><button class="rowbtn warn" data-act="unblock" data-kind="${kind}" data-id="${esc(k)}">Remove</button></div>`).join("")}</div>` : `<p class="blank">None.</p>`}
+      <div class="inline-actions" style="margin-top:0.5rem">
+        <input class="field" name="block-${kind}" placeholder="${ph}" autocapitalize="none" style="flex:1 1 12rem">
+        <button class="btn compact" data-act="block-add" data-kind="${kind}">Add</button>
+      </div>
+    </div>`).join("")}
+  </section>`;
+}
+
+function settingsTab() {
+  return `${safe("Group", groupSection)}
+  ${safe("Import", importSection)}
+  ${safe("Backup", backupSection)}
+  ${safe("Course lookup", lookupSection)}
+  ${safe("Account", accountSection)}`;
+}
+
+/* ---- My season (regular members, top of Summary): their own data only ---- */
+function mySeasonCard() {
+  const mine = db.myGolferId(rawGolfers);
+  if (!mine) return "";
+  const golfer = golferById(mine);
+  if (!golfer) return "";
+  const myRounds = rounds.filter((r) => r.golferId === mine && typeof r.date === "string");
+  const year = String(new Date().getFullYear());
+  const thisYear = myRounds.filter((r) => r.date.startsWith(year)).length;
+  const now = shownIndex(golfer);
+  const cutoff = isoDaysAgo(183);
+  let window = [];
+  for (const r of [...myRounds].filter((r) => r.date <= cutoff && Number.isFinite(+r.differential)).sort((a, b) => a.date.localeCompare(b.date))) {
+    window = model.insertIntoWindow(window, { roundId: r.id, date: r.date, differential: +r.differential, assocId: r.assocId });
+  }
+  const then = window.length >= 3 ? model.displayIndex(window) : null;
+  const move = now != null && then != null ? Math.round((now - then) * 10) / 10 : null;
+  return `<section class="panel my-season">
+    <div class="panel-head"><h2 class="panel-title">My season</h2></div>
+    <div class="ck-tiles">
+      ${tile(thisYear, `Rounds in ${year}`)}
+      ${tile(now == null ? "–" : now.toFixed(1), "Handicap index now")}
+    </div>
+    <p class="hint">${move == null ? "Your 6-month trend appears once you have rounds from 6 months ago."
+      : move === 0 ? "Your index is the same as 6 months ago."
+      : move < 0 ? `Your index is down ${Math.abs(move).toFixed(1)} since 6 months ago. Well played.`
+      : `Your index is up ${move.toFixed(1)} since 6 months ago.`}</p>
+  </section>`;
+}
+
 function screenAdmin() {
-  /* An admin without an account still needs the password form, and the rest of
-     this tab is the owner's. So the form is shown here on its own rather than
-     turning them away with nothing — being told "not your area" while holding
-     a real admin role is exactly what looked like a broken button. */
-  if (!db.isOwner()) {
-    /* Phase D: an admin removes regular members of this group. Phase C: an
-       admin of the PUBLIC group also reviews applications and reports. */
-    if (db.canManage()) {
-      return `${flashBar()}
-        ${db.isPublicGroup() ? safe("Applications", applicationsSection) : ""}
-        ${db.isPublicGroup() ? safe("Reports", reportsSection) : ""}
-        ${safe("Members", adminMembersSection)}
-        ${db.needsPassword() ? safe("Set a password", passwordPrompt) : ""}
-        ${versionBlock()}`;
-    }
+  /* Somebody who manages nothing still needs the password form if they have
+     a role on this device only; otherwise this tab is not theirs. */
+  if (!db.canManage()) {
     if (db.needsPassword()) {
       return `${flashBar()}
         ${safe("Set a password", passwordPrompt)}
@@ -2586,17 +3039,19 @@ function screenAdmin() {
     return empty("Not your area", "Only the group owner manages people and settings.");
   }
 
+  /* beta.4: the four tabs. "Set a password" stays above them, on every tab,
+     until it is done. */
+  const tabs = adminTabs();
+  if (!tabs.some((t) => t.id === adminTab)) adminTab = "cockpit";
+  let body = "";
+  if (adminTab === "cockpit") body = db.canCreateGroups() ? safe("Cockpit", ownerCockpitSection) : safe("Cockpit", miniCockpitSection);
+  else if (adminTab === "applications") body = applicationsTab();
+  else if (adminTab === "members") body = db.isOwner() ? safe("People", peopleSection) : safe("Members", adminMembersSection);
+  else if (adminTab === "settings") body = settingsTab();
   return `${flashBar()}
-  ${db.canCreateGroups() ? safe("Group requests", groupRequestsSection) : ""}
-  ${db.isPublicGroup() ? safe("Applications", applicationsSection) : ""}
-  ${db.isPublicGroup() ? safe("Reports", reportsSection) : ""}
-  ${safe("Set a password", passwordPrompt)}
-  ${safe("People", peopleSection)}
-  ${safe("Group", groupSection)}
-  ${safe("Import", importSection)}
-  ${safe("Backup", backupSection)}
-  ${safe("Course lookup", lookupSection)}
-  ${safe("Account", accountSection)}
+  ${db.needsPassword() ? safe("Set a password", passwordPrompt) : ""}
+  ${adminTabBar(tabs, adminTab)}
+  ${body}
   ${versionBlock()}`;
 }
 
@@ -2704,7 +3159,7 @@ function peopleSection() {
       <span class="panel-count">${people.length || ""}</span></div>
     <div class="card">
       <div class="list">
-        ${people.length ? people.map((p) => `<div class="list-row">
+        ${people.length ? people.map((p) => `<div class="list-row person-row">
           <span class="grow"><span class="name">${esc(p.name)}</span><br>
             <span class="sub">${roleLabel(p.role)}${p.you ? " · you" : ""} ·
               <span class="invite-state ${p.state}">${p.state === "joined" ? "invitation used" : "not used yet"}</span>${
@@ -3599,10 +4054,7 @@ function render({ force = false } = {}) {
     try {
       const btn = document.getElementById("statusBtn");
       const sync = db.status();
-      if (btn) {
-        btn.textContent = sync.text;
-        btn.classList.toggle("alert", !!sync.alert);
-      }
+      if (btn) paintStatus(btn, sync);
       paintBusy();
       paintAlert();
     } catch { /* cosmetic only */ }
@@ -3676,12 +4128,23 @@ function renderNow() {
       <button class="btn" data-act="recover">Back to Enter</button>
       <details><summary>Technical detail</summary><pre>${esc(e && e.message)}</pre></details></div>`;
   }
-  const btn = document.getElementById("statusBtn");
-  btn.textContent = sync.text;
-  btn.classList.toggle("alert", !!sync.alert);
+  paintStatus(document.getElementById("statusBtn"), sync);
   paintBusy();
   paintAlert();
   if (window.__scorecardBooted) window.__scorecardBooted();
+}
+
+/* beta.4: the status pill. On a narrow screen a plain "Connected" shrinks to
+   a green dot (tap it for the words), so the header always fits on one line;
+   anything else (offline, waiting writes, a problem) keeps its words. */
+function paintStatus(btn, s) {
+  if (!btn) return;
+  const text = String((s && s.text) || "");
+  const plain = text === "Connected" && !(s && s.alert);
+  btn.innerHTML = `<span class="status-dot" aria-hidden="true"></span><span class="status-label">${esc(text)}</span>`;
+  btn.classList.toggle("alert", !!(s && s.alert));
+  btn.classList.toggle("plain", plain);
+  btn.setAttribute("aria-label", text);
 }
 
 let dismissed = "";
@@ -4432,9 +4895,14 @@ view.addEventListener("click", async (e) => {
       platform.openExternal(platform.conductUrl(), "tab");
       return;
     case "create-account": return createAccountHere();
-    case "show-apply": signedOutStep = "member"; applySentTo = ""; return render();
+    case "show-apply":
+      signedOutStep = "member"; applySentTo = ""; applyInUse = "";
+      render();
+      applySettings = await db.readApplicationSettings();
+      return render();
     case "hide-apply": signedOutStep = null; applySentTo = ""; requestSentTo = ""; return render();
     case "submit-application": return submitApplicationHere();
+    case "finish-apply": return finishApplyHere();
     case "send-confirmation": {
       busy("Sending the confirmation email");
       try { await db.sendEmailConfirmation(); confirmationSent = true; flashMsg("Sent. Open the link in the email, then tap Continue."); }
@@ -4464,6 +4932,35 @@ view.addEventListener("click", async (e) => {
     }
     case "review-application": return openApproveSheet(d.id);
     case "approve-request": return approveRequestHere(d.id);
+    case "admin-tab": adminTab = d.id || "cockpit"; cockpitGroup = null; window.scrollTo && window.scrollTo(0, 0); return render();
+    case "cockpit-refresh": return loadOwnerCockpitHere();
+    case "cockpit-group": cockpitGroup = d.id || null; window.scrollTo && window.scrollTo(0, 0); return render();
+    case "set-switch": {
+      if (!appSettings || appSettings.mode === d.id) return;
+      busy("Changing the switch");
+      try { appSettings = await db.saveApplicationSettings({ mode: d.id, dailyLimit: appSettings.dailyLimit });
+        flashMsg(appSettings.mode === "auto" ? "The switch is on Auto." : "The switch is on Manual."); }
+      catch (e) { flashMsg(`The switch did not change: ${String((e && (e.code || e.message)) || "no connection")}.`); }
+      finally { idle(); }
+      return render();
+    }
+    case "block-add": {
+      const input = view.querySelector(`[name="block-${d.kind}"]`);
+      const value = ((input || {}).value || "").trim();
+      if (!value) { flashMsg("Type what to block first."); return; }
+      busy("Adding to the block list");
+      try { const key = await db.addBlock(d.kind, value); flashMsg(`${key} is on the block list.`); }
+      catch (e) { flashMsg(`It was not added: ${String((e && (e.code || e.message)) || "no connection")}.`); }
+      finally { idle(); }
+      return render();
+    }
+    case "unblock": {
+      busy("Removing from the block list");
+      try { await db.removeBlock(d.kind, d.id); flashMsg(`${d.id} is off the block list.`); }
+      catch (e) { flashMsg(`It was not removed: ${String((e && (e.code || e.message)) || "no connection")}.`); }
+      finally { idle(); }
+      return render();
+    }
     case "decline-request": {
       if (confirmDecline !== d.id) {
         confirmDecline = d.id;
@@ -5916,6 +6413,10 @@ async function start(assocId) {
   if (!member) return;
   association = await db.loadAssociation(assocId);
   if (association) lookup.setSharedKey(association.lookupKey || "");
+  /* beta.4: "last seen" for the cockpit (at most twice a day; quiet). */
+  db.stampLastSeen();
+  /* A new group: the cockpit shows the new group's numbers. */
+  ownerCockpit = null; ownerCockpitState = "idle"; cockpitGroup = null; blockWatched = false; blockLists = { emails: [], domains: [], names: [] };
   db.stopWatching();
   db.watchAssociation((doc) => {
     association = doc;

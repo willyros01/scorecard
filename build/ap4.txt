@@ -1,0 +1,199 @@
+#!/usr/bin/env bash
+# The Scorecard — COCKPIT AND APPLICATIONS SWITCH (2.30.0-beta.4), prepared by Claude, Oct 1, 2026
+#
+# Apply:    bash ap4.txt
+# Verify:   bash ap4.txt verify
+# Rollback: bash ap4.txt rollback
+#
+# What it does (it shows what changes and waits for you to type yes):
+#   1. checks the published rules are exactly the ones rq3.txt published;
+#   2. adds what the new version needs, without changing anything that exists:
+#      each account's email (for "this email already has an account"), the
+#      applications switch set to Manual with 20 a day, common throwaway email
+#      domains on the block list, and a database index for the cockpit;
+#   3. switches on Firebase's "Email link sign-in" (for Auto), keeping
+#      password sign-in exactly as it is, and allows www.cuberoot-systems.com
+#      as the address the link opens;
+#   4. publishes the new rules (cockpit, switch, block lists, Auto);
+#   5. checks everything.
+# If step 3 or 4 fails, everything is put back by itself. Rollback puts the
+# earlier rules and the Firebase setting back at any time.
+#
+# Run it in Google Cloud Shell, signed in with the Google account that owns
+# the Firebase project scorecard-f41b8.
+
+# ---------------------------------------------------------------------------
+# THE GOOGLE PROJECT — defined first, before any command runs.
+# ---------------------------------------------------------------------------
+PROJECT_ID="scorecard-f41b8"
+unset CLOUDSDK_CORE_PROJECT GOOGLE_CLOUD_PROJECT
+
+set -Eeuo pipefail
+
+echo "Switching Cloud Shell to project ${PROJECT_ID} ..."
+gcloud config set project "${PROJECT_ID}" --quiet >/dev/null 2>&1 || { echo "ERROR: could not switch to project ${PROJECT_ID}. Nothing changed." >&2; exit 1; }
+CURRENT_PROJECT="$(gcloud config get-value project 2>/dev/null)"
+[[ "${CURRENT_PROJECT}" == "${PROJECT_ID}" ]] || { echo "ERROR: Cloud Shell is on '${CURRENT_PROJECT}', not ${PROJECT_ID}. Nothing changed." >&2; exit 1; }
+echo "OK: Cloud Shell is now on project ${CURRENT_PROJECT}."
+export CLOUDSDK_CORE_PROJECT="${PROJECT_ID}"
+export GOOGLE_CLOUD_PROJECT="${PROJECT_ID}"
+
+MODE="${1:-apply}"
+COMMIT="PIN_ME"                                              # v2 branch, tested: the new rules and data step
+LIVE_COMMIT="747678bf321754269dd962343ec0a2ed4a312a66"      # the rules rq3.txt published (Oct 1)
+RAW="https://raw.githubusercontent.com/willyros01/scorecard"
+STATE="$(pwd)/scorecard-ap4-backup"
+WORK="$(pwd)/scorecard-ap4-tools"
+RULES_API="https://firebaserules.googleapis.com/v1"
+AUTH_CONFIG="https://identitytoolkit.googleapis.com/admin/v2/projects/${PROJECT_ID}/config"
+LINK_DOMAIN="www.cuberoot-systems.com"
+
+die(){ echo "ERROR: $*" >&2; exit 1; }
+for c in gcloud curl jq python3 node; do command -v "$c" >/dev/null || die "$c is unavailable. Run this in Google Cloud Shell."; done
+[[ "$(node -p 'process.versions.node.split(".")[0]')" -ge 18 ]] || die "Node 18 or newer is needed."
+
+ACCOUNT="$(gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -n1)"
+[[ -n "${ACCOUNT}" ]] || die "No active Google account. Sign in to Cloud Shell first."
+FOUND_ID="$(gcloud projects describe "${PROJECT_ID}" --project="${PROJECT_ID}" --format='value(projectId)' 2>/dev/null || true)"
+[[ "${FOUND_ID}" == "${PROJECT_ID}" ]] || die "Project ${PROJECT_ID} was not found, or ${ACCOUNT} cannot see it. Nothing changed."
+echo
+echo "  Google account : ${ACCOUNT}"
+echo "  Project        : ${PROJECT_ID}"
+echo
+
+token(){ gcloud auth print-access-token; }
+HDR_PROJECT="x-goog-user-project: ${PROJECT_ID}"
+get(){ curl --fail-with-body --silent --show-error -H "Authorization: Bearer $(token)" -H "${HDR_PROJECT}" "$1"; }
+send(){ curl --fail-with-body --silent --show-error -X "$1" -H "Authorization: Bearer $(token)" -H "${HDR_PROJECT}" -H 'Content-Type: application/json' --data-binary "@$3" "$2"; }
+release_ruleset(){ get "${RULES_API}/projects/${PROJECT_ID}/releases/cloud.firestore" | jq -er .rulesetName; }
+save_rules(){ get "${RULES_API}/$1" | jq -er '.source.files[]|select(.name=="firestore.rules")|.content' > "$2"; [[ -s "$2" ]] || die "Empty Firestore rules."; }
+same_rules(){ python3 - "$1" "$2" <<'PYC'
+import sys
+a=open(sys.argv[1]).read().rstrip("\n"); b=open(sys.argv[2]).read().rstrip("\n")
+sys.exit(0 if a==b else 1)
+PYC
+}
+publish_file(){
+  local body="${STATE}/ruleset.json" patch="${STATE}/release.json" ruleset
+  jq -n --rawfile rules "$1" '{source:{files:[{name:"firestore.rules",content:$rules}]}}' > "${body}" || return 1
+  # Creating the ruleset compiles it; a rules error stops here, before anything is published.
+  ruleset="$(send POST "${RULES_API}/projects/${PROJECT_ID}/rulesets" "${body}" | jq -er .name)" || return 1
+  [[ -n "${ruleset}" ]] || return 1
+  jq -n --arg name "projects/${PROJECT_ID}/releases/cloud.firestore" --arg ruleset "${ruleset}" '{release:{name:$name,rulesetName:$ruleset},updateMask:"rulesetName"}' > "${patch}" || return 1
+  send PATCH "${RULES_API}/projects/${PROJECT_ID}/releases/cloud.firestore" "${patch}" >/dev/null || return 1
+}
+# The live rules equal this file? (no exit on failure)
+live_is(){
+  local current
+  current="$(release_ruleset 2>/dev/null)" || return 1
+  get "${RULES_API}/${current}" 2>/dev/null | jq -er '.source.files[]|select(.name=="firestore.rules")|.content' > "${STATE}/rules-live-now.txt" 2>/dev/null || return 1
+  same_rules "$1" "${STATE}/rules-live-now.txt"
+}
+# Firebase's sign-in setting: email link on, password unchanged, link domain allowed.
+auth_on(){
+  local domains
+  get "${AUTH_CONFIG}" > "${STATE}/auth-now.json" || return 1
+  jq -n '{signIn:{email:{enabled:true,passwordRequired:false}}}' > "${STATE}/auth-link.json" || return 1
+  send PATCH "${AUTH_CONFIG}?updateMask=signIn.email.enabled,signIn.email.passwordRequired" "${STATE}/auth-link.json" >/dev/null || return 1
+  domains="$(jq -c --arg d "${LINK_DOMAIN}" '((.authorizedDomains // []) + [$d]) | unique' "${STATE}/auth-now.json")" || return 1
+  jq -n --argjson d "${domains}" '{authorizedDomains:$d}' > "${STATE}/auth-domains.json" || return 1
+  send PATCH "${AUTH_CONFIG}?updateMask=authorizedDomains" "${STATE}/auth-domains.json" >/dev/null || return 1
+}
+auth_is_on(){
+  get "${AUTH_CONFIG}" > "${STATE}/auth-check.json" 2>/dev/null || return 1
+  jq -e --arg d "${LINK_DOMAIN}" '(.signIn.email.enabled == true) and (.signIn.email.passwordRequired == false) and ((.authorizedDomains // []) | index($d) != null)' "${STATE}/auth-check.json" >/dev/null
+}
+auth_back(){
+  [[ -s "${STATE}/auth-before.json" ]] || return 0
+  jq '{signIn:{email:{enabled:(.signIn.email.enabled // true),passwordRequired:(.signIn.email.passwordRequired // true)}}}' "${STATE}/auth-before.json" > "${STATE}/auth-back.json" || return 1
+  send PATCH "${AUTH_CONFIG}?updateMask=signIn.email.enabled,signIn.email.passwordRequired" "${STATE}/auth-back.json" >/dev/null || return 1
+  jq '{authorizedDomains:(.authorizedDomains // [])}' "${STATE}/auth-before.json" > "${STATE}/auth-back-domains.json" || return 1
+  send PATCH "${AUTH_CONFIG}?updateMask=authorizedDomains" "${STATE}/auth-back-domains.json" >/dev/null || return 1
+}
+# Automatic recovery: the earlier rules back (tried 3 times) and the Firebase
+# setting back. Always ends the script.
+recover(){
+  local what="$1" tries=0 back=no
+  echo
+  echo "Something failed during ${what}. Putting everything back automatically ..."
+  while (( tries < 3 )); do
+    tries=$((tries + 1))
+    if live_is "${STATE}/rules-before.txt"; then back=yes; break; fi
+    publish_file "${STATE}/rules-before.txt" || true
+    sleep 3
+  done
+  auth_back || echo "Note: the Firebase sign-in setting could not be put back yet. Run: bash ap4.txt rollback"
+  if [[ "${back}" == yes ]]; then
+    echo "DONE: the earlier rules are live again and the app works as before. Nothing was lost."
+    echo "Send a screenshot to Claude. When it is fixed, bash ap4.txt can simply be run again."
+  else
+    echo "WARNING: the earlier rules could not be confirmed. Run:  bash ap4.txt rollback  and send a screenshot to Claude."
+  fi
+  exit 1
+}
+data(){ ACCESS_TOKEN="$(token)" PROJECT="${PROJECT_ID}" node "${WORK}/ap4.mjs" "$@"; }
+
+mkdir -p "${STATE}" "${WORK}"
+curl --fail --silent --show-error "${RAW}/${COMMIT}/firestore.rules" -o "${STATE}/rules-new.txt" || die "Cannot read the new rules from GitHub. Nothing changed."
+grep -Fq "COCKPIT AND AUTO APPLICATIONS (beta.4)" "${STATE}/rules-new.txt" || die "The downloaded rules are not the beta.4 rules. Nothing changed."
+curl --fail --silent --show-error "${RAW}/${COMMIT}/build/ap4.mjs" -o "${WORK}/ap4.mjs" || die "Cannot read ap4.mjs from GitHub. Nothing changed."
+
+if [[ "${MODE}" == apply ]]; then
+  if live_is "${STATE}/rules-new.txt" && auth_is_on; then
+    echo "OK: the beta.4 rules and the sign-in setting are already live. Checking the data ..."
+    data verify || true
+    echo; echo "DONE. Nothing else to do."; exit 0
+  fi
+  # 1. The published rules must be exactly the ones rq3.txt published (or,
+  #    on a second run after a failure, already this file's).
+  save_rules "$(release_ruleset)" "${STATE}/rules-live.txt"
+  curl --fail --silent --show-error "${RAW}/${LIVE_COMMIT}/firestore.rules" -o "${STATE}/rules-expected.txt" || die "Cannot read the current rules from GitHub. Nothing changed."
+  if same_rules "${STATE}/rules-live.txt" "${STATE}/rules-expected.txt"; then
+    cp "${STATE}/rules-live.txt" "${STATE}/rules-before.txt"
+  elif same_rules "${STATE}/rules-live.txt" "${STATE}/rules-new.txt" && [[ -s "${STATE}/rules-before.txt" ]]; then
+    :   # a second run: the new rules are already live, the earlier ones are saved
+  else
+    die "The published rules are not the ones rq3.txt published. Nothing changed. Send a screenshot to Claude."
+  fi
+  echo "OK: the published rules are the ones rq3.txt published (saved for rollback)."
+  [[ -s "${STATE}/auth-before.json" ]] || get "${AUTH_CONFIG}" > "${STATE}/auth-before.json" || die "Cannot read Firebase's sign-in setting. Nothing changed."
+  echo
+  echo "The change: the cockpit, the Manual / Auto switch for public group"
+  echo "applications (it starts on Manual), block lists, and the 'email already"
+  echo "has an account' check. Firebase's email link sign-in is switched on for"
+  echo "Auto; password sign-in stays exactly as it is."
+  echo
+  read -r -p "Type yes to go ahead: " ANSWER
+  [[ "${ANSWER}" == "yes" ]] || die "Stopped. Nothing was changed."
+  # 2. The data (adds only what is missing; nothing existing changes).
+  data apply || die "The data step did not finish. The rules and the sign-in setting were NOT changed, so the app works as before. Run bash ap4.txt again; send a screenshot to Claude if it repeats."
+  # 3. Firebase's sign-in setting.
+  auth_on || recover "switching on email link sign-in"
+  auth_is_on || { sleep 5; auth_is_on; } || recover "checking the sign-in setting"
+  echo "OK: email link sign-in is on, password sign-in unchanged, ${LINK_DOMAIN} allowed."
+  # 4. The rules.
+  publish_file "${STATE}/rules-new.txt" || recover "publishing the rules"
+  sleep 3
+  # 5. Check (twice, as Google can take a moment).
+  live_is "${STATE}/rules-new.txt" || { sleep 10; live_is "${STATE}/rules-new.txt"; } || recover "checking the published rules"
+  echo "OK: the published rules are the beta.4 rules."
+  data verify || echo "Note: the data check reported something missing; the app still works. Run bash ap4.txt verify later and send a screenshot to Claude."
+  echo
+  echo "DONE. Now tell Claude to update the web."
+elif [[ "${MODE}" == verify ]]; then
+  live_is "${STATE}/rules-new.txt" || die "The published rules are not the beta.4 rules."
+  echo "OK: the published rules are the beta.4 rules."
+  auth_is_on || die "Email link sign-in is not on, or ${LINK_DOMAIN} is not allowed."
+  echo "OK: email link sign-in is on and ${LINK_DOMAIN} is allowed."
+  data verify
+elif [[ "${MODE}" == rollback ]]; then
+  [[ -s "${STATE}/rules-before.txt" ]] || die "No saved rules to go back to."
+  publish_file "${STATE}/rules-before.txt" || die "The earlier rules could not be published. Send a screenshot to Claude."
+  sleep 3
+  live_is "${STATE}/rules-before.txt" || { sleep 10; live_is "${STATE}/rules-before.txt"; } || die "Rollback of the rules did not take. Send a screenshot to Claude."
+  echo "OK: the earlier rules are published again."
+  auth_back && echo "OK: Firebase's sign-in setting is back as it was." || echo "Note: the sign-in setting could not be put back; it is harmless. Send a screenshot to Claude."
+  echo "Now tell Claude to put the web back to beta.3."
+else
+  die "Unknown mode ${MODE}. Use: bash ap4.txt   or   bash ap4.txt verify   or   bash ap4.txt rollback"
+fi

@@ -45,6 +45,7 @@ async function put(docPath, data) {
     body: JSON.stringify({ writes: [{ update: { name: `projects/${P}/databases/(default)/documents/${docPath}`, fields: fields(data) } }] }) });
   if (!r.ok) throw new Error(`seed ${docPath}: ${r.status}`);
 }
+async function getDocQuick(docPath) { try { return await getDoc(docPath); } catch { return null; } }
 async function getDoc(docPath) {
   const r = await fetch(`${FS}/${docPath}`, { headers: OWNER });
   if (r.status === 404) return null;
@@ -94,6 +95,8 @@ async function signIn(page, email, password) {
   await page.locator('[data-act="sign-in"]').first().click();
 }
 async function tab(page, id) { await page.locator(`button[data-tab="${id}"]`).click(); await page.waitForTimeout(400); }
+/* beta.4: the Admin tab's own tabs (Cockpit, Applications, Members, Settings). */
+async function subtab(page, id) { await page.locator(`[data-act="admin-tab"][data-id="${id}"]`).first().click(); await page.waitForTimeout(400); }
 
 /* ---- seed: the PUBLIC group, run by Willy's stand-in, with one member ---- */
 const W = { email: "owner@example.com", password: "owner-pass-1" };
@@ -220,6 +223,7 @@ await check("E3", "the owner signs in, lands in PUBLIC and sees the application 
   await signIn(owner, W.email, W.password);
   await waitForText(owner, /Admin \(1\)/);
   await tab(owner, "admin");
+  await subtab(owner, "applications");
   await waitForText(owner, new RegExp(APPLICANT.name));
 });
 await check("E4", "approving creates the account, the golfer, the directory entry and the approval, and sends the password email", async () => {
@@ -271,6 +275,7 @@ await check("E4d", "two reviewers approving the same application at once: exactl
   await signIn(rita, R2.email, R2.password);
   await waitForText(rita, /Admin/);
   await tab(rita, "admin");
+  await subtab(rita, "applications");
   await put("publicApplications/both@example.com", { fullName: "Bo Both", email: "both@example.com", status: "pending" });
   await waitForText(owner, /both@example\.com/);
   await waitForText(rita, /both@example\.com/);
@@ -356,6 +361,7 @@ await check("E8b", "a regular member reads only their own membership, and no err
 /* E9: the owner deals with the report */
 await check("E9", "the owner sees the report and dismisses it", async () => {
   await tab(owner, "admin");
+  await subtab(owner, "applications");
   await waitForText(owner, /Test report/);
   await owner.locator('[data-act="dismiss-report"]').first().click();
   await waitForText(owner, /Report dismissed/);
@@ -425,6 +431,7 @@ await check("E12", "an admin invites regular members only: no Admin choice on th
 });
 await check("E13", "an admin removes a regular member of their group, and has no button for the owner", async () => {
   await tab(ada, "admin");
+  await subtab(ada, "members");
   await waitForText(ada, /Rex Regular/);
   if (await ada.locator(`[data-drop-member="${W.uid}"]`).count()) throw new Error("a remove button for the owner");
   await ada.locator(`[data-drop-member="${R1.uid}"]`).click();
@@ -478,6 +485,7 @@ await check("E16", "Willy approves: the group is created with him as owner, the 
   await signIn(wil, W.email, W.password);
   await waitForText(wil, /Admin/);
   await tab(wil, "admin");
+  await subtab(wil, "applications");
   await waitForText(wil, /Group requests/);
   await waitForText(wil, new RegExp(ORG.group));
   await wil.locator('[data-act="approve-request"]').first().click();
@@ -518,6 +526,140 @@ await check("E17", "the organiser taps the link, creates an account and joins th
   while (Date.now() < end && !(m = await getDoc(`associations/${r.groupId}/members/${uid}`))) await org.waitForTimeout(400);
   if (!m || m.role !== "admin") throw new Error(`membership: ${JSON.stringify(m)}`);
   if (org.errors.length) throw new Error(org.errors.join(" | "));
+});
+
+/* E18–E24: beta.4, the cockpit, Admin's tabs and the applications switch */
+await check("E18", "the owner cockpit counts every group, and the owner's last seen is stamped", async () => {
+  await tab(wil, "admin");
+  await subtab(wil, "cockpit");
+  await waitForText(wil, /Members, all groups/, 30000);
+  const t = await text(wil);
+  for (const name of ["Saturday Group", "Tuesday Golfers", "Public group"]) if (!t.includes(name)) throw new Error(`group ${name} missing from the cockpit`);
+  if (!/Waiting for you/.test(t) || !/Housekeeping/.test(t)) throw new Error("a cockpit section is missing");
+  const gid = await wil.evaluate(async () => (await import("/store.js")).currentAssociation());
+  const end = Date.now() + 15000;
+  let m = null;
+  while (Date.now() < end && !((m = await getDocQuick(`associations/${gid}/members/${W.uid}`)) && m.lastSeenAt)) await wil.waitForTimeout(400);
+  if (!m || !m.lastSeenAt) throw new Error("last seen was not stamped");
+  await wil.locator('[data-act="cockpit-group"][data-id="G1"]').first().click();
+  await waitForText(wil, /Back to all groups/);
+  if (!/Ada Admin/.test(await text(wil))) throw new Error("the group's members are not listed");
+  await wil.locator('[data-act="cockpit-group"][data-id=""]').first().click();
+  await waitForText(wil, /Members, all groups/);
+  if (wil.errors.length) throw new Error(wil.errors.join(" | "));
+});
+await check("E19", "the owner's Members tab is People as before, and Settings holds Group, Backup, Course lookup and Account", async () => {
+  await subtab(wil, "members");
+  await waitForText(wil, /People/);
+  const t = await text(wil);
+  if (!/invitation used/.test(t) || !/(Make guest|Make admin)/.test(t)) throw new Error(`People changed: ${t.replace(/\s+/g, " ").slice(0, 300)}`);
+  await subtab(wil, "settings");
+  await waitForText(wil, /Backup/);
+  const s2 = await text(wil);
+  if (!/Course lookup/.test(s2)) throw new Error("Course lookup is missing from Settings");
+  if (await wil.locator('[data-act="admin-tab"]').count() !== 4) throw new Error("the owner should see four tabs");
+});
+await check("E20", "a group admin sees the mini cockpit of their own group, and two tabs only", async () => {
+  await tab(ada, "admin");
+  await subtab(ada, "cockpit");
+  await waitForText(ada, /This group only/);
+  const t = await text(ada);
+  if (!/Last seen/.test(t) || !/Rounds this month/.test(t)) throw new Error("a mini cockpit section is missing");
+  if (/Members, all groups/.test(t)) throw new Error("an admin sees the owner cockpit");
+  if (await ada.locator('[data-act="admin-tab"]').count() !== 2) throw new Error("an admin should see Cockpit and Members only");
+});
+await check("E21", "an email that already has an account is stopped on screen; nothing is saved", async () => {
+  const end = Date.now() + 15000;
+  while (Date.now() < end && !(await getDocQuick(`accountEmails/${W.email}`))) await new Promise((r) => setTimeout(r, 400));
+  if (!(await getDocQuick(`accountEmails/${W.email}`))) throw new Error("the owner's email was not recorded");
+  const p = await newPage();
+  await p.goto(APP, { waitUntil: "load" });
+  await waitForText(p, /Become a member or start a group/);
+  await p.locator('[data-act="show-choose"]').click();
+  await p.locator('[data-act="show-apply"]').click();
+  await waitForText(p, /What happens next/);
+  await p.fill('[name="apply-name"]', "Someone Willy");
+  await p.fill('[name="apply-email"]', W.email);
+  await p.locator('[name="ap-agree"]').check();
+  await p.locator('[data-act="submit-application"]').click();
+  await waitForText(p, /This email already has an account/);
+  if (await getDocQuick(`publicApplications/${W.email}`)) throw new Error("an application was saved");
+});
+async function turnSwitch(mode) {
+  await tab(owner, "admin");
+  await subtab(owner, "applications");
+  await waitForText(owner, /Public group applications/);
+  await owner.waitForSelector(".seg-b.on", { timeout: 15000 });
+  await owner.locator(`[data-act="set-switch"][data-id="${mode}"]`).click();
+  const end = Date.now() + 15000;
+  let s = null;
+  while (Date.now() < end && !((s = await getDocQuick("settings/publicApplications")) && s.mode === mode)) await owner.waitForTimeout(400);
+  if (!s || s.mode !== mode) throw new Error(`the switch did not change to ${mode}: ${JSON.stringify(s)}`);
+}
+async function applyAndOpenLink(name, email) {
+  const p = await newPage();
+  await p.goto(APP, { waitUntil: "load" });
+  await waitForText(p, /Become a member or start a group/);
+  await p.locator('[data-act="show-choose"]').click();
+  await p.locator('[data-act="show-apply"]').click();
+  await waitForText(p, /You tap the link, which confirms your email/);
+  await p.fill('[name="apply-name"]', name);
+  await p.fill('[name="apply-email"]', email);
+  await p.locator('[name="ap-agree"]').check();
+  await p.locator('[data-act="submit-application"]').click();
+  await waitForText(p, /Check your email/);
+  if (await accountByEmail(email)) throw new Error("an account was created before the link was tapped");
+  const r = await fetch(`${AUTH_ADMIN}/oobCodes`);
+  const codes = ((await r.json()).oobCodes || []).filter((c) => c.email === email && c.requestType === "EMAIL_SIGNIN");
+  if (!codes.length) throw new Error("no sign-in link was sent");
+  const code = codes[codes.length - 1].oobCode;
+  const q = await newPage();
+  await q.goto(`${APP}&apply=1&apiKey=fake-api-key&mode=signIn&oobCode=${encodeURIComponent(code)}&lang=en`, { waitUntil: "load" });
+  await waitForText(q, /Finish joining/);
+  await q.fill('[name="email"]', email);
+  await q.fill('[name="password"]', "auto-pass-1");
+  await q.fill('[name="password-again"]', "auto-pass-1");
+  await q.locator('[data-act="finish-apply"]').click();
+  return q;
+}
+await check("E22", "Auto: the applicant taps the link, chooses a password and is in the public group by themselves", async () => {
+  await turnSwitch("auto");
+  const q = await applyAndOpenLink("Gwen Auto", "gwen.auto@example.com");
+  await waitForText(q, /Welcome to the public group/, 30000);
+  const acct = await accountByEmail("gwen.auto@example.com");
+  if (!acct || !acct.emailVerified) throw new Error("no confirmed account");
+  const uid = acct.localId;
+  const m = await getDoc(`associations/PUBLIC/members/${uid}`);
+  if (!m || m.role !== "member" || !m.golferId) throw new Error(`membership: ${JSON.stringify(m)}`);
+  const g = await getDoc(`golfers/${m.golferId}`);
+  if (!g || g.linkedUid !== uid || g.name !== "Gwen Auto") throw new Error(`golfer: ${JSON.stringify(g)}`);
+  const end = Date.now() + 15000;
+  let a = null;
+  while (Date.now() < end && !((a = await getDoc("publicApplications/gwen.auto@example.com")) && a.status === "approved")) await q.waitForTimeout(400);
+  if (!a || a.status !== "approved" || a.auto !== true) throw new Error(`application: ${JSON.stringify(a)}`);
+  if (!(await getDoc(`associations/PUBLIC/roster/${m.golferId}`))) throw new Error("not on the public roster");
+  if (!(await getDoc(`associations/PUBLIC/directory/${m.golferId}`))) throw new Error("not in the public directory");
+  if (!(await getDoc("golferNames/gwen-auto"))) throw new Error("the name was not claimed");
+  if (q.errors.length) throw new Error(q.errors.join(" | "));
+});
+await check("E23", "Auto: a name already taken waits for a reviewer, who sees the next number filled in", async () => {
+  const q = await applyAndOpenLink("Mia Member", "mia.two@example.com");
+  await waitForText(q, /waits for a person to review it/, 30000);
+  const a = await getDoc("publicApplications/mia.two@example.com");
+  if (!a || a.status !== "pending") throw new Error(`application: ${JSON.stringify(a)}`);
+  const acct = await accountByEmail("mia.two@example.com");
+  if (await getDoc(`associations/PUBLIC/members/${acct.localId}`)) throw new Error("joined although the name is taken");
+  await tab(owner, "admin");
+  await subtab(owner, "applications");
+  await waitForText(owner, /mia\.two@example\.com/);
+  const row = owner.locator('[data-act="review-application"][data-id="mia.two@example.com"]');
+  await row.click();
+  const end = Date.now() + 10000;
+  let v = "";
+  while (Date.now() < end && (v = await owner.inputValue('[name="approve-name"]')) !== "Mia Member 1") await owner.waitForTimeout(300);
+  if (v !== "Mia Member 1") throw new Error(`the name offered is "${v}", not "Mia Member 1"`);
+  await owner.locator('[data-close="1"]').first().click().catch(() => {});
+  await turnSwitch("manual");
 });
 
 /* E14: Tidy, run by Willy, under the Version 2.0 rules */
