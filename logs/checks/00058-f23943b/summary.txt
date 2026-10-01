@@ -1,0 +1,32 @@
+kind:    checks
+result:  bootstrap=success verify=failure web=skipped
+branch:  v2
+commit:  f23943b8692d813b6a2c442b335aea1a9b948239
+run:     58 (id 36922117376)
+time:    2026-10-01T20:31:07Z
+
+--- last lines of bootstrap.log ---
+npm warn deprecated uuid@7.0.3: uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).
+
+added 180 packages in 4s
+
+  vendor/firebase/firebase-10.12.0.js  384.1kb
+
+⚡ Done in 53ms
+[v2 88871f4] Add the generated lockfile and Firebase bundle (exact approved versions)
+ 2 files changed, 13 insertions(+), 13 deletions(-)
+To https://github.com/willyros01/scorecard
+   f23943b..88871f4  HEAD -> v2
+
+--- last lines of verify.log ---
+OK    V1 npm ci succeeded from the committed lockfile
+OK    V2 every package is exactly the approved version
+
+  vendor/firebase/firebase-10.12.0.js  384.1kb
+
+⚡ Done in 41ms
+OK    V3 the committed bundle is identical to a fresh build
+OK    V4 no remote code in the 15 packaged files
+OK    V5 Capacitor core, cli and ios are 8.5.2
+store.js:1519:  const url = EMULATORS ? `${location.origin}${location.pathname}?emulators=1&apply=1` : `${platform.joinBase()}?apply=1`;
+FAIL  V6 location.origin is still used
