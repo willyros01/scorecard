@@ -1,0 +1,616 @@
+[36m[1mi  emulators:[22m[39m Starting emulators: auth, firestore
+[36m[1mi  emulators:[22m[39m Detected demo project ID "demo-scorecard", emulated services will use a demo configuration and attempts to access non-emulated services for this project will fail.
+[33m[1m⚠ [22m[39m It appears you are running in a CI environment. You can avoid downloading the Firestore Emulator repeatedly by caching the /home/runner/.cache/firebase/emulators directory.
+[36m[1mi  firestore:[22m[39m downloading cloud-firestore-emulator-v1.22.0.jar...
+
+[36m[1mi  firestore:[22m[39m Firestore Emulator logging to [1mfirestore-debug.log[22m
+[32m[1m✔  firestore:[22m[39m Firestore Emulator was started in standard edition.
+[32m[1m✔  firestore:[22m[39m Firestore Emulator UI websocket is running on 9150.
+[36m[1mi [22m[39m Running script: [1ms=0; bash sec-tests.sh || s=1; echo; bash del1-tests.sh || s=1; echo; if [ -f privacy-tests.sh ]; then bash privacy-tests.sh || s=1; fi; echo; bash acc-tests.sh || s=1; echo; bash pub-tests.sh || s=1; echo; bash grp-tests.sh || s=1; echo; bash grq-tests.sh || s=1; echo; if [ -d ../../node_modules/playwright ]; then node ../app/e2e.mjs ../.. || s=1; else echo "SKIP  app tests (npm ci not run)"; fi; echo; node golive-tests.mjs || s=1; echo; bash go2-tests.sh || s=1; exit $s[22m
+== Scenario 1: A's forged request names B's group, golfer and invitations
+15:44:27 Deletion completion job for demo-scorecard (requests older than 0s).
+15:44:27 Requests found: 1
+15:44:27 OK dFWc…: cleaned up group G1… (3 writes).
+15:44:28 DONE dFWc…: account confirmed gone; request removed.
+15:44:28 Summary: done 1, blocked 0, waiting for the app 0, failed 0.
+PASS  job finished
+PASS  SEC1 B's invitation claim in G1 untouched
+PASS  SEC1 B's invitation claim in G2 untouched
+PASS  SEC2 B's golfer still linked to B
+PASS  SEC3 unrelated group G2 completely unchanged
+PASS  SEC3 B's membership in G1 untouched
+PASS  SEC3 owner's membership in G1 untouched
+PASS  SEC3 B's group list untouched
+PASS  A's own membership removed
+PASS  A's own invitation claim removed
+PASS  A's own group list removed
+PASS  A's golfer unlinked
+PASS  D1 A's golfer name kept
+PASS  D1 A's round kept
+PASS  A's sign-in deleted
+PASS  B's sign-in untouched
+PASS  A's request removed after confirmation
+== Scenario 2 (SEC4): the owner of two groups requests deletion
+15:44:29 Deletion completion job for demo-scorecard (requests older than 0s).
+15:44:29 Requests found: 1
+15:44:29 BLOCKED 4P0B…: owns 2 group(s). Nothing deleted. The owner must delete those groups first.
+15:44:29 Summary: done 0, blocked 1, waiting for the app 0, failed 0.
+PASS  job finished (a blocked request is not a failure)
+PASS  SEC4 group G1 completely unchanged
+PASS  SEC4 group G2 completely unchanged
+PASS  SEC4 owner's sign-in NOT deleted
+PASS  SEC4 request kept and marked blocked
+== Scenario 3 (SEC5): Firebase does not confirm the sign-in is gone
+15:44:30 Deletion completion job for demo-scorecard (requests older than 0s).
+15:44:30 Requests found: 1
+15:44:30 OK kMK9…: cleaned up group G1… (3 writes).
+15:44:31 NOT CONFIRMED kMK9…: Firebase still has the account. Request kept; it will be retried.
+15:44:31 FAILED kMK9… (code 11); it will be retried next run.
+15:44:31 Summary: done 0, blocked 0, waiting for the app 0, failed 1.
+PASS  job reports a problem
+PASS  SEC5 request kept until the sign-in is confirmed gone
+PASS  SEC5 request marked not confirmed
+== Scenario 4: a request younger than one hour is left for the app
+15:44:31 Deletion completion job for demo-scorecard (requests older than 3600s).
+15:44:31 Requests found: 1
+15:44:31 Summary: done 0, blocked 0, waiting for the app 1, failed 0.
+PASS  job finished
+PASS  young request untouched
+PASS  young request: membership untouched
+PASS  young request: sign-in untouched
+
+RESULT: 29 passed, 0 failed
+
+== DEL1 part 0: the reads Delete my account makes before any write (steps 1 and 4, still anonymous) — each must be allowed
+PASS  DEL1 step 1: A asks which groups it owns (associations where ownerUid == A)
+PASS  DEL1 step 1: A finds its memberships (collection group members where uid == A)
+PASS  DEL1 step 1: A lists its own group list
+PASS  DEL1 step 4: A finds its own golfer (golfers where linkedUid == A)
+PASS  DEL1 A cannot find B's memberships (uid == B)
+== DEL1 part 1: another account tries the same writes — each must be refused
+PASS  DEL1 a fellow member (B) cannot write A's deletion record
+PASS  DEL1 a fellow member (B) cannot delete A's membership in G1
+PASS  DEL1 a fellow member (B) cannot delete A's group list entry
+PASS  DEL1 a fellow member (B) cannot delete A's invitation claim
+PASS  DEL1 a fellow member (B) cannot unlink A's golfer
+PASS  DEL1 a fellow member (B) cannot run A's whole step-7 batch for G1
+PASS  DEL1 a stranger (X) cannot write A's deletion record
+PASS  DEL1 a stranger (X) cannot delete A's membership in G1
+PASS  DEL1 a stranger (X) cannot delete A's group list entry
+PASS  DEL1 a stranger (X) cannot delete A's invitation claim
+PASS  DEL1 a stranger (X) cannot unlink A's golfer
+PASS  DEL1 a stranger (X) cannot run A's whole step-7 batch for G1
+PASS  DEL1 nothing of A's changed after the refused attempts
+== DEL1 part 2: the account itself makes every write, in the app's order — each must be allowed
+PASS  DEL1 step 4: A (still anonymous) records its deletion request (D4)
+PASS  DEL1 Phase B: A cannot leave a group while still anonymous
+PASS  DEL1 step 5: the throwaway email is attached to A's own account
+PASS  DEL1 step 5: A marks the request re-confirmed
+PASS  DEL1 step 7: A (email attached) finds its own invitation claims in G1
+PASS  DEL1 step 7: A leaves G1 in one batch (membership, group list, own invitation claim (D4), record)
+PASS  DEL1 step 7: A leaves G2 in one batch (membership, group list, own invitation claim (D4), record)
+PASS  DEL1 step 7: A unlinks its golfer and marks the record auth-deleting
+PASS  DEL1 end state: A is out of both groups; roster, B and the record remain
+PASS  DEL1 golfer unlinked and the name kept (D1)
+== DEL1 part 3: another account still cannot touch A's record; A can withdraw it (wrong-password path)
+PASS  DEL1 a fellow member cannot delete A's deletion record
+PASS  DEL1 A can delete its own record (D4, the wrong-password withdrawal)
+
+RESULT: 30 passed, 0 failed
+
+== PRIV1 rounds: no reads across the database
+PASS  PRIV1 an outsider cannot read a G1 round directly
+PASS  PRIV1 a collection-group query on every rounds collection is refused
+PASS  PRIV1 an outsider's collection-group query is refused
+== PRIV2 rounds: a regular member sees only their own
+PASS  PRIV2 A reads A's own round
+PASS  PRIV2 A cannot read B's round, even knowing its path
+PASS  PRIV2 A's query for golferId == gA is allowed
+PASS  PRIV2 A's query for every round of the group is refused
+PASS  PRIV2 A's query for golferId == gB is refused
+== PRIV3 rounds: admins see their group, not others
+PASS  PRIV3 the G1 admin lists every G1 round
+PASS  PRIV3 the G1 owner lists every G1 round
+PASS  PRIV3 the G2 owner cannot list G1 rounds
+== PRIV4 golfer records are private
+PASS  PRIV4 A reads A's own golfer record
+PASS  PRIV4 A cannot read B's golfer record
+PASS  PRIV4 the G1 admin reads B's golfer record (B plays in G1)
+PASS  PRIV4 the G2 owner cannot read B's golfer record
+PASS  PRIV4 an unclaimed golfer cannot be read by an outsider (go-live fix 1)
+PASS  PRIV4 the G1 admin can still read the unclaimed golfer of G1
+== PRIV10 invitation records (go-live fix 1): the greeting, nothing more
+PASS  PRIV10 the G1 admin writes a member invitation record
+PASS  PRIV10 an admin cannot write an admin invitation record
+PASS  PRIV10 the owner writes an admin invitation record
+PASS  PRIV10 a regular member cannot write an invitation record
+PASS  PRIV10 no invitation record for a golfer not on the roster
+PASS  PRIV10 no private fields on an invitation record
+PASS  PRIV10 an invitation record cannot be signed as somebody else
+PASS  PRIV10 somebody holding the link reads the record by its id
+PASS  PRIV10 nobody outside the group can list invitation records
+PASS  PRIV10 a regular member cannot list invitation records
+PASS  PRIV10 the G1 admin lists invitation records
+PASS  PRIV4 nobody can list the golfers collection (member)
+PASS  PRIV4 nobody can list the golfers collection (admin)
+PASS  PRIV4 A lists golfers where linkedUid is A (find my golfer)
+PASS  PRIV4 A cannot list golfers where linkedUid is B
+== PRIV9 a member records which golfer they are, and nothing else
+PASS  PRIV9 A sets golferId gA on A's own membership
+PASS  PRIV9 A cannot claim golfer gB on A's own membership
+PASS  PRIV9 A cannot change A's own role
+PASS  PRIV9 A cannot set a golferId on B's membership
+== PRIV5 the directory: name and index for members only
+PASS  PRIV5 A lists the G1 directory
+PASS  PRIV5 the G2 owner cannot list the G1 directory
+PASS  PRIV5 A updates A's own index in the G1 directory
+PASS  PRIV5 A cannot change B's directory entry
+PASS  PRIV5 A cannot add a private field to A's own entry
+PASS  PRIV5 the G1 admin updates B's directory entry
+== PRIV6 games: participants only
+PASS  PRIV6 A (played in game1) reads game1
+PASS  PRIV6 A (did not play in game2) cannot read game2
+PASS  PRIV6 A's query for games containing gA is allowed
+PASS  PRIV6 A's query for every game is refused
+PASS  PRIV6 the G1 admin lists every game
+PASS  PRIV6 the G2 owner cannot read game1
+== PRIV7 golfer name index
+PASS  PRIV7 a single name lookup is allowed (uniqueness check)
+PASS  PRIV7 nobody can list every golfer name
+PASS  PRIV7 an outsider cannot delete A's name claim
+PASS  PRIV7 B cannot delete A's name claim
+PASS  PRIV7 the G1 admin can delete A's name claim (rename)
+== PRIV8 invitation claims
+PASS  PRIV8 an outsider cannot list G1's invitation claims
+
+RESULT: 54 passed, 0 failed
+
+== ACC1 an anonymous session is refused everywhere else, even as a member
+PASS  ACC1 anonymous cannot read its group
+PASS  ACC1 anonymous cannot read its own round
+PASS  ACC1 anonymous cannot query its own rounds
+PASS  ACC1 anonymous cannot list the directory
+PASS  ACC1 anonymous cannot read its own golfer directly
+PASS  ACC1 anonymous cannot read an unclaimed golfer
+PASS  ACC1 anonymous cannot read an invitation
+PASS  ACC1 anonymous cannot read courses
+PASS  ACC1 anonymous cannot read a join code
+PASS  ACC1 anonymous cannot look up a golfer name
+PASS  ACC1 anonymous cannot post a round
+PASS  ACC1 anonymous cannot create a group
+PASS  ACC1 anonymous cannot create a golfer
+PASS  ACC1 anonymous cannot add a group to its own group list
+PASS  ACC1 anonymous cannot change its own directory entry
+== ACC2 an anonymous session may still find its own groups and delete itself
+PASS  ACC2 anonymous lists its own group list
+PASS  ACC2 anonymous finds its own memberships (collection group, uid == self)
+PASS  ACC2 anonymous asks which groups it owns (ownerUid == self)
+PASS  ACC2 anonymous finds its own golfer (linkedUid == self)
+PASS  ACC2 anonymous records its own deletion request
+PASS  ACC2 anonymous reads its own deletion request
+PASS  ACC2 anonymous cannot read another account's deletion request
+PASS  ACC2 anonymous cannot list another account's group list
+PASS  ACC2 anonymous cannot find another account's golfer
+PASS  ACC2 anonymous withdraws its own deletion request
+== ACC3 email accounts work as before
+PASS  ACC3 an email member finds its own memberships (collection group, uid == self — the app's query)
+PASS  ACC3 an email member cannot find another account's memberships
+PASS  ACC3 an email member reads the group
+PASS  ACC3 an email member reads its own round
+PASS  ACC3 an email member lists the directory
+PASS  ACC3 a new email account reads courses
+PASS  ACC3 a new email account reads an invitation (to accept it)
+PASS  ACC3 a new email account cannot read an unclaimed golfer (go-live fix 1)
+PASS  ACC3 a new email account cannot create a group (Phase D: group creators only)
+PASS  ACC3 a new email account adds it to its own group list
+== ACC4 the guest sets an email and password on the SAME account and is let back in
+PASS  ACC4 the email and password are attached to the guest's own account
+PASS  ACC4 now reads its group
+PASS  ACC4 now reads its own round
+PASS  ACC4 now queries its own rounds
+PASS  ACC4 now lists the directory
+PASS  ACC4 now reads its own golfer
+PASS  ACC4 still cannot read another member's round
+== ACC5 a fresh anonymous sign-in (a stranger) gets nothing at all
+PASS  ACC5 a stranger's anonymous session cannot read the group
+PASS  ACC5 a stranger's anonymous session cannot read an invitation
+PASS  ACC5 a stranger's anonymous session cannot create a group
+
+RESULT: 45 passed, 0 failed
+
+== PUB1 applications: made without signing in, one per email, never readable by the applicant
+PASS  PUB1 signed out, an application is accepted
+PASS  PUB1 a second application for the same email is refused
+PASS  PUB1 an application already approved (status) is refused
+PASS  PUB1 an extra field (a password) is refused
+PASS  PUB1 an email that differs from the document key is refused
+PASS  PUB1 an upper-case key is refused (keys are lower case)
+PASS  PUB1 something that is not an email is refused
+PASS  PUB1 a name over 80 characters is refused
+PASS  PUB1 a time set by the device (not the server) is refused
+PASS  PUB1 an application with a mixed-case email and lower-case key is accepted
+PASS  PUB1 signed out, an application cannot be read
+PASS  PUB1 an outsider cannot read it
+PASS  PUB1 a PUBLIC member cannot read it
+PASS  PUB1 a PUBLIC member cannot list applications
+PASS  PUB1 a reviewer reads it
+PASS  PUB1 a reviewer lists applications
+PASS  PUB1 the owner lists applications
+PASS  PUB1 an outsider cannot approve it
+PASS  PUB1 a reviewer cannot change the applicant's name
+PASS  PUB1 approving without claiming first is refused (go-live fix 2)
+PASS  PUB1 a claim without the server's time is refused
+PASS  PUB1 a reviewer claims the approval (pending → approving)
+PASS  PUB1 a second reviewer cannot take a fresh claim (simultaneous approval)
+PASS  PUB1 a second reviewer cannot finish someone else's claim
+PASS  PUB1 an application being approved cannot be rejected
+PASS  PUB1 the same reviewer may renew the claim (a retry)
+PASS  PUB1 a pending application can be rejected
+PASS  PUB1 a rejected application cannot be claimed for approval
+PASS  PUB1 a reviewer deletes a rejected application
+== PUB2 approval: the reviewer makes the account; the set-password email confirms it
+PASS  PUB2 a PUBLIC member cannot write an approval
+PASS  PUB2 a reviewer cannot sign an approval as somebody else
+PASS  PUB2 another reviewer cannot write the approval under R's claim
+PASS  PUB2 the approval must name the claimed golfer
+PASS  PUB2 the claiming reviewer writes the approval
+PASS  PUB2 the approval cannot be written twice
+PASS  PUB2 the claiming reviewer finishes (approving → approved)
+PASS  PUB2 an approved application cannot be claimed again
+PASS  PUB2 the new account starts with an unconfirmed email
+PASS  PUB2 before the email is confirmed, the approval cannot be read
+PASS  PUB2 before the email is confirmed, joining PUBLIC is refused
+[36m[1mi [22m[39m To reset the password for pat.applicant@example.com, follow this link: http://127.0.0.1:9099/emulator/action?mode=resetPassword&lang=en&oobCode=B-05L9L1wPh934V8G_L3B_ON-ZIiDFIZK-jpF2RI_RLLiTqmgq11rM&apiKey=fake-api-key&newPassword=NEW_PASSWORD_HERE
+PASS  PUB2 setting the password from the email confirms the email (email_verified)
+PASS  PUB2 the applicant reads their own approval
+PASS  PUB2 an outsider cannot read it
+PASS  PUB2 the applicant cannot join with another golfer
+PASS  PUB2 the applicant cannot join as an admin
+PASS  PUB2 the applicant cannot remove their approval before joining
+PASS  PUB2 the applicant joins PUBLIC as the approved golfer
+PASS  PUB2 the applicant claims the approved golfer
+PASS  PUB2 the applicant adds PUBLIC to their own group list
+PASS  PUB2 the applicant removes the approval once joined
+== PUB3 the PUBLIC group cannot be entered any other way
+PASS  PUB3 an outsider cannot join PUBLIC with its code
+PASS  PUB3 an outsider cannot join PUBLIC with no approval
+PASS  PUB3 nobody can create a group with the id PUBLIC
+PASS  PUB3 an account that is not a group creator cannot create a group (Phase D)
+PASS  PUB3 private groups still join by code
+PASS  PUB3 a PUBLIC member cannot add a golfer to the PUBLIC roster
+PASS  PUB3 a reviewer adds a golfer to the PUBLIC roster
+PASS  PUB3 a reviewer writes the directory entry
+== PUB4 member lists: your own membership only, unless you are an admin
+PASS  PUB4 a PUBLIC member cannot list the members
+PASS  PUB4 a PUBLIC member reads their own membership
+PASS  PUB4 a PUBLIC member cannot read another member's membership
+PASS  PUB4 a reviewer lists the members
+PASS  PUB4 a PUBLIC member still lists the directory (name and index)
+PASS  PUB4 a private-group member cannot list that group's members either
+PASS  PUB4 the private group's owner lists its members
+== PUB5 reports (Apple guideline 1.2)
+PASS  PUB5 a member reports a golfer's name
+PASS  PUB5 a report signed as somebody else is refused
+PASS  PUB5 a report over 500 characters is refused
+PASS  PUB5 an outsider cannot report
+PASS  PUB5 a member cannot read reports
+PASS  PUB5 a reviewer lists the reports
+PASS  PUB5 a member cannot change a report
+PASS  PUB5 a reviewer dismisses (deletes) a report
+== PUB6 blocks: each account's own list
+PASS  PUB6 a member blocks a golfer
+PASS  PUB6 the member lists their own blocks
+PASS  PUB6 nobody else can read that list
+PASS  PUB6 nobody can write another account's list
+PASS  PUB6 the member unblocks
+== PUB7 reviewers remove members
+PASS  PUB7 a member cannot remove another member
+PASS  PUB7 a reviewer cannot remove the owner
+PASS  PUB7 a reviewer removes a regular member
+== PUB8 reviewers are only the admins of PUBLIC
+PASS  PUB8 the owner of a private group is not a reviewer
+PASS  PUB8 a private-group owner cannot write an approval
+
+RESULT: 83 passed, 0 failed
+
+== GRP1 only group creators create groups
+PASS  GRP1 Willy (group creator) creates a group
+PASS  GRP1 Willy becomes its owner
+PASS  GRP1 an admin cannot create a group
+PASS  GRP1 a regular member cannot create a group
+PASS  GRP1 a brand-new account cannot create a group
+PASS  GRP1 nobody can create a group in Willy's name
+PASS  GRP1 even Willy cannot put the admin secret on a new group document
+PASS  GRP1 Willy checks his own group-creator entry
+PASS  GRP1 nobody else can read it
+PASS  GRP1 nobody can list the group creators
+PASS  GRP1 nobody can add themselves as a group creator
+PASS  GRP1 not even Willy, from the app
+PASS  GRP1 Willy (group creator) lists every golfer, for Tidy
+PASS  GRP1 an admin cannot list every golfer
+PASS  GRP1 a regular member cannot list every golfer
+== GRP2 admin invitations: the owner only
+PASS  GRP2 the owner reads the admin secret
+PASS  GRP2 an admin cannot read the admin secret
+PASS  GRP2 a member cannot read the admin secret
+PASS  GRP2 an admin cannot change the admin secret
+PASS  GRP2 an admin cannot put an admin secret back on the group document
+PASS  GRP2 the owner cannot put it back on the group document either
+PASS  GRP2 the owner moves an older group's secret: removes it from the group document
+PASS  GRP2 ... and saves it where only the owner can read it
+PASS  GRP2 the member code does not make somebody an admin
+PASS  GRP2 a wrong admin code is refused
+PASS  GRP2 the owner's admin invitation works
+PASS  GRP2 an admin's (regular member) invitation works
+== GRP3 only the owner promotes and demotes
+PASS  GRP3 an admin cannot promote a member
+PASS  GRP3 an admin cannot demote another admin
+PASS  GRP3 a member cannot promote themselves
+PASS  GRP3 the owner promotes a member
+PASS  GRP3 the owner demotes them again
+PASS  GRP3 nobody can demote the owner
+== GRP4 admins remove regular members of their own group
+PASS  GRP4 an admin cannot remove the owner
+PASS  GRP4 an admin cannot remove another admin
+PASS  GRP4 an admin of another group cannot remove this group's member
+PASS  GRP4 a regular member cannot remove another member
+PASS  GRP4 an admin removes a regular member
+PASS  GRP4 a member may still leave by themselves
+== GRP6 archiving golfers (Tidy's merge and clean-up)
+PASS  GRP6 the owner archives a golfer of G1 that is on no roster
+PASS  GRP6 Tidy's exact merge write (archived, archivedAt, nameKey, mergedInto, editedIn)
+PASS  GRP6 archiving cannot also rename
+PASS  GRP6 a regular member cannot archive
+PASS  GRP6 an admin of G1 cannot archive a golfer of G2 only
+PASS  GRP6 an admin of G2 archives G2's golfer
+== GRP5 the owner keeps every right
+PASS  GRP5 the owner removes an admin
+PASS  GRP5 the owner renames the group
+PASS  GRP5 the owner changes the admin secret
+PASS  GRP5 the owner deletes a group
+
+RESULT: 49 passed, 0 failed
+
+== GRQ1 a request is made signed out, once, well formed
+PASS  GRQ1 signed out, a well-formed request is accepted
+PASS  GRQ1 a second request for the same email is refused
+PASS  GRQ1 the document id must be the lower-case email
+PASS  GRQ1 status must be pending
+PASS  GRQ1 an extra field is refused
+PASS  GRQ1 a missing group name is refused
+PASS  GRQ1 a group name over 60 characters is refused
+PASS  GRQ1 the time must be the server's
+PASS  GRQ1 a signed-in account may also send a request
+== GRQ2 only the group creator reads requests
+PASS  GRQ2 signed out cannot read a request
+PASS  GRQ2 an ordinary account cannot read a request
+PASS  GRQ2 an ordinary account cannot list requests
+PASS  GRQ2 the group creator reads a request
+PASS  GRQ2 the group creator lists requests
+== GRQ3 approving: claim with the new group id, then approve
+PASS  GRQ3 an ordinary account cannot claim
+PASS  GRQ3 a claim needs a group id
+PASS  GRQ3 pending cannot jump straight to approved
+PASS  GRQ3 the reviewer must be the one signed in
+PASS  GRQ3 the request's own fields cannot change
+PASS  GRQ3 the group creator claims it with the new group id
+PASS  GRQ3 the group id cannot change while approving it
+PASS  GRQ3 it can be released back to pending, keeping the group id
+PASS  GRQ3 claimed again (a retry)
+PASS  GRQ3 then approved
+PASS  GRQ3 an approved request cannot be declined
+PASS  GRQ3 an approved request cannot go back to pending
+== GRQ4 declining
+PASS  GRQ4 an ordinary account cannot decline
+PASS  GRQ4 the group creator declines a pending request
+PASS  GRQ4 a declined request cannot be claimed
+== GRQ5 deleting
+PASS  GRQ5 an ordinary account cannot delete a request
+PASS  GRQ5 the group creator deletes a request
+
+RESULT: 31 passed, 0 failed
+
+PASS  E1  signed out: Sign in, I have a code, Become a member or start a group; no sign-in happens by itself
+PASS  E2  the applicant applies with full name and email; the application is stored as pending
+PASS  E2b  a second application for the same email is refused with a clear message
+PASS  E3  the owner signs in, lands in PUBLIC and sees the application on the Admin tab
+[36m[1mi [22m[39m To reset the password for pat.applicant@example.com, follow this link: http://127.0.0.1:9099/emulator/action?mode=resetPassword&lang=en&oobCode=oxypl68VbM7LtfZtJYcjfcqAh7tmACXKyAIL4YMvfZ5H_PPr619wCA&apiKey=fake-api-key&newPassword=NEW_PASSWORD_HERE
+PASS  E4  approving creates the account, the golfer, the directory entry and the approval, and sends the password email
+PASS  E4b  a name already in use is refused and the owner is asked to change it
+[36m[1mi [22m[39m To reset the password for retry@example.com, follow this link: http://127.0.0.1:9099/emulator/action?mode=resetPassword&lang=en&oobCode=0da5P2QuRymkR2-5cq-gHHmOlXYLUUzl9Z_z2JB2_KkckEpByN-AXT&apiKey=fake-api-key&newPassword=NEW_PASSWORD_HERE
+PASS  E4c  an approval interrupted part-way is finished by the same reviewer, with the same golfer
+[36m[1mi [22m[39m To reset the password for both@example.com, follow this link: http://127.0.0.1:9099/emulator/action?mode=resetPassword&lang=en&oobCode=jwgP6-2SO8-Q_gN_Xb8iKS8-CrTxXfg1c3ifbB7zkrWQ_BhlH7AFYF&apiKey=fake-api-key&newPassword=NEW_PASSWORD_HERE
+PASS  E4d  two reviewers approving the same application at once: exactly one approval, one golfer, one account
+PASS  E5  the applicant chooses a password from the email, signs in and is in the PUBLIC group
+      after E5 the member's screen says: The Scorecard PUBLIC PAT APPLICANT A+ Auto · day Connected Welcome to the public group. Post your rounds on the Enter tab. Almost ready Whoever runs your group still needs to add the roster and a course. ✎ Enter ≡ My rounds ▤ Summary ⚑ Games
+PASS  E6  the member sees the group ranking with Report or block beside other golfers
+PASS  E7  reporting a name reaches the reviewers
+PASS  E8  blocking hides the golfer from the member's ranking; unblocking brings them back
+PASS  E8b  a regular member reads only their own membership, and no errors appeared
+PASS  E9  the owner sees the report and dismisses it
+PASS  E10  only the group creator is offered Start another group
+PASS  E11  a named private invitation: create an account, then join as the invited golfer
+PASS  E12  an admin invites regular members only: no Admin choice on the invitation
+PASS  E13  an admin removes a regular member of their group, and has no button for the owner
+PASS  E15  signed out: Start your own group sends a request (only after agreeing to the conditions)
+PASS  E16  Willy approves: the group is created with him as owner, the request is approved, and an admin invitation is ready to email to the organiser
+PASS  E17  the organiser taps the link, creates an account and joins the new group as its admin
+PASS  E14  Tidy finds and fixes duplicates and unused golfers across Willy's groups
+
+RESULT: 22 passed, 0 failed
+
+      | Owner: willy@example.com — owns 1 of 1 group(s).
+      | 
+      | == Saturday Group  (owner: willy@example.com; 4 member(s))
+      |    admin  Ada Admin                email              admin@example.com  last sign-in 2026-10-01
+      |    member Gus Guest                guest (no email)     last sign-in 2026-10-01
+      |    member Max Member               email              member@example.com  last sign-in 2026-10-01
+      |    owner  Willy Rosales            email              willy@example.com  last sign-in 2026-10-01
+      | 
+      | == Summary
+      |    memberships held by guests (no email): 1
+      |    admins or owners with no email       : 0
+      |    sign-ins in total                    : 4
+      |    guest sign-ins in no group           : 0
+      | 
+      | Nothing was changed.
+      | 
+PASS  GO1 count lists the members and finds the one guest
+PASS  GO1 count changes nothing
+PASS  GO2 plan shows the changes and changes nothing
+PASS  GO2 nothing written by plan
+      | Owner: willy@example.com — owns 1 of 1 group(s).
+      | What apply changes:
+      |   owner listed as the only group creator : yes
+      |   public group created                   : yes
+      |   admin codes moved to the owner's secret: 1
+      |   golfers given their groups list        : 3
+      |   directory entries written              : 3
+      |   memberships given their golfer         : 2
+      |   games given players and result sheet   : 1
+      |   invitation records for unused links    : 0
+      | 
+      | Applied 15 change(s).
+      | OK: everything is in place.
+      | 
+PASS  GO3 apply finishes and checks itself
+PASS  GO3 the owner is the group creator
+PASS  GO3 the public group exists, owned by the owner
+PASS  GO3 the admin code moved to the owner's secret
+PASS  GO3 golfers list their group
+PASS  GO3 the directory has names and indexes (from rounds, or the typed-in index)
+PASS  GO3 memberships record their golfer
+PASS  GO3 the game lists who played and its result sheet
+PASS  GO3 names and rounds untouched
+PASS  GO4 running apply again changes nothing
+PASS  GO4 verify agrees
+PASS  GO5 a member reads their own rounds
+PASS  GO5 ... and not anybody else's
+PASS  GO5 a member reads a game they played in
+PASS  GO5 a member reads the directory
+PASS  GO5 the admin reads an unjoined golfer of the group
+PASS  GO5 the admin cannot read the admin secret
+PASS  GO5 an admin invitation sent before go-live still works
+PASS  GO5 an old guest sign-in is refused until it sets an email
+PASS  GO6 rollback puts the admin code back on the group
+PASS  GO6 the marker says rolled-back
+ERROR: the data step stopped part-way: stopped on purpose after 2 batch(es) (test). Nothing is lost; run it again to continue, or roll back.
+PASS  GO7 a failure part-way stops with a clear message
+PASS  GO7 the marker records data-failed and why
+PASS  GO7 status shows how far it got
+PASS  GO7 the marker holds every admin code before it moved
+PASS  GO8 rollback from the database marker alone puts both admin codes back
+PASS  GO8 running apply again finishes the job
+PASS  GO8 marker data-done and verify agrees
+PASS  GO8 G2's admin code moved
+PASS  GO9 an invitation already sent gets its greeting record
+PASS  GO9 no record for a golfer never invited
+PASS  GO9 the invitee reads the greeting record
+PASS  GO9 ... but not the golfer record (go-live fix 1)
+PASS  GO9 nobody can read the migration marker from an app
+
+RESULT: 38 passed, 0 failed
+
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+== GL1 the data step fails part-way: everything is put back by itself
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+      |   golfers given their groups list        : 1
+      |   directory entries written              : 1
+      |   memberships given their golfer         : 0
+      |   games given players and result sheet   : 0
+      |   invitation records for unused links    : 0
+      | ERROR: the data step stopped part-way: stopped on purpose after 1 batch(es) (test). Nothing is lost; run it again to continue, or roll back.
+      | 
+      | Something failed during the data step. Putting everything back automatically ...
+      | Owner: willyros01@gmail.com — owns 1 of 1 group(s).
+      | OK: 1 admin code(s) put back on their groups. The other additions are harmless under the old rules and are left in place.
+      | DONE: the earlier rules are live again and the old web app works. Nothing was lost.
+      | Send a screenshot to Claude. When it is fixed, bash go2.txt can simply be run again.
+PASS  GL1 go2.txt stops (exit 1)
+PASS  GL1 it says what failed and that everything is back
+PASS  GL1 the old rules are still live
+PASS  GL1 the admin code is back on the group
+PASS  GL1 the marker says rolled-back
+== GL2 publishing the rules fails: the old rules stay, then a second run succeeds
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+      |   games given players and result sheet   : 0
+      |   invitation records for unused links    : 0
+      | 
+      | Applied 7 change(s).
+      | OK: everything is in place.
+      | curl: (22) The requested URL returned error: 500 (fake)
+      | 
+      | Something failed during publishing the rules. Putting everything back automatically ...
+      | Owner: willyros01@gmail.com — owns 2 of 2 group(s).
+      | OK: 1 admin code(s) put back on their groups. The other additions are harmless under the old rules and are left in place.
+      | DONE: the earlier rules are live again and the old web app works. Nothing was lost.
+      | Send a screenshot to Claude. When it is fixed, bash go2.txt can simply be run again.
+PASS  GL2 go2.txt stops (exit 1)
+PASS  GL2 it names the step
+PASS  GL2 the old rules are live
+PASS  GL2 the admin code is back
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+      | OK: the published rules are the Version 2.0 rules.
+      | Owner: willyros01@gmail.com — owns 2 of 2 group(s).
+      | OK: every data change is in place.
+      | OK: the password email now has the subject "Choose your password for The Scorecard".
+      | 
+      | DONE. Version 2.0 is live. Now tell Claude to switch the web to Version 2.0.
+PASS  GL2 running it again goes live (exit 0)
+PASS  GL2 the Version 2.0 rules are live
+PASS  GL2 the marker says verified
+PASS  GL2 the admin code moved off the group
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+PASS  GL3 running it once more only checks (exit 0)
+PASS  GL3 ... and says so
+== GL4 the manual rollback
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+      | 
+      | OK: the earlier rules are published again.
+      | Owner: willyros01@gmail.com — owns 2 of 2 group(s).
+      | OK: 1 admin code(s) put back on their groups. The other additions are harmless under the old rules and are left in place.
+      | OK: the email subject is back as it was.
+      | Now tell Claude to put the web back to 2.21.9.
+PASS  GL4 rollback succeeds (exit 0)
+PASS  GL4 the old rules are live
+PASS  GL4 the admin code is back
+== GL5 the check after publishing fails: the old rules are put back
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+      |   memberships given their golfer         : 0
+      |   games given players and result sheet   : 0
+      |   invitation records for unused links    : 0
+      | 
+      | Applied 1 change(s).
+      | OK: everything is in place.
+      | 
+      | Something failed during checking the published rules. Putting everything back automatically ...
+      | Owner: willyros01@gmail.com — owns 2 of 2 group(s).
+      | OK: 1 admin code(s) put back on their groups. The other additions are harmless under the old rules and are left in place.
+      | DONE: the earlier rules are live again and the old web app works. Nothing was lost.
+      | Send a screenshot to Claude. When it is fixed, bash go2.txt can simply be run again.
+PASS  GL5 go2.txt stops (exit 1)
+PASS  GL5 it names the step
+PASS  GL5 the old rules are live again
+PASS  GL5 the admin code is back
+PASS  GL5 the marker says rolled-back
+PASS  GL5 status shows the marker
+
+RESULT: 24 passed, 0 failed
+[32m[1m✔ [22m[39m Script exited successfully (code 0)
+[36m[1mi  emulators:[22m[39m Shutting down emulators.
+[36m[1mi  firestore:[22m[39m Stopping Firestore Emulator
+[36m[1mi  auth:[22m[39m Stopping Authentication Emulator
+[36m[1mi  hub:[22m[39m Stopping emulator hub
+[36m[1mi  logging:[22m[39m Stopping Logging Emulator
