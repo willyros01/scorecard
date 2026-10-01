@@ -1,0 +1,115 @@
+Building The Scorecard 2.30.0-beta.2 as version 2.30.0, build 7
+--- 1. npm ci and 2. build checks V1-V6
+OK    V1 npm ci succeeded from the committed lockfile
+OK    V2 every package is exactly the approved version
+
+  vendor/firebase/firebase-10.12.0.js  383.4kb
+
+⚡ Done in 42ms
+OK    V3 the committed bundle is identical to a fresh build
+OK    V4 no remote code in the 15 packaged files
+OK    V5 Capacitor core, cli and ios are 8.5.2
+OK    V6 no location.origin; the bundle exports everything store.js uses
+verify.sh: all checks passed
+--- 3. Collect the web files into www/
+www/app.js
+www/courses-api.js
+www/firebase-config.js
+www/icon.svg
+www/index.html
+www/migrate.js
+www/model.js
+www/outbox.js
+www/platform.js
+www/quick-start.html
+www/store.js
+www/styles.css
+www/vendor/firebase/bundle.source
+www/vendor/firebase/firebase-10.12.0.js
+www/version.js
+--- 4. Capacitor: generate the iOS project (fresh every build) and sync
+✔ Adding native Xcode project in ios in 15.28ms
+✔ add in 15.75ms
+✔ Copying web assets from www to ios/App/App/public in 6.86ms
+✔ Creating capacitor.config.json in ios/App/App in 512.83μs
+✔ copy ios in 20.07ms
+✔ Updating iOS plugins in 982.83μs
+[info] All Capacitor plugins have a Package.swift file and will be included in Package.swift
+[info] Writing Package.swift
+[info] Found 5 Capacitor plugins for ios:
+       @capacitor/app@8.1.1
+       @capacitor/share@8.0.2
+       @capacitor/filesystem@8.1.3
+       @capacitor/clipboard@8.0.1
+       @capacitor/app-launcher@8.0.1
+✔ update ios in 13.80ms
+[success] ios platform added!
+Follow the Developer Workflow guide to get building:
+https://capacitorjs.com/docs/basics/workflow
+✔ Copying web assets from www to ios/App/App/public in 30.59ms
+✔ Creating capacitor.config.json in ios/App/App in 531.96μs
+✔ copy ios in 41.30ms
+✔ Updating iOS plugins in 1.35ms
+[info] All Capacitor plugins have a Package.swift file and will be included in Package.swift
+[info] Writing Package.swift
+[info] Found 5 Capacitor plugins for ios:
+       @capacitor/app@8.1.1
+       @capacitor/share@8.0.2
+       @capacitor/filesystem@8.1.3
+       @capacitor/clipboard@8.0.1
+       @capacitor/app-launcher@8.0.1
+✔ update ios in 15.72ms
+[info] Sync finished in 0.071s
+--- Project settings: privacy manifest, entitlements, Info.plist
+Xcode project: privacy manifest added as a resource; entitlements set.
+--- App icon and launch image
+--- App Store Connect key
+--- Check the Apple key is accepted
+Apple API preflight passed: the key is accepted.
+App record found: The Scorecard: Golf Handicaps (io.github.willyros01.scorecard).
+--- 5. Set the version, 6. archive (signed for distribution at export, as Fairpot does: no devices needed)
+    cd /Users/runner/work/scorecard/scorecard/ios/App
+    /usr/bin/touch -c /Users/runner/Library/Developer/Xcode/DerivedData/App-foiydrissoivwcgqlipyfvsodhew/Build/Intermediates.noindex/ArchiveIntermediates/App/InstallationBuildProductsLocation/Applications/App.app
+
+** ARCHIVE SUCCEEDED **
+
+--- 7. Audit the finished, distribution-signed app (A1-A7). No upload unless it passes.
+Audit of App.app — 2.30.0 (7)
+      privacy manifests found: 3
+        Frameworks/Capacitor.framework/PrivacyInfo.xcprivacy
+        Frameworks/Cordova.framework/PrivacyInfo.xcprivacy
+        PrivacyInfo.xcprivacy
+OK    A1 the app's own manifest: no tracking, no tracking domains
+      categories declared across all manifests: NSPrivacyAccessedAPICategoryUserDefaults
+      App: none
+      Capacitor: none
+      Cordova: none
+OK    A2 every required-reason API category used is declared
+      frameworks and resource bundles in the app:
+        Frameworks/Capacitor.framework
+        Frameworks/Cordova.framework
+OK    A3 Capacitor (on Apple's commonly used SDK list) ships its own privacy manifest
+OK    A3 every embedded framework carries a valid signature
+OK    A4 no NS…UsageDescription keys (no camera, photos, location or contacts)
+      entitlements: application-identifier beta-reports-active com.apple.developer.associated-domains com.apple.developer.team-identifier get-task-allow
+OK    A5 no unexpected entitlements
+OK    A5 get-task-allow is false
+OK    A5 associated domains: applinks:www.cuberoot-systems.com only
+OK    A6 no App Transport Security exceptions
+OK    A7 ITSAppUsesNonExemptEncryption is NO
+OK    A7 no bundled encryption library (SQLCipher, OpenSSL, BoringSSL)
+
+AUDIT PASSED (A1-A7)
+--- 8. Upload to TestFlight
+::notice title=Uploaded::The Scorecard 2.30.0 build 7 sent to App Store Connect.
+--- 9. Test Information and What to Test
+Test Information filled.
+Waiting for Apple to process build 7 (not listed yet)…
+Waiting for Apple to process build 7 (not listed yet)…
+Waiting for Apple to process build 7 (not listed yet)…
+Waiting for Apple to process build 7 (not listed yet)…
+Waiting for Apple to process build 7 (not listed yet)…
+"What to Test" filled for build 7.
+Export compliance already set (usesNonExemptEncryption: false).
+Group "Willy": POST /v1/betaGroups/a860dc30-33c8-4115-b7eb-2835e7bec0ad/relationships/builds — ENTITY_UNPROCESSABLE: Cannot add internal group to a build. (automatic distribution may already have added it).
+RESULT: success — The Scorecard 2.30.0 build 7 uploaded to TestFlight.
