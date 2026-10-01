@@ -42,6 +42,9 @@ def body():
 if "raw.githubusercontent.com" in url:
     parts = url.split("raw.githubusercontent.com/willyros01/scorecard/")[1].split("/", 1)
     sha, rel = parts[0], parts[1]
+    override = FAKE / "raw" / sha / rel
+    if override.exists():
+        reply(override.read_text())
     if sha == LIVE_COMMIT and rel == "firestore.rules":
         reply((FAKE / "old-rules.txt").read_text())
     reply((REPO / rel).read_text())
