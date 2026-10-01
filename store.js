@@ -1439,13 +1439,17 @@ export async function saveApplicationSettings({ mode, dailyLimit }) {
   return { mode: mode === "auto" ? "auto" : "manual", dailyLimit: limit };
 }
 
-/* Does this email already have an account? (One document, by its id.) */
+/* Does this email already have an account? (One document, by its id.) Read
+   from the server: a signed-out device has nothing cached to trust. */
+let lastAccountCheckError = "";
+export const accountCheckError = () => lastAccountCheckError;
 export async function emailHasAccount(email) {
   if (!fb) return false;
   try {
-    const snap = await fb.mod.store.getDoc(ref("accountEmails", emailKey(email)));
+    const snap = await fb.mod.store.getDocFromServer(ref("accountEmails", emailKey(email)));
+    lastAccountCheckError = "";
     return snap.exists();
-  } catch { return false; }
+  } catch (e) { lastAccountCheckError = String((e && (e.code || e.message)) || "unknown"); return false; }
 }
 
 /* Every signed-in account records its own email once, so the form can tell an
@@ -1516,7 +1520,7 @@ export const plainName = (name) => /^[A-Za-z][A-Za-z'-]*( [A-Za-z][A-Za-z'-]*)+$
    is tapped. */
 const APPLY_EMAIL_KEY = "golf:v2:applyEmail";
 export async function sendApplicationLink(email) {
-  const url = EMULATORS ? `${location.origin}${location.pathname}?emulators=1&apply=1` : `${platform.joinBase()}?apply=1`;
+  const url = EMULATORS ? `${location.protocol}//${location.host}${location.pathname}?emulators=1&apply=1` : `${platform.joinBase()}?apply=1`;
   await fb.mod.auth.sendSignInLinkToEmail(fb.auth, String(email || "").trim(), { url, handleCodeInApp: true });
   try { localStorage.setItem(APPLY_EMAIL_KEY, String(email || "").trim()); } catch {}
 }
@@ -1575,7 +1579,7 @@ export async function autoJoinPublic() {
     await commitTogether([
       { op: "set", merge: false, path: ["golfers", golfer.id], data: { ...golfer, linkedUid: uid, groups: [PUBLIC_ID] } },
       { op: "set", merge: false, path: ["golferNames", nk], data: { golferId: golfer.id, name: golfer.name } },
-      { op: "set", merge: false, path: ["autoApprovals", day], data: { count: count + 1 } },
+      { op: "set", merge: false, path: ["autoApprovals", day], data: { count: count + 1, lastBy: uid, lastAt: { __serverTimestamp: true } } },
       { op: "set", merge: false, path: ["publicApprovals", key],
         data: { golferId: golfer.id, displayName: golfer.name, nameKey: nk, approvedBy: uid, approvedAt: { __serverTimestamp: true }, auto: true } },
     ], "approve automatically");

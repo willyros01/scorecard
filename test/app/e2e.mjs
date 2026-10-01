@@ -247,7 +247,14 @@ await check("E4", "approving creates the account, the golfer, the directory entr
 await check("E4b", "a name already in use is refused and the owner is asked to change it", async () => {
   await put("publicApplications/second@example.com", { fullName: "Mia Member", email: "second@example.com", status: "pending" });
   await waitForText(owner, /second@example\.com/);
-  await owner.locator('[data-act="review-application"]').first().click();
+  await owner.locator('[data-act="review-application"][data-id="second@example.com"]').click();
+  /* beta.4 (Willy, Oct 1): the next free number is filled in for a taken name. */
+  const end = Date.now() + 10000;
+  let v = "";
+  while (Date.now() < end && (v = await owner.inputValue('[name="approve-name"]')) !== "Mia Member 1") await owner.waitForTimeout(300);
+  if (v !== "Mia Member 1") throw new Error(`the name offered is "${v}", not "Mia Member 1"`);
+  /* Typing the taken name back is still refused, as before. */
+  await owner.fill('[name="approve-name"]', "Mia Member");
   await owner.locator('[data-pc="approve"]').click();
   await waitForText(owner, /already used/);
   if (await accountByEmail("second@example.com")) throw new Error("an account was made for a refused approval");
@@ -582,7 +589,11 @@ await check("E21", "an email that already has an account is stopped on screen; n
   await p.fill('[name="apply-email"]', W.email);
   await p.locator('[name="ap-agree"]').check();
   await p.locator('[data-act="submit-application"]').click();
-  await waitForText(p, /This email already has an account/);
+  try { await waitForText(p, /This email already has an account/); }
+  catch (e) {
+    const why = await p.evaluate(async (em) => { const db = await import("/store.js"); const has = await db.emailHasAccount(em); return `has=${has} error=${db.accountCheckError()}`; }, W.email);
+    throw new Error(`${e.message} | check: ${why}`);
+  }
   if (await getDocQuick(`publicApplications/${W.email}`)) throw new Error("an application was saved");
 });
 async function turnSwitch(mode) {

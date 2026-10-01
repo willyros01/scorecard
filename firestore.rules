@@ -288,7 +288,7 @@ service cloud.firestore {
     }
 
     function todayKey() {
-      return string(math.floor(request.time.toMillis() / 86400000));
+      return string(int(request.time.toMillis() / 86400000));
     }
 
     function counterPath() {
@@ -314,9 +314,11 @@ service cloud.firestore {
         && !exists(/databases/$(database)/documents/blockedEmails/$(emailKey))
         && !exists(/databases/$(database)/documents/blockedDomains/$(emailKey.split('@')[1]))
         && !exists(/databases/$(database)/documents/blockedNames/$(request.resource.data.nameKey))
-        /* The day's counter must move by exactly one in this same batch, and
-           stay within the limit. */
-        && getAfter(counterPath()).data.count == (exists(counterPath()) ? get(counterPath()).data.count : 0) + 1
+        /* The day's counter must be written in this same batch (its rule
+           makes it move by exactly one, stamped with this account and this
+           moment), and stay within the limit. */
+        && getAfter(counterPath()).data.lastBy == request.auth.uid
+        && getAfter(counterPath()).data.lastAt == request.time
         && getAfter(counterPath()).data.count <= settingsDoc().get('dailyLimit', 20);
     }
 
@@ -950,12 +952,16 @@ service cloud.firestore {
     match /autoApprovals/{dayKey} {
       allow get: if signedIn();
       allow create: if dayKey == todayKey()
-        && request.resource.data.keys().hasOnly(['count'])
+        && request.resource.data.keys().hasOnly(['count', 'lastBy', 'lastAt'])
         && request.resource.data.count == 1
+        && request.resource.data.lastBy == request.auth.uid
+        && request.resource.data.lastAt == request.time
         && autoApprovalInThisBatch();
       allow update: if dayKey == todayKey()
-        && request.resource.data.keys().hasOnly(['count'])
+        && request.resource.data.keys().hasOnly(['count', 'lastBy', 'lastAt'])
         && request.resource.data.count == resource.data.count + 1
+        && request.resource.data.lastBy == request.auth.uid
+        && request.resource.data.lastAt == request.time
         && autoApprovalInThisBatch();
     }
 

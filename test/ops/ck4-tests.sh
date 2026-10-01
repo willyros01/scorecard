@@ -118,7 +118,8 @@ auto_writes(){ local day; day="$(( $(date -u +%s) / 86400 ))"
   jq -nc --arg db "${DB}" --arg ek "$1" --arg g "$2" --arg n "$3" --arg nk "$4" --arg u "$5" --arg c "$6" --arg day "${day}" --arg cx "${7:-false}" '
   [ {update:{name:"\($db)/golfers/\($g)",fields:{name:{stringValue:$n},nameKey:{stringValue:$nk},linkedUid:{stringValue:$u},groups:{arrayValue:{values:[{stringValue:"PUBLIC"}]}}}}},
     {update:{name:"\($db)/golferNames/\($nk)",fields:{golferId:{stringValue:$g},name:{stringValue:$n}}}},
-    ({update:{name:"\($db)/autoApprovals/\($day)",fields:{count:{integerValue:$c}}}} + (if $cx == "true" then {currentDocument:{exists:true}} else {} end)),
+    ({update:{name:"\($db)/autoApprovals/\($day)",fields:{count:{integerValue:$c},lastBy:{stringValue:$u}}},
+      updateTransforms:[{fieldPath:"lastAt",setToServerValue:"REQUEST_TIME"}]} + (if $cx == "true" then {currentDocument:{exists:true}} else {} end)),
     {update:{name:"\($db)/publicApprovals/\($ek)",fields:{golferId:{stringValue:$g},displayName:{stringValue:$n},nameKey:{stringValue:$nk},approvedBy:{stringValue:$u},auto:{booleanValue:true}}},
      updateTransforms:[{fieldPath:"approvedAt",setToServerValue:"REQUEST_TIME"}]} ]'; }
 # applicant EMAIL NAME → "uid token" for a confirmed account, with a pending application
@@ -161,10 +162,10 @@ refused "CK2 last seen must be the server's time"                             wr
 refused "CK2 nothing else changes with it"                                    ts_update "${TO}" "associations/G2/members/${O}" '{"role":"admin"}' lastSeenAt
 
 echo "== CK3 the applications switch"
-allowed "CK3 anyone, signed out, reads the switch"                            get_any - "settings/publicApplications"
 refused "CK3 an ordinary account cannot change it"                            ts_write "${TO}" "settings/publicApplications" "{\"mode\":\"auto\",\"dailyLimit\":20,\"updatedBy\":\"${O}\"}" updatedAt
 allowed "CK3 a reviewer turns it to Auto"                                     ts_write "${TR}" "settings/publicApplications" "{\"mode\":\"auto\",\"dailyLimit\":20,\"updatedBy\":\"${R}\"}" updatedAt
 allowed "CK3 Willy turns it back to Manual"                                   ts_write "${TW}" "settings/publicApplications" "{\"mode\":\"manual\",\"dailyLimit\":20,\"updatedBy\":\"${W}\"}" updatedAt
+allowed "CK3 anyone, signed out, reads the switch"                            get_any - "settings/publicApplications"
 refused "CK3 only Manual or Auto"                                             ts_write "${TW}" "settings/publicApplications" "{\"mode\":\"always\",\"dailyLimit\":20,\"updatedBy\":\"${W}\"}" updatedAt
 refused "CK3 the daily limit is 1 to 500"                                     ts_write "${TW}" "settings/publicApplications" "{\"mode\":\"auto\",\"dailyLimit\":0,\"updatedBy\":\"${W}\"}" updatedAt
 refused "CK3 other settings documents are closed"                             get_any - "settings/other"
@@ -209,7 +210,10 @@ refused "CK7 the golfer must be linked to the applicant"                      co
 
 echo "== CK8 Auto: a clean application is approved by the applicant, then joins"
 allowed "CK8 Ann approves herself (all checks pass)"                          commit_as "${T1}" "$(auto_writes ann.auto@example.com gAnn 'Ann Auto' ann-auto "${U1}" 1)"
-refused "CK8 the counter cannot move on its own"                              write_as "${T1}" "autoApprovals/${DAY}" '{"count":5}'
+if [[ "$(curl -g -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer ${T1}" "${FS}/${DB}/publicApprovals/ann.auto@example.com")" != 200 ]]; then
+  echo "      why: $(jq -nc --argjson w "$(auto_writes ann.auto@example.com gAnn 'Ann Auto' ann-auto "${U1}" 1)" '{writes:$w}' | curl -g -sS -H "Authorization: Bearer ${T1}" -H 'Content-Type: application/json' --data-binary @- "${FS}/${DB}:commit" | tr -s ' \n' ' ' | cut -c1-900)"
+fi
+refused "CK8 the counter cannot move on its own"                              ts_update "${T1}" "autoApprovals/${DAY}" "{\"count\":2,\"lastBy\":\"${U1}\"}" lastAt
 allowed "CK8 she puts her own golfer on the public roster"                    write_as "${T1}" "associations/PUBLIC/roster/gAnn" '{"golferId":"gAnn"}'
 refused "CK8 not somebody else's golfer"                                      write_as "${T1}" "associations/PUBLIC/roster/gTaken" '{"golferId":"gTaken"}'
 allowed "CK8 she joins the public group with that golfer"                     ts_write "${T1}" "associations/PUBLIC/members/${U1}" "{\"uid\":\"${U1}\",\"role\":\"member\",\"displayName\":\"Ann Auto\",\"golferId\":\"gAnn\"}" joinedAt
