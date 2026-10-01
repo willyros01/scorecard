@@ -143,6 +143,12 @@ export const clampIndex = (value) => {
  * stands in, so somebody with a known handicap is not treated as unrated. */
 export function effectiveIndex(golfer) {
   if (!golfer) return { index: null, source: "none" };
+  /* A regular member sees other golfers only through the group directory
+     (Version 2.0, Phase A): the published index, nothing to recompute from. */
+  if (golfer.fromDirectory) {
+    const v = golfer.directoryIndex;
+    return Number.isFinite(v) ? { index: v, source: "directory" } : { index: null, source: "none" };
+  }
   const fromRounds = displayIndex(golfer.recentWindow);
   if (fromRounds != null) return { index: fromRounds, source: "rounds" };
   const manual = clampIndex(golfer.manualIndex);
@@ -351,12 +357,14 @@ export const gameSpanLabel = (game) => {
  * admin invitation carries a different secret, and the rules grant the admin
  * role only when that second code matches. A guest link cannot be altered into
  * an admin one. */
-export const buildAssociation = ({ name, ownerUid, joinCode = newJoinCode(), adminCode = newJoinCode(), id = newId() }) => ({
+/* Version 2.0 Phase D: the admin code is no longer on the group document,
+   which every member can read. It lives in associations/{id}/secrets/admin,
+   which only the owner can read (store.js ensureAdminCode). */
+export const buildAssociation = ({ name, ownerUid, joinCode = newJoinCode(), id = newId() }) => ({
   id,
   name: String(name).trim(),
   ownerUid,
   joinCode,
-  adminCode,
   settings: { minRoundsForRanking: 3 },
 });
 

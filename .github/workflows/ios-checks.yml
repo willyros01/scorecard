@@ -1,0 +1,70 @@
+name: iOS branch checks (V1-V6 and web tests)
+
+# Runs by itself on every push to the ios branch. Nothing is published: the
+# web app is served only inside GitHub's test machine. Full logs are saved to
+# the ci-logs branch of this repo.
+on:
+  push:
+    branches: [ios, v2]
+
+permissions:
+  contents: write   # to save the logs, and on the very first run the generated lockfile and bundle
+
+concurrency:
+  group: ios-checks-${{ github.ref_name }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: First run only - create the lockfile and the Firebase bundle
+        id: bootstrap
+        run: |
+          exec > >(tee bootstrap.log) 2>&1
+          changed=no
+          if [ ! -f package-lock.json ]; then npm install --no-audit --no-fund; changed=yes; fi
+          # The bundle is rebuilt whenever the list of Firebase functions
+          # (build/firebase-entry.js) or the locked packages change; the
+          # fingerprint of both is kept beside the bundle.
+          want="$(cat build/firebase-entry.js package-lock.json | sha256sum | cut -c1-16)"
+          have="$(cat vendor/firebase/bundle.source 2>/dev/null || true)"
+          if [ ! -f vendor/firebase/firebase-10.12.0.js ] || [ "$want" != "$have" ]; then
+            npm ci --no-audit --no-fund; npm run -s bundle; echo "$want" > vendor/firebase/bundle.source; changed=yes
+          fi
+          if [ "$changed" = yes ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add package-lock.json vendor/firebase/firebase-10.12.0.js vendor/firebase/bundle.source
+            git commit -m "Add the generated lockfile and Firebase bundle (exact approved versions)"
+            git push origin HEAD:${GITHUB_REF_NAME}
+          fi
+      - name: Build checks V1-V6
+        id: verify
+        run: bash build/verify.sh 2>&1 | tee verify.log
+      - name: Install the test browsers (WebKit and Chromium)
+        run: npx playwright install --with-deps chromium webkit
+      - name: Web tests and merge rehearsal
+        id: web
+        env:
+          TEST_OWNER_EMAIL: ${{ secrets.TEST_OWNER_EMAIL }}
+          TEST_OWNER_PASSWORD: ${{ secrets.TEST_OWNER_PASSWORD }}
+        run: |
+          git worktree add ../v2.21.9-live v2.21.9-live
+          node test/web/run.mjs . ../v2.21.9-live 2>&1 | tee web-tests.log
+      - name: Save logs to the ci-logs branch
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/scripts/save-logs.sh checks "bootstrap=${{ steps.bootstrap.outcome }} verify=${{ steps.verify.outcome }} web=${{ steps.web.outcome }}" bootstrap.log verify.log web-tests.log

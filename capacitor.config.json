@@ -1,0 +1,9 @@
+{
+  "appId": "io.github.willyros01.scorecard",
+  "appName": "The Scorecard",
+  "webDir": "www",
+  "ios": {
+    "contentInset": "never",
+    "limitsNavigationsToAppBoundDomains": false
+  }
+}

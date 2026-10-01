@@ -9,8 +9,26 @@
 
 import * as model from "./model.js";
 import * as outbox from "./outbox.js";
+import * as platform from "./platform.js";
 
-const SDK = "https://www.gstatic.com/firebasejs/10.12.0";
+/* Firebase is bundled into the app's own files (spec Change 3): built from
+   the firebase npm package at exactly 10.12.0 by build/firebase-entry.js.
+   Nothing is downloaded at run time. */
+const FIREBASE_BUNDLE = "./vendor/firebase/firebase-10.12.0.js";
+
+/* ---------------- offline-aware reads (spec Change 3, Part C) ----------------
+   With data kept on the device, an offline read of something never
+   downloaded comes back EMPTY, not as an error. "Empty" must then mean
+   "unknown, offline" — never "you belong to no group" or "not found". */
+let cacheMiss = false;
+function noteRead(snap, found) {
+  const fromCache = !!(snap && snap.metadata && snap.metadata.fromCache);
+  if (fromCache && !found) cacheMiss = true;
+  else if (!fromCache) cacheMiss = false;
+}
+export const readsOffline = () => cacheMiss || (typeof navigator !== "undefined" && navigator.onLine === false);
+let persistentCacheOff = false;
+export const offlineCopyUnavailable = () => persistentCacheOff;
 
 let fb = null;            // { app, auth, db, mod }
 let uid = null;
@@ -56,6 +74,19 @@ const report = (e) => { const [short, full] = describe(e); setError(short, full)
 
 /* ---------------- boot ---------------- */
 
+/* Automated tests only. On this machine's own address (localhost) with
+   ?emulators=1, the app talks to the Firebase emulators running beside the
+   tests — a demo project that cannot reach any live data. Anywhere else,
+   including the published site and the iPhone app, this is always false. */
+const EMULATORS = (() => {
+  try {
+    return ["localhost", "127.0.0.1"].includes(location.hostname)
+      && new URLSearchParams(location.search).has("emulators");
+  } catch { return false; }
+})();
+const EMULATOR_CONFIG = { apiKey: "fake-api-key", projectId: "demo-scorecard", authDomain: "localhost", appId: "demo" };
+const AUTH_EMULATOR = "http://127.0.0.1:9099";
+
 export async function init() {
   let config;
   try {
@@ -71,19 +102,43 @@ export async function init() {
   if (!configured) { setStatus("On this device"); return; }
 
   try {
-    const [app, auth, store] = await Promise.all([
-      import(`${SDK}/firebase-app.js`),
-      import(`${SDK}/firebase-auth.js`),
-      import(`${SDK}/firebase-firestore.js`),
-    ]);
-    const instance = app.initializeApp(config.firebaseConfig);
-    fb = { mod: { auth, store }, auth: auth.getAuth(instance), db: store.getFirestore(instance) };
+    const { app, auth, store } = await import(FIREBASE_BUNDLE);
+    const firebaseConfig = EMULATORS ? EMULATOR_CONFIG : config.firebaseConfig;
+    const instance = app.initializeApp(firebaseConfig);
+    /* IndexedDB is where getAuth has always kept the sign-in, so existing web
+       sign-ins carry straight over (proved by rehearsal R1). The no-remote-code
+       auth build offers IndexedDB only. getAuth itself can hang inside the app. */
+    const authInstance = auth.initializeAuth(instance, {
+      persistence: [auth.indexedDBLocalPersistence],
+    });
+    if (EMULATORS) auth.connectAuthEmulator(authInstance, AUTH_EMULATOR, { disableWarnings: true });
+    /* Inside the app every document read is kept on the device across
+       restarts (Part B). In a browser Firestore stays memory-only, as today. */
+    let database;
+    if (platform.isApp()) {
+      try {
+        database = store.initializeFirestore(instance, {
+          localCache: store.persistentLocalCache({ tabManager: store.persistentSingleTabManager() }),
+        });
+      } catch {
+        persistentCacheOff = true;
+        database = store.getFirestore(instance);
+      }
+    } else {
+      database = store.getFirestore(instance);
+    }
+    if (EMULATORS) store.connectFirestoreEmulator(database, "127.0.0.1", 8080);
+    fb = { mod: { app, auth, store }, auth: authInstance, db: database, config: firebaseConfig };
 
     await new Promise((resolve) => {
       auth.onAuthStateChanged(fb.auth, async (user) => {
+        /* Version 2.0 Phase B: no anonymous sign-in. Nobody signed in means the
+           first screen asks them to sign in, or to create their account from an
+           invitation. The old automatic guest sign-in is gone for good. */
         if (!user) {
-          try { await auth.signInAnonymously(fb.auth); }
-          catch (e) { setStatus("Saved on device", true); report(e); resolve(); }
+          uid = null;
+          setStatus("Signed out");
+          resolve();
           return;
         }
         uid = user.uid;
@@ -104,6 +159,15 @@ export async function init() {
 }
 
 const ref = (...path) => fb.mod.store.doc(fb.db, ...path);
+/* Every live watcher goes through here, so a saved copy shown while offline is
+   labelled as such (Part C). Only when the device is actually offline, so the
+   web app never flickers. */
+const listen = (target, onNext, onError) => fb.mod.store.onSnapshot(target, (snap) => {
+  if (snap && snap.metadata && snap.metadata.fromCache && typeof navigator !== "undefined" && navigator.onLine === false) {
+    setStatus("Offline — showing saved copy", true);
+  }
+  onNext(snap);
+}, onError);
 const col = (...path) => fb.mod.store.collection(fb.db, ...path);
 
 /* ---------------- the outbox writer ---------------- */
@@ -230,6 +294,13 @@ export async function createAssociation({ name, displayName }) {
       "Firebase refused part of the setup, usually because the rules in the console are older than this version. Nothing was left behind — publish the latest firestore.rules and try again.");
     throw e;
   }
+
+  /* Phase D: the admin invitation secret, where only the owner can read it.
+     Written after the membership, because the rule reads that membership.
+     If this one write fails, it is simply made the first time an admin
+     invitation is sent (ensureAdminCode). */
+  try { await setDoc(ref("associations", association.id, "secrets", "admin"), { adminCode: model.newJoinCode() }); }
+  catch { /* made later, on demand */ }
 
   assocId = association.id;
   rememberAssociation(association.id);
@@ -540,7 +611,9 @@ export async function addGolfer({ name }) {
   if (!golfer) {
     /* Nothing matched, so this really is somebody new. */
     golfer = model.buildGolfer({ name });
-    writes.push({ op: "set", path: ["golfers", golfer.id], data: golfer });
+    /* groups: the groups this golfer plays in, which lets their admins read
+       the record (Phase A rules). */
+    writes.push({ op: "set", path: ["golfers", golfer.id], data: { ...golfer, groups: [assocId] } });
     writes.push({ op: "set", path: ["golferNames", key], data: { golferId: golfer.id, name: golfer.name } });
   }
   writes.push({
@@ -637,30 +710,167 @@ export function addGame({ date, endDate = null, courseId, name }) {
 
 /* ---------------- live reads ---------------- */
 
-/* Every golfer in the whole system. Their index lives here, so it is the same
-   number no matter which group you are looking at. */
+/* The golfers this screen may show (Version 2.0, Phase A privacy).
+ *
+ * Owners and admins: the full record of every golfer on this group's roster,
+ * read one document at a time (nobody may list the whole golfers collection).
+ * Regular members: their OWN full record, plus name and handicap index only for
+ * everybody else, from the group's directory. A directory entry arrives as a
+ * golfer-shaped object with fromDirectory set and directoryIndex holding the
+ * published index, so the screens need no second code path to show a name. */
+let watchGeneration = 0;
 export function watchGolfers(callback) {
+  const generation = watchGeneration;
+  if (canManage()) return watchRosterGolfers(callback, generation);
+  return watchMemberGolfers(callback, generation);
+}
+
+function watchRosterGolfers(callback, generation) {
   const { onSnapshot } = fb.mod.store;
-  const stop = onSnapshot(col("golfers"),
-    (snap) => {
-      clearError();
-      /* Archived people are filtered out HERE, at the single point every screen
-         reads from, rather than in each list separately — one place to get
-         right instead of a dozen. Hidden, never destroyed: clearing the flag
-         brings them straight back. */
-      callback(snap.docs
-        .map((d) => ({ ...d.data(), id: d.id }))
-        .filter((g) => !g.archived));
-    },
-    (e) => report(e));
+  const docs = new Map();      /* golferId -> data */
+  const stops = new Map();     /* golferId -> unsubscribe */
+  const emit = () => callback([...docs.values()].filter((g) => !g.archived));
+  const stopRoster = listen(col("associations", assocId, "roster"), (snap) => {
+    const ids = new Set(snap.docs.map((d) => d.id));
+    for (const [id, stop] of stops) if (!ids.has(id)) { try { stop(); } catch {} stops.delete(id); docs.delete(id); }
+    for (const id of ids) {
+      if (stops.has(id)) continue;
+      const subscribe = (retried) => listen(ref("golfers", id), (g) => {
+        if (g.exists()) docs.set(id, { ...g.data(), id }); else docs.delete(id);
+        emit();
+      }, () => {
+        docs.delete(id); emit();
+        /* Refused: the record does not list this group yet (made before
+           Phase A). As an admin here, add the group, then read again once. */
+        if (!retried) addGroupToGolfer(id).then((done) => {
+          if (done && stops.has(id) && generation === watchGeneration) stops.set(id, subscribe(true));
+        });
+      });
+      stops.set(id, subscribe(false));
+    }
+    emit();
+  }, (e) => report(e));
+  const stop = () => { try { stopRoster(); } catch {} for (const s2 of stops.values()) { try { s2(); } catch {} } stops.clear(); };
+  if (generation === watchGeneration) unsubscribers.push(stop); else stop();
+  return stop;
+}
+
+function watchMemberGolfers(callback, generation) {
+  let mine = null;
+  let others = [];
+  const emit = () => callback([...(mine ? [mine] : []), ...others.filter((o) => !mine || o.id !== mine.id)]);
+  const stops = [];
+  stops.push(listen(col("associations", assocId, "directory"), (snap) => {
+    others = snap.docs.map((d) => {
+      const e = d.data();
+      return { id: d.id, name: e.displayName || "Unknown", fromDirectory: true,
+               directoryIndex: e.handicapIndex == null ? null : Number(e.handicapIndex) };
+    });
+    emit();
+  }, (e) => report(e)));
+  findMyGolfer().then((g) => {
+    if (generation !== watchGeneration || !g) return;
+    stops.push(listen(ref("golfers", g.id), (snap) => {
+      mine = snap.exists() ? { ...snap.data(), id: snap.id } : null;
+      emit();
+      if (mine) publishOwnDirectoryEntries(mine);
+    }, (e) => report(e)));
+  });
+  const stop = () => { while (stops.length) { try { stops.pop()(); } catch {} } };
   unsubscribers.push(stop);
   return stop;
+}
+
+/* Which golfer this account is: the one whose linkedUid is this account.
+   Remembered per session; the membership records it too (golferId), which is
+   what the games rule reads to decide who played. */
+let myGolferCache = null;
+export async function findMyGolfer() {
+  if (!fb || !uid) return null;
+  if (myGolferCache && myGolferCache.linkedUid === uid) return myGolferCache;
+  const { query, where, limit, getDocs, updateDoc } = fb.mod.store;
+  try {
+    const snap = await getDocs(query(col("golfers"), where("linkedUid", "==", uid), limit(5)));
+    const found = snap.docs.map((d) => ({ ...d.data(), id: d.id })).filter((g) => !g.archived)[0] || null;
+    myGolferCache = found;
+    if (found && assocId && myMember && myMember.golferId !== found.id) {
+      /* Best effort: the rules allow only this one field, and only for a
+         golfer really linked to this account. */
+      try { await updateDoc(ref("associations", assocId, "members", uid), { golferId: found.id }); myMember.golferId = found.id; }
+      catch { /* older rules: harmless */ }
+    }
+    return found;
+  } catch { return null; }
+}
+export const myGolferIdNow = () => (myGolferCache ? myGolferCache.id : (myMember && myMember.golferId) || "");
+
+/* ---------------- the directory: name and index only ---------------- */
+
+const directoryEntry = (golfer) => ({
+  golferId: golfer.id,
+  displayName: golfer.name || "",
+  handicapIndex: model.effectiveIndex(golfer).index,
+  updatedAt: Date.now(),
+});
+
+/* Writes one golfer's entry in one group. Best effort and never queued: the
+   entry is a projection of the golfer record, rebuilt whenever it is next
+   written, so a failed write loses nothing. */
+export async function publishDirectoryEntry(golfer, group = assocId) {
+  if (!fb || !golfer || !golfer.id || !group || golfer.fromDirectory) return false;
+  try { await fb.mod.store.setDoc(ref("associations", group, "directory", golfer.id), directoryEntry(golfer)); return true; }
+  catch { return false; }
+}
+
+/* A golfer plays in several groups and their index spans all of them. With no
+   server, the golfer's own app keeps their entry current in every group they
+   belong to (the rules allow exactly that, and nothing more). */
+async function publishOwnDirectoryEntries(golfer) {
+  const groups = new Set([...(golfer.groups || []), ...knownGroups().map((g) => g.id)]);
+  if (assocId) groups.add(assocId);
+  for (const g of groups) await publishDirectoryEntry(golfer, g);
+}
+
+/* Owners and admins refresh the whole group's directory when they open it, so
+   entries stay right for golfers who never open the app themselves. Only
+   entries that differ are written. */
+export async function refreshGroupDirectory(golfersOnRoster) {
+  if (!fb || !assocId || !canManage()) return 0;
+  const { getDocs } = fb.mod.store;
+  let current = new Map();
+  try { current = new Map((await getDocs(col("associations", assocId, "directory"))).docs.map((d) => [d.id, d.data()])); }
+  catch { return 0; }
+  let written = 0;
+  for (const g of golfersOnRoster || []) {
+    const want = directoryEntry(g);
+    const have = current.get(g.id);
+    if (!have || have.displayName !== want.displayName || (have.handicapIndex ?? null) !== (want.handicapIndex ?? null)) {
+      if (await publishDirectoryEntry(g)) written++;
+    }
+    /* The golfer record lists its groups so admins may read it (rules, R8). */
+    if (!(g.groups || []).includes(assocId)) await addGroupToGolfer(g.id);
+  }
+  /* Somebody taken off the roster leaves the ranking too. */
+  const onRoster = new Set((golfersOnRoster || []).map((g) => g.id));
+  for (const id of current.keys()) {
+    if (!onRoster.has(id)) { try { await fb.mod.store.deleteDoc(ref("associations", assocId, "directory", id)); written++; } catch {} }
+  }
+  return written;
+}
+
+/* Adds this group to a golfer's `groups` list, as an admin of this group
+   (editedIn), without reading the record first. */
+export async function addGroupToGolfer(golferId, group = assocId) {
+  if (!fb || !golferId || !group) return false;
+  const { updateDoc, arrayUnion } = fb.mod.store;
+  try { await updateDoc(ref("golfers", golferId), { groups: arrayUnion(group), editedIn: group }); return true; }
+  catch { return false; }
 }
 
 /* Which of them play in this group. */
 export function watchRoster(callback) {
   const { onSnapshot } = fb.mod.store;
-  const stop = onSnapshot(col("associations", assocId, "roster"),
+  const stop = listen(col("associations", assocId, "roster"),
     (snap) => callback(snap.docs.map((d) => d.id)),
     (e) => report(e));
   unsubscribers.push(stop);
@@ -670,54 +880,47 @@ export function watchRoster(callback) {
 /* Deliberately bounded. Pagination is a version 3 concern, but an unbounded
    query would be the thing that quietly runs up a bill, so it is capped now. */
 export function watchRounds(callback, { max = 500 } = {}) {
-  const { onSnapshot, query, orderBy, limit } = fb.mod.store;
-  const stop = onSnapshot(
-    query(col("associations", assocId, "rounds"), orderBy("date", "desc"), limit(max)),
-    (snap) => {
-      clearError();
-      /* Archived people are filtered out HERE, at the single point every screen
-         reads from, rather than in each list separately — one place to get
-         right instead of a dozen. Hidden, never destroyed: clearing the flag
-         brings them straight back. */
-      callback(snap.docs
-        .map((d) => ({ ...d.data(), id: d.id }))
-        .filter((g) => !g.archived));
-    },
-    (e) => report(e)
-  );
-  unsubscribers.push(stop);
-  return stop;
+  const { query, orderBy, limit, where } = fb.mod.store;
+  const generation = watchGeneration;
+  const deliver = (snap) => {
+    clearError();
+    /* Archived rounds are filtered out HERE, at the single point every screen
+       reads from. Hidden, never destroyed. */
+    callback(snap.docs
+      .map((d) => ({ ...d.data(), id: d.id }))
+      .filter((g) => !g.archived)
+      .sort((a, b) => String(b.date || "").localeCompare(String(a.date || ""))));
+  };
+  if (canManage()) {
+    const stop = listen(query(col("associations", assocId, "rounds"), orderBy("date", "desc"), limit(max)), deliver, (e) => report(e));
+    unsubscribers.push(stop);
+    return stop;
+  }
+  /* A regular member may read only their own rounds (Phase A rules), so the
+     query must say so. No orderBy: a filter plus a sort would need an index. */
+  let stop = () => {};
+  findMyGolfer().then((g) => {
+    if (generation !== watchGeneration) return;
+    if (!g) { callback([]); return; }
+    stop = listen(query(col("associations", assocId, "rounds"), where("golferId", "==", g.id), limit(max)), deliver, (e) => report(e));
+    unsubscribers.push(stop);
+  });
+  return () => stop();
 }
 
 export function watchCourses(callback) {
   const { onSnapshot } = fb.mod.store;
-  const stop = onSnapshot(col("courses"), (snap) => callback(snap.docs.map((d) => d.data())), (e) => report(e));
+  const stop = listen(col("courses"), (snap) => callback(snap.docs.map((d) => d.data())), (e) => report(e));
   unsubscribers.push(stop);
   return stop;
 }
 
 export function stopWatching() {
+  watchGeneration++;
+  myGolferCache = null;
   while (unsubscribers.length) {
     const stop = unsubscribers.pop();
     try { stop(); } catch { /* already gone */ }
-  }
-}
-
-/* ---------------- optional Google sign-in ---------------- */
-
-export async function signInWithGoogle() {
-  if (!fb) throw new Error("Firebase has not loaded.");
-  const { GoogleAuthProvider, linkWithPopup, signInWithPopup } = fb.mod.auth;
-  const provider = new GoogleAuthProvider();
-  const current = fb.auth.currentUser;
-  try {
-    if (current && current.isAnonymous) await linkWithPopup(current, provider);
-    else await signInWithPopup(fb.auth, provider);
-    clearError();
-  } catch (e) {
-    if (String(e && e.code).includes("credential-already-in-use")) {
-      await signInWithPopup(fb.auth, provider);
-    } else { report(e); throw e; }
   }
 }
 
@@ -784,6 +987,7 @@ export async function signInWithEmail({ email, password }) {
         }
 
         await linkWithCredential(current, EmailAuthProvider.credential(address, secret));
+        await refreshToken();
         uid = fb.auth.currentUser.uid;
         clearError();
         return { ok: true, outcome: "created" };
@@ -942,6 +1146,7 @@ export async function setMyPassword({ email, password }) {
   }
 
   try { await fb.auth.currentUser.reload(); } catch {}
+  await refreshToken();
   uid = fb.auth.currentUser.uid;
   clearError();
   return { ok: true, outcome: "added" };
@@ -959,6 +1164,319 @@ export const isSignedIn = () => {
   const user = fb && fb.auth && fb.auth.currentUser;
   return !!(user && !user.isAnonymous);
 };
+
+/* Any sign-in on this device, including an old anonymous guest session. */
+export const hasUser = () => !!(fb && fb.auth && fb.auth.currentUser);
+
+/* An old guest session from before Version 2.0 (Phase B). The rules refuse it
+   everything except finding its own groups and deleting itself, so the app
+   asks for an email and password — attached to the SAME account, so the
+   person keeps their groups, role and rounds. */
+export const isAnonymousSession = () => {
+  const user = fb && fb.auth && fb.auth.currentUser;
+  return !!(user && user.isAnonymous);
+};
+
+/* After an email is attached, the token must carry it before the next read,
+   or the rules still see an anonymous session. */
+async function refreshToken() {
+  try { await fb.auth.currentUser.getIdToken(true); } catch {}
+}
+
+/* ================= Version 2.0 Phase C: the PUBLIC group ================= */
+
+/* The PUBLIC group's fixed id (the rules reserve it). */
+export const PUBLIC_ID = "PUBLIC";
+export const isPublicGroup = () => assocId === PUBLIC_ID;
+const emailKey = (email) => String(email || "").trim().toLowerCase();
+
+/* An application: full name and email, written WITHOUT signing in (R1, R3).
+   It counts only once Firestore confirms it; otherwise the person is told. */
+export async function submitApplication({ fullName, email }) {
+  if (!fb) throw new Error("The app is still starting. Try again in a moment.");
+  const name = String(fullName || "").trim().replace(/\s+/g, " ");
+  const address = String(email || "").trim();
+  const key = emailKey(address);
+  if (name.length < 2 || name.length > 80) { const e = new Error("name"); e.code = "app/name"; throw e; }
+  if (!/^[^@ ]+@[^@ ]+[.][^@ ]+$/.test(key) || address.length > 254) { const e = new Error("email"); e.code = "app/email"; throw e; }
+  const { setDoc, serverTimestamp } = fb.mod.store;
+  try {
+    await withTimeout(setDoc(ref("publicApplications", key), {
+      fullName: name, email: address, status: "pending", createdAt: serverTimestamp(),
+    }), 20000, "Your application");
+  } catch (e) {
+    const code = String((e && (e.code || e.message)) || "");
+    /* The only way a well-formed application is refused is that one already
+       exists for this email (applicants can never see or change it). */
+    if (code.includes("permission")) { const x = new Error("exists"); x.code = "app/exists"; throw x; }
+    throw e;
+  }
+  return { ok: true };
+}
+
+/* Is the signed-in email confirmed? New PUBLIC accounts confirm it by setting
+   their password from the approval email; anyone else confirms it with
+   Firebase's confirmation email. */
+export const emailConfirmed = () => {
+  const user = fb && fb.auth && fb.auth.currentUser;
+  return !!(user && !user.isAnonymous && user.email && user.emailVerified);
+};
+export async function sendEmailConfirmation() {
+  await fb.mod.auth.sendEmailVerification(fb.auth.currentUser);
+}
+/* After the person confirms in their email, fetch the new state. */
+export async function refreshEmailState() {
+  try { await fb.auth.currentUser.reload(); } catch {}
+  await refreshToken();
+  emit();
+  return emailConfirmed();
+}
+
+/* The applicant's side of an approval: if one waits for this confirmed email,
+   join the PUBLIC group as the golfer the reviewer chose. Returns
+   { joined: true } after joining, { joined: false } when there is none, or
+   { needsConfirmation: true } when the email is not confirmed yet. */
+export async function joinPublicIfApproved() {
+  if (!fb || !uid || isAnonymousSession()) return { joined: false };
+  if (!emailConfirmed()) return { needsConfirmation: true };
+  const { getDoc, getDocFromServer, deleteDoc } = fb.mod.store;
+  const key = emailKey(fb.auth.currentUser.email);
+  let approval;
+  try {
+    approval = await getDocFromServer(ref("publicApprovals", key));
+  } catch { return { joined: false }; }
+  if (!approval.exists()) return { joined: false };
+  const a = approval.data();
+  const already = await getDoc(ref("associations", PUBLIC_ID, "members", uid)).catch(() => null);
+  if (!(already && already.exists())) {
+    await commitTogether([
+      { op: "set", merge: false, path: ["associations", PUBLIC_ID, "members", uid],
+        data: { uid, role: "member", displayName: a.displayName || "", golferId: a.golferId, joinedAt: { __serverTimestamp: true } } },
+      { op: "update", path: ["golfers", a.golferId], data: { linkedUid: uid } },
+      { op: "set", path: ["userGroups", uid, "groups", PUBLIC_ID], data: { assocId: PUBLIC_ID, name: "PUBLIC", at: Date.now() } },
+    ], "join the PUBLIC group");
+  }
+  rememberGroup(PUBLIC_ID, "PUBLIC");
+  try { await deleteDoc(ref("publicApprovals", key)); } catch { /* removed next time */ }
+  return { joined: true };
+}
+
+/* ---- reviewers (admins of PUBLIC) ---- */
+
+export function watchApplications(callback) {
+  const { query, where } = fb.mod.store;
+  /* Pending, and approvals in progress (so a stuck one can be finished). */
+  const stop = listen(query(col("publicApplications"), where("status", "in", ["pending", "approving"])),
+    (snap) => callback(snap.docs.map((d) => ({ key: d.id, ...d.data() }))
+      .sort((x, y) => ((x.createdAt && x.createdAt.seconds) || 0) - ((y.createdAt && y.createdAt.seconds) || 0))),
+    (e) => report(e));
+  unsubscribers.push(stop);
+  return stop;
+}
+
+/* 24 random characters: the new account's first password, which nobody ever
+   sees. The person chooses their own from the approval email. */
+function randomPassword() {
+  const bytes = new Uint8Array(24);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"[b % 56]).join("");
+}
+
+/* Approving (R2), go-live fix 2: safe to retry, and two reviewers can never
+   approve the same application.
+   1. CLAIM, in a transaction: the application goes from pending to approving,
+      holding this reviewer's id, the golfer id and the golfer name. A retry by
+      the same reviewer keeps the same golfer id. Another reviewer is refused
+      (by this code and by the rules) unless the claim is 10 minutes old.
+   2. The name must be free (names are unique across the whole database); if
+      it is taken, the claim is released so the name can be changed.
+   3. The ACCOUNT, through a separate Firebase instance so the reviewer stays
+      signed in. An existing account is left as it is (that is also what a
+      retry finds).
+   4. ONE BATCH, all or nothing: the golfer, the name claim, the PUBLIC roster
+      and directory entries, the approval, and the application approved. The
+      rules accept the approval only under this reviewer's claim.
+   5. Firebase's own password email, the invitation. If only this fails, the
+      approval stands and the email can be sent again from the Admin tab.
+   Returns { ok, existingAccount, golferId, emailFailed, already }. */
+const STALE_CLAIM_MS = 10 * 60 * 1000;
+export async function approveApplication({ application, golferName }) {
+  const { getDoc, runTransaction, doc, serverTimestamp } = fb.mod.store;
+  const name = String(golferName || "").trim().replace(/\s+/g, " ");
+  const key = model.nameKey(name);
+  if (!key) { const e = new Error("name"); e.code = "app/name"; throw e; }
+  const appRef = doc(fb.db, "publicApplications", application.key);
+
+  /* 1. Claim. If two reviewers claim at the same moment, the rules refuse
+     the second; that refusal is reported as "busy" or "already approved",
+     whichever is now true. */
+  const claimed = await runTransaction(fb.db, async (tx) => {
+    const snap = await tx.get(appRef);
+    if (!snap.exists()) { const e = new Error("gone"); e.code = "app/gone"; throw e; }
+    const a = snap.data();
+    if (a.status === "approved") return { already: true, golferId: a.golferId };
+    if (a.status === "rejected") { const e = new Error("rejected"); e.code = "app/rejected"; throw e; }
+    let golferId = model.newId();
+    if (a.status === "approving") {
+      const at = a.approvingAt && a.approvingAt.toMillis ? a.approvingAt.toMillis() : 0;
+      const mine = a.reviewedBy === uid;
+      if (!mine && Date.now() - at < STALE_CLAIM_MS) { const e = new Error("busy"); e.code = "app/busy"; throw e; }
+      if (mine && a.golferId) golferId = a.golferId;   /* a retry: same golfer */
+    }
+    tx.update(appRef, { status: "approving", reviewedBy: uid, approvingAt: serverTimestamp(), golferId, golferName: name });
+    return { already: false, golferId };
+  }).catch(async (e) => {
+    if (String((e && e.code) || "").startsWith("app/")) throw e;
+    const now = await getDoc(appRef).catch(() => null);
+    const a = now && now.exists() ? now.data() : null;
+    if (a && a.status === "approved") return { already: true, golferId: a.golferId };
+    if (a && a.status === "approving" && a.reviewedBy !== uid) { const b = new Error("busy"); b.code = "app/busy"; throw b; }
+    throw e;
+  });
+  if (claimed.already) return { ok: true, already: true, golferId: claimed.golferId };
+  const golferId = claimed.golferId;
+  const release = async () => {
+    try { await commitTogether([{ op: "update", path: ["publicApplications", application.key], data: { status: "pending", reviewedBy: uid } }], "release the approval"); } catch {}
+  };
+
+  /* 2. The name. */
+  const nameClaim = await getDoc(ref("golferNames", key));
+  if (nameClaim.exists() && (nameClaim.data() || {}).golferId !== golferId) {
+    await release();
+    const e = new Error("name taken"); e.code = "app/name-taken"; throw e;
+  }
+
+  /* 3. The account. */
+  let existingAccount = false;
+  const second = fb.mod.app.initializeApp(fb.config, `approver-${Date.now()}`);
+  try {
+    const secondAuth = fb.mod.auth.initializeAuth(second, { persistence: fb.mod.auth.inMemoryPersistence });
+    if (EMULATORS) fb.mod.auth.connectAuthEmulator(secondAuth, AUTH_EMULATOR, { disableWarnings: true });
+    try {
+      await fb.mod.auth.createUserWithEmailAndPassword(secondAuth, application.email, randomPassword());
+    } catch (e) {
+      const code = String((e && (e.code || e.message)) || "");
+      if (!code.includes("email-already-in-use")) throw e;   /* the claim stays: tap Approve again */
+      existingAccount = true;
+    }
+    try { await fb.mod.auth.signOut(secondAuth); } catch {}
+  } finally {
+    try { await fb.mod.app.deleteApp(second); } catch {}
+  }
+
+  /* 4. Everything else, together. */
+  const golfer = model.buildGolfer({ name, id: golferId });
+  try {
+    await commitTogether([
+      { op: "set", merge: false, path: ["golfers", golferId], data: { ...golfer, groups: [PUBLIC_ID] } },
+      { op: "set", merge: false, path: ["golferNames", key], data: { golferId, name: golfer.name } },
+      { op: "set", path: ["associations", PUBLIC_ID, "roster", golferId], data: { golferId, addedAt: Date.now() } },
+      { op: "set", merge: false, path: ["associations", PUBLIC_ID, "directory", golferId],
+        data: { golferId, displayName: golfer.name, handicapIndex: null } },
+      { op: "set", merge: false, path: ["publicApprovals", application.key],
+        data: { golferId, displayName: golfer.name, approvedBy: uid, approvedAt: { __serverTimestamp: true } } },
+      { op: "update", path: ["publicApplications", application.key],
+        data: { status: "approved", reviewedBy: uid, reviewedAt: { __serverTimestamp: true } } },
+    ], "approve an application");
+  } catch (e) {
+    /* Nothing of the batch landed. If the application was approved meanwhile
+       (a retry that already finished), that is success. */
+    const now = await getDoc(appRef).catch(() => null);
+    if (now && now.exists() && now.data().status === "approved") return { ok: true, already: true, golferId };
+    throw e;   /* the claim stays: tap Approve again to retry */
+  }
+
+  /* 5. The email. */
+  let emailFailed = false;
+  try { await fb.mod.auth.sendPasswordResetEmail(fb.auth, application.email); }
+  catch { emailFailed = true; }
+  return { ok: true, existingAccount, golferId, emailFailed };
+}
+
+/* Approved, not joined yet (their approval is still waiting for them). */
+export function watchApprovals(callback) {
+  const stop = listen(col("publicApprovals"),
+    (snap) => callback(snap.docs.map((d) => ({ key: d.id, ...d.data() }))), (e) => report(e));
+  unsubscribers.push(stop);
+  return stop;
+}
+
+/* The password email again, for an approved applicant. */
+export async function resendApprovalEmail(email) {
+  await fb.mod.auth.sendPasswordResetEmail(fb.auth, String(email || "").trim());
+}
+
+export async function rejectApplication(application) {
+  await commitTogether([
+    { op: "update", path: ["publicApplications", application.key],
+      data: { status: "rejected", reviewedBy: uid, reviewedAt: { __serverTimestamp: true } } },
+  ], "reject an application");
+}
+
+/* ---- reports and blocks (Apple guideline 1.2) ---- */
+
+export async function reportGolfer({ golferId, displayName, reason }) {
+  const { setDoc, serverTimestamp, doc, collection } = fb.mod.store;
+  const target = doc(collection(fb.db, "associations", assocId, "reports"));
+  await withTimeout(setDoc(target, {
+    golferId, displayName: String(displayName || "").slice(0, 120),
+    reason: String(reason || "").trim().slice(0, 500), reportedBy: uid, createdAt: serverTimestamp(),
+  }), 20000, "Your report");
+}
+
+export function watchReports(callback) {
+  const stop = listen(col("associations", assocId, "reports"),
+    (snap) => callback(snap.docs.map((d) => ({ id: d.id, ...d.data() }))), (e) => report(e));
+  unsubscribers.push(stop);
+  return stop;
+}
+
+export async function dismissReport(reportId) {
+  await commitTogether([{ op: "delete", path: ["associations", assocId, "reports", reportId] }], "dismiss a report");
+}
+
+export function watchBlocks(callback) {
+  if (!uid) return () => {};
+  const stop = listen(col("userBlocks", uid, "golfers"),
+    (snap) => callback(snap.docs.map((d) => ({ golferId: d.id, ...d.data() }))), (e) => report(e));
+  unsubscribers.push(stop);
+  return stop;
+}
+export async function blockGolfer({ golferId, name }) {
+  await commitTogether([{ op: "set", merge: false, path: ["userBlocks", uid, "golfers", golferId],
+    data: { name: String(name || "").slice(0, 120), blockedAt: { __serverTimestamp: true } } }], "block a golfer");
+}
+export async function unblockGolfer(golferId) {
+  await commitTogether([{ op: "delete", path: ["userBlocks", uid, "golfers", golferId] }], "unblock a golfer");
+}
+
+/* Creating an account. Only ever from an invitation, a group code, or
+   (Phase C) an approved application — never as a side effect of a typo on
+   the sign-in screen. */
+export async function createAccount({ email, password }) {
+  if (!fb) throw new Error("Firebase has not loaded yet.");
+  const address = String(email || "").trim();
+  const secret = String(password || "");
+  if (!address) throw new Error("auth/invalid-email");
+  if (secret.length < 6) throw new Error("auth/weak-password");
+  if (fb.auth.currentUser) throw new Error("auth/already-signed-in");
+  try {
+    await fb.mod.auth.createUserWithEmailAndPassword(fb.auth, address, secret);
+  } catch (e) {
+    const code = String((e && (e.code || e.message)) || "");
+    if (code.includes("email-already-in-use")) {
+      const taken = new Error("auth/email-already-in-use");
+      taken.code = "auth/email-already-in-use";
+      throw taken;
+    }
+    throw e;
+  }
+  uid = fb.auth.currentUser.uid;
+  clearError();
+  setStatus("Connected");
+  emit();
+  return { ok: true, outcome: "created" };
+}
 
 export async function signOutEverywhere() {
   /* Live listeners must go first. Left running, they keep firing against
@@ -1014,6 +1532,7 @@ export async function loadMembership(id) {
   const { getDoc } = fb.mod.store;
   try {
     const snap = await getDoc(ref("associations", id, "members", uid));
+    noteRead(snap, snap.exists());
     myMember = snap.exists() ? snap.data() : null;
     if (myMember) {
       assocId = id;
@@ -1033,6 +1552,7 @@ export async function loadAssociation(id) {
   const { getDoc } = fb.mod.store;
   try {
     const snap = await getDoc(ref("associations", id));
+    noteRead(snap, snap.exists());
     if (!snap.exists()) return null;
     const group = { ...snap.data(), id: snap.id };
     /* Filled here as well as in the watcher, so an invitation can be built
@@ -1043,8 +1563,15 @@ export async function loadAssociation(id) {
 }
 
 export function watchMembers(callback) {
-  const { onSnapshot } = fb.mod.store;
-  const stop = onSnapshot(col("associations", assocId, "members"),
+  /* Phase C: only admins may list the members; everybody else reads their
+     own membership. */
+  if (!canManage()) {
+    const stop = listen(ref("associations", assocId, "members", uid),
+      (snap) => callback(snap.exists() ? [{ uid: snap.id, ...snap.data() }] : []), (e) => report(e));
+    unsubscribers.push(stop);
+    return stop;
+  }
+  const stop = listen(col("associations", assocId, "members"),
     (snap) => callback(snap.docs.map((d) => ({ uid: d.id, ...d.data() }))), (e) => report(e));
   unsubscribers.push(stop);
   return stop;
@@ -1065,7 +1592,7 @@ export function setMemberRole(memberUid, role) {
 /* An invitation is a link, so joining is one tap from a message rather than
    a code somebody has to read out and type. */
 export const joinLink = (association) =>
-  `${location.origin}${location.pathname}?join=${association.id}.${association.joinCode}`;
+  `${platform.joinBase()}?join=${association.id}.${association.joinCode}`;
 
 /* An invitation for a specific role.
  *
@@ -1075,7 +1602,7 @@ export const joinLink = (association) =>
 /* Records that an invitation was sent, so the People list can show who is still
    outstanding. Written on the golfer — only the MOST RECENT invitation matters,
    and a list of old ones was impossible to read. */
-export function noteInvitation(golferId, role) {
+export function noteInvitation(golferId, role, golfer = null) {
   if (!golferId) return;
   outbox.enqueue({
     type: "update",
@@ -1084,13 +1611,28 @@ export function noteInvitation(golferId, role) {
             editedIn: assocId },
     opId: `golfer-invited-${golferId}`,
   });
+  /* Go-live fix 1: what the invitee sees before joining — their name, index
+     and the group's name — lives on the invitation record, readable by its id
+     alone. The golfer record itself stays private. */
+  if (golfer && golfer.name) {
+    const index = model.effectiveIndex(golfer).index;
+    outbox.enqueue({
+      type: "set",
+      path: ["associations", assocId, "invitations", golferId],
+      data: { golferId, name: String(golfer.name).slice(0, 120), handicapIndex: index == null ? null : index,
+              groupName: String((cachedAssociation && cachedAssociation.name) || "").slice(0, 120),
+              role: role === "admin" ? "admin" : "member", sentBy: uid, sentAt: { __serverTimestamp: true } },
+      opId: `invitation-${assocId}-${golferId}`,
+    });
+  }
   flush();
 }
 
 export function inviteLink(role = "member", golferId = null) {
   const group = currentAssociationDoc();
   if (!group) return "";
-  const code = role === "admin" ? group.adminCode : group.joinCode;
+  /* Phase D: the admin code is the owner's secret, fetched by ensureAdminCode. */
+  const code = role === "admin" ? (adminCodeFor === group.id ? adminCodeCache : "") : group.joinCode;
   if (!code) return "";
   /* A named invitation carries the golfer, so the person joining never types
      their name and cannot misspell it into a second record with a split
@@ -1108,35 +1650,64 @@ export function inviteLink(role = "member", golferId = null) {
    * rules still check the code against the group, so a link edited to say
    * admin while holding the guest code is refused. */
   const as = role === "admin" ? "&as=admin" : "";
-  return `${location.origin}${location.pathname}?join=${group.id}.${code}${named}${as}`;
+  return `${platform.joinBase()}?join=${group.id}.${code}${named}${as}`;
 }
 
-/* Groups created before admin invitations existed have no admin code. One is
-   generated and saved the first time an admin invitation is sent, so older
-   groups gain the feature without anybody having to do anything. */
+/* The admin invitation secret (Phase D). The owner only — the rules let
+   nobody else read it. Kept in associations/{id}/secrets/admin. A group whose
+   secret is still on the group document (made before Phase D) has it moved
+   there now: saved in its new place first, then removed from the old one, so
+   an admin invitation already sent keeps working. A group with none gets one. */
+let adminCodeCache = "";
+let adminCodeFor = "";
 export async function ensureAdminCode() {
   const group = currentAssociationDoc();
-  if (!group) return "";
-  if (group.adminCode) return group.adminCode;
-
-  const code = model.newJoinCode();
-  await commitTogether([
-    { op: "set", path: ["associations", group.id], data: { adminCode: code } },
-  ], "add admin code");
-  cachedAssociation = { ...group, adminCode: code };
+  if (!group || !isOwner()) return "";
+  if (adminCodeFor === group.id && adminCodeCache) return adminCodeCache;
+  const { getDoc } = fb.mod.store;
+  const snap = await getDoc(ref("associations", group.id, "secrets", "admin"));
+  let code = snap.exists() ? (snap.data() || {}).adminCode || "" : "";
+  if (!code) {
+    code = group.adminCode || model.newJoinCode();
+    await commitTogether([
+      { op: "set", merge: false, path: ["associations", group.id, "secrets", "admin"], data: { adminCode: code } },
+    ], "save the admin code");
+  }
+  if (group.adminCode) {
+    await commitTogether([
+      { op: "update", path: ["associations", group.id], data: { adminCode: null } },
+    ], "move the admin code");
+    cachedAssociation = { ...group, adminCode: null };
+  }
+  adminCodeCache = code;
+  adminCodeFor = group.id;
   return code;
+}
+
+/* Phase D: whether this account may create groups (Willy's). Read from the
+   list the setup script keeps; the rules refuse anybody else anyway. */
+let groupCreatorFlag = false;
+export const canCreateGroups = () => groupCreatorFlag;
+export async function loadGroupCreator() {
+  groupCreatorFlag = false;
+  if (!fb || !uid || isAnonymousSession()) return false;
+  try {
+    const snap = await fb.mod.store.getDoc(ref("groupCreators", uid));
+    groupCreatorFlag = snap.exists();
+  } catch { groupCreatorFlag = false; }
+  return groupCreatorFlag;
 }
 
 export function readJoinLink() {
   try {
-    const value = new URLSearchParams(location.search).get("join");
+    const value = new URLSearchParams(platform.linkQuery()).get("join");
     if (!value) return null;
 
     /* group.code            — an open invitation, they type their name
        group.code.golferId   — a named one, for a specific person on the roster */
     const parts = value.split(".");
     if (parts.length < 2) return null;
-    const params = new URLSearchParams(location.search);
+    const params = new URLSearchParams(platform.linkQuery());
     return {
       associationId: parts[0],
       code: parts[1],
@@ -1150,13 +1721,23 @@ export function readJoinLink() {
 /* The golfer a named invitation points at, read straight from the database so
    the screen shows their real name rather than one carried in the link — a URL
    can be edited, a document cannot. */
-export async function golferNamedInLink(golferId) {
-  if (!fb || !golferId) return null;
+/* Go-live fix 1: the greeting comes from the invitation record written when
+   the invitation was sent (name, index, group name), never from the golfer
+   record, which is private. Returns { id, name, handicapIndex, groupName }. */
+export async function invitationFor(associationId, golferId) {
+  if (!fb || !associationId || !golferId) return null;
   try {
     const { getDoc } = fb.mod.store;
-    const snap = await getDoc(ref("golfers", golferId));
-    return snap.exists() ? { ...snap.data(), id: snap.id } : null;
-  } catch { return null; }
+    const snap = await getDoc(ref("associations", associationId, "invitations", golferId));
+    noteRead(snap, snap.exists());
+    if (!snap.exists()) return null;
+    const d = snap.data() || {};
+    return { id: golferId, name: d.name || "", handicapIndex: d.handicapIndex == null ? null : Number(d.handicapIndex), groupName: d.groupName || "" };
+  } catch (e) {
+    const code = String((e && (e.code || e.message)) || "");
+    if (!code.includes("permission")) cacheMiss = true;
+    return null;
+  }
 }
 
 /* Accepting a named invitation.
@@ -1186,7 +1767,7 @@ export async function acceptNamedInvite({ associationId, code, golferId, role })
 
   const member = model.buildMember({
     uid,
-    displayName: (await golferNamedInLink(golferId) || {}).name || "",
+    displayName: (await invitationFor(associationId, golferId) || {}).name || "",
     role: role === "admin" ? "admin" : "member",
     joinCode: code,
   });
@@ -1248,17 +1829,55 @@ export async function acceptNamedInvite({ associationId, code, golferId, role })
    including the role, so anything that still needs it must read it first. */
 export const clearJoinLink = () => {
   try { history.replaceState(null, "", location.pathname); } catch {}
+  platform.clearLinkQuery();
 };
 
 /* ---------------- games ---------------- */
 
 export function watchGames(callback, { max = 200 } = {}) {
-  const { onSnapshot, query, orderBy, limit } = fb.mod.store;
-  const stop = onSnapshot(
-    query(col("associations", assocId, "games"), orderBy("date", "desc"), limit(max)),
-    (snap) => callback(snap.docs.map((d) => d.data())), (e) => report(e));
+  const { query, orderBy, limit, where } = fb.mod.store;
+  const generation = watchGeneration;
+  if (canManage()) {
+    const stop = listen(
+      query(col("associations", assocId, "games"), orderBy("date", "desc"), limit(max)),
+      (snap) => callback(snap.docs.map((d) => d.data())), (e) => report(e));
+    unsubscribers.push(stop);
+    return stop;
+  }
+  /* A regular member sees only games they played in, or created (Phase A).
+     Two queries, merged; each is one the rules can prove. */
+  const played = new Map(), created = new Map();
+  const emit = () => callback([...new Map([...created, ...played]).values()]
+    .sort((a, b) => String(b.date || "").localeCompare(String(a.date || ""))));
+  const stops = [];
+  stops.push(listen(query(col("associations", assocId, "games"), where("createdBy", "==", uid), limit(max)),
+    (snap) => { created.clear(); snap.docs.forEach((d) => created.set(d.id, d.data())); emit(); }, (e) => report(e)));
+  findMyGolfer().then((g) => {
+    if (generation !== watchGeneration || !g) { emit(); return; }
+    stops.push(listen(query(col("associations", assocId, "games"), where("participantGolferIds", "array-contains", g.id), limit(max)),
+      (snap) => { played.clear(); snap.docs.forEach((d) => played.set(d.id, d.data())); emit(); }, (e) => report(e)));
+  });
+  const stop = () => { while (stops.length) { try { stops.pop()(); } catch {} } };
   unsubscribers.push(stop);
   return stop;
+}
+
+/* Publishes a game's shared result sheet on the game itself (Phase A): who
+   played and the scores needed for the leaderboard, never anybody's round
+   history. Written by an owner or admin whenever they look at or change the
+   game. participantGolferIds is what lets each player read it. */
+export async function publishGameResults(gameId, results) {
+  if (!fb || !assocId || !canManage() || !gameId) return false;
+  const participantGolferIds = [...new Set((results || []).map((r) => r.golferId).filter(Boolean))].sort();
+  const sheet = (results || []).map((r) => ({
+    id: String(r.id || ""), golferId: r.golferId || "", name: r.name || "", date: r.date || "",
+    gross: r.gross ?? null, adjusted: r.adjusted ?? null, courseHandicap: r.courseHandicap ?? null,
+    teeName: r.teeName || "", estimated: !!r.estimated,
+  }));
+  try {
+    await fb.mod.store.updateDoc(ref("associations", assocId, "games", gameId), { participantGolferIds, results: sheet });
+    return true;
+  } catch { return false; }
 }
 
 export function updateGame(gameId, data) {
@@ -1376,7 +1995,7 @@ export async function importLegacyV1({ v1, assocName, displayName }) {
    device without anybody reloading. */
 export function watchAssociation(callback) {
   const { onSnapshot } = fb.mod.store;
-  const stop = onSnapshot(ref("associations", assocId),
+  const stop = listen(ref("associations", assocId),
     (snap) => {
       if (!snap.exists()) return;
       /* Keep the cached copy current. inviteLink() and ensureAdminCode() read
@@ -1517,6 +2136,7 @@ export async function groupsFromMemberships() {
       collectionGroup(fb.db, "members"),
       where("uid", "==", uid)
     ));
+    noteRead(found, !found.empty);
 
     const groups = [];
     for (const d of found.docs) {
@@ -1547,6 +2167,8 @@ export async function loadMyGroups() {
   try {
     const { getDocs, getDoc } = fb.mod.store;
     const snap = await getDocs(col("userGroups", uid, "groups"));
+    noteRead(snap, !snap.empty);
+    if (snap.metadata && snap.metadata.fromCache && snap.empty) return knownGroups();   /* unknown while offline */
     const hidden = hiddenGroups();
     const listed = snap.docs
       .map((d) => ({ id: d.id, name: (d.data() || {}).name || "Group" }))
@@ -1615,6 +2237,7 @@ export async function amMemberOf(id) {
   try {
     const { getDoc } = fb.mod.store;
     const snap = await getDoc(ref("associations", id, "members", uid));
+    noteRead(snap, snap.exists());
     return snap.exists();
   } catch { return false; }
 }
@@ -1945,6 +2568,246 @@ export async function resetInvitation(golferId) {
  * A membership is only a sign-in record. Rounds belong to the GOLFER, and the
  * golfer document is untouched, so this loses nothing at all. Owner only, and
  * the rules refuse the owner's own membership regardless. */
+/* ---------------- Delete my account (spec Change 7, D5) ----------------
+ *
+ * The person's sign-in and their links to groups are removed. Their golfer,
+ * rounds and handicap stay with the group (D1), exactly as the owner's Remove
+ * does today.
+ *
+ * Order, and why: nothing is deleted before the sign-in has been re-confirmed
+ * (step 5) and the request is recorded on the server (step 4). The app never
+ * signs anyone out while their account still exists. If anything stops the
+ * process, the record on the server lets it resume here, or lets the daily
+ * completion job finish it, even if this device is gone.
+ */
+
+const DELETING_KEY = "golf:v2:deleting";
+const THROWAWAY_DOMAIN = "accounts.cuberoot-systems.com";
+
+const deletionNote = () => { try { return JSON.parse(localStorage.getItem(DELETING_KEY) || "null"); } catch { return null; } };
+const saveDeletionNote = (note) => { localStorage.setItem(DELETING_KEY, JSON.stringify(note)); };   /* throws if storage refuses: that stops the flow */
+const clearDeletionNote = () => { try { localStorage.removeItem(DELETING_KEY); } catch {} };
+
+/* 32 random characters for the throwaway password of an anonymous account.
+   Always contains upper, lower, digit and symbol, so any password policy on
+   the project accepts it. */
+function throwawayPassword() {
+  const sets = ["ABCDEFGHJKLMNPQRSTUVWXYZ", "abcdefghijkmnopqrstuvwxyz", "23456789", "-_.~!"];
+  const all = sets.join("");
+  const bytes = new Uint32Array(32);
+  crypto.getRandomValues(bytes);
+  const chars = Array.from(bytes, (b, i) => (i < sets.length ? sets[i][b % sets[i].length] : all[b % all.length]));
+  return chars.join("");
+}
+
+/* Waits for a server-confirmed write, but never forever. */
+function withTimeout(promise, ms, what) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(`${what} could not be confirmed. Check the connection.`)), ms)),
+  ]);
+}
+
+/* Groups this account owns, read from the server. Throws on a failed read. */
+async function ownedGroupIds() {
+  const { collection, query, where, getDocsFromServer } = fb.mod.store;
+  const snap = await getDocsFromServer(query(collection(fb.db, "associations"), where("ownerUid", "==", uid)));
+  return snap.docs.map((d) => d.id);
+}
+
+/* Every group this account is linked to: its memberships and its own group
+   list. Both read from the server; a failed read throws. */
+async function myGroupIdsFromServer() {
+  const { collection, collectionGroup, query, where, getDocsFromServer } = fb.mod.store;
+  const ids = new Set();
+  const members = await getDocsFromServer(query(collectionGroup(fb.db, "members"), where("uid", "==", uid)));
+  members.docs.forEach((d) => { const g = d.ref.parent && d.ref.parent.parent; if (g) ids.add(g.id); });
+  const pointers = await getDocsFromServer(collection(fb.db, "userGroups", uid, "groups"));
+  pointers.docs.forEach((d) => ids.add(d.id));
+  return [...ids];
+}
+
+/* Whether a deletion was started and has not finished (read from the server
+   when possible, otherwise from this device's note). Used at start-up to open
+   the "not deleted yet" screen, and to hide Sign out meanwhile. */
+let deletionPendingFlag = false;
+export const deletionPending = () => deletionPendingFlag;
+export async function checkPendingDeletion() {
+  deletionPendingFlag = false;
+  if (!fb || !uid) return false;
+  const note = deletionNote();
+  if (note && note.uid && note.uid !== uid) clearDeletionNote();   /* a different account now */
+  try {
+    const { getDocFromServer } = fb.mod.store;
+    const snap = await getDocFromServer(ref("accountDeletions", uid));
+    deletionPendingFlag = snap.exists();
+  } catch {
+    deletionPendingFlag = !!(deletionNote() && deletionNote().uid === uid);
+  }
+  return deletionPendingFlag;
+}
+
+/* Rounds still waiting, and writes the queue gave up on — both must be dealt
+   with before an account is deleted. */
+export function deletionBlockers() {
+  return { waiting: outbox.count(), abandoned: outbox.abandoned().length };
+}
+export function dismissAbandoned() {
+  try { localStorage.removeItem("golf:v2:abandoned"); } catch {}
+}
+
+/* Re-confirm the sign-in so Firebase accepts the deletion.
+   Password account: the password typed on the confirmation screen.
+   Anonymous account: a throwaway email and password attached to the SAME
+   account (the same linkWithCredential call setMyPassword makes), then a
+   fresh sign-in with it. The throwaway password stays only in this device's
+   note, until the account is gone. */
+async function reconfirmSignIn(password) {
+  const { EmailAuthProvider, reauthenticateWithCredential, linkWithCredential } = fb.mod.auth;
+  const user = fb.auth.currentUser;
+  if (!user) throw new Error("Not signed in.");
+  const hasPw = user.providerData && user.providerData.some((p) => p.providerId === "password");
+  const note = deletionNote() || { uid };
+
+  if (hasPw && !(note.throwawayEmail && user.email === note.throwawayEmail)) {
+    if (!password) { const e = new Error("password-needed"); e.code = "password-needed"; throw e; }
+    await reauthenticateWithCredential(user, EmailAuthProvider.credential(user.email, password));
+    return;
+  }
+
+  if (!note.throwawayEmail) {
+    note.throwawayEmail = `delete-${uid.toLowerCase()}@${THROWAWAY_DOMAIN}`;
+    note.throwawayPassword = throwawayPassword();
+    saveDeletionNote(note);   /* kept BEFORE linking, so a crash can't strand the account */
+  }
+  const credential = () => EmailAuthProvider.credential(note.throwawayEmail, note.throwawayPassword);
+  if (!hasPw) await linkWithCredential(user, credential());
+  await reauthenticateWithCredential(user, credential());
+  await refreshToken();   /* the rules need the email on the token from here on */
+}
+
+/* The whole flow. Returns { ok: true } once Firebase has confirmed the
+   sign-in is deleted, or { ok: false, reason, message } with nothing
+   reported as deleted. Reasons: OFFLINE, OWNER, WAITING, ABANDONED,
+   PASSWORD, WRONG_PASSWORD, RECORD, CLEANUP, AUTH. */
+export async function deleteMyAccount({ password = "", onStep = () => {} } = {}) {
+  if (!fb || !uid) return { ok: false, reason: "OFFLINE", message: "Not connected yet." };
+  const { setDoc, deleteDoc, collection, query, where, getDocsFromServer } = fb.mod.store;
+  const { deleteUser } = fb.mod.auth;
+  const recordRef = ref("accountDeletions", uid);
+  let recordWritten = false;
+
+  try {
+    /* 1. Ownership and group links, from the server. */
+    onStep("Checking your groups");
+    let owned, groups;
+    try { owned = await ownedGroupIds(); groups = await myGroupIdsFromServer(); }
+    catch (e) { return { ok: false, reason: "OFFLINE", message: "Your groups couldn't be checked. Connect to the internet and try again. Nothing was changed." }; }
+    if (owned.length) return { ok: false, reason: "OWNER", message: "You own a group. Delete the group first (Admin → Delete this group), then delete your account." };
+
+    /* 2. Anything waiting to upload goes first. */
+    onStep("Sending anything waiting");
+    await flush();
+    if (!outbox.isEmpty()) return { ok: false, reason: "WAITING", message: `${outbox.count()} change${outbox.count() === 1 ? " is" : "s are"} still waiting to upload. Stay online until the status says Synced, then try again. Nothing was changed.` };
+    if (outbox.abandoned().length) return { ok: false, reason: "ABANDONED", message: "Some earlier changes could not be saved. Review and dismiss them first. Nothing was changed." };
+
+    const user = fb.auth.currentUser;
+    const hasPw = !!(user && user.providerData && user.providerData.some((p) => p.providerId === "password"));
+    const note0 = deletionNote();
+    const resumingThrowaway = !!(note0 && note0.uid === uid && note0.throwawayEmail && user && user.email === note0.throwawayEmail);
+    if (hasPw && !resumingThrowaway && !password) return { ok: false, reason: "PASSWORD", message: "Type your Scorecard password to confirm." };
+
+    /* 4. The request is recorded on the server before anything is deleted. */
+    onStep("Recording your request");
+    const golferSnap = await getDocsFromServer(query(collection(fb.db, "golfers"), where("linkedUid", "==", uid)));
+    const golferIds = golferSnap.docs.map((d) => d.id);
+    saveDeletionNote({ ...(note0 && note0.uid === uid ? note0 : {}), uid, at: Date.now() });
+    try {
+      await withTimeout(setDoc(recordRef, {
+        stage: "requested", kind: hasPw && !resumingThrowaway ? "password" : "anonymous",
+        groups, golferIds, startedAt: serverTimestampValue(),
+      }, { merge: true }), 20000, "Your request");
+      recordWritten = true;
+    } catch (e) {
+      return { ok: false, reason: "RECORD", message: `${(e && e.message) || "Your request could not be recorded"}. Your account is NOT deleted.` };
+    }
+    deletionPendingFlag = true;
+
+    /* 5. Re-confirm the sign-in (every account, anonymous included). */
+    onStep("Confirming it's you");
+    try { await reconfirmSignIn(password); }
+    catch (e) {
+      const code = String((e && (e.code || e.message)) || "");
+      if (/wrong-password|invalid-credential|invalid-login|user-mismatch/.test(code)) {
+        /* Nothing has been deleted: withdraw the request entirely. */
+        try { await deleteDoc(recordRef); } catch {}
+        clearDeletionNote(); deletionPendingFlag = false;
+        return { ok: false, reason: "WRONG_PASSWORD", message: "That password isn't right. Nothing was changed." };
+      }
+      return { ok: false, reason: "AUTH", message: `Your sign-in couldn't be confirmed (${code}). Your account is NOT deleted yet — tap Try again.` };
+    }
+    await setDoc(recordRef, { stage: "reauthenticated" }, { merge: true });
+
+    /* 6. Ownership again, now that the sign-in is fresh. */
+    try { if ((await ownedGroupIds()).length) return { ok: false, reason: "OWNER", message: "You own a group. Delete the group first, then delete your account." }; }
+    catch { return { ok: false, reason: "OFFLINE", message: "Your groups couldn't be checked. Your account is NOT deleted yet — tap Try again when online." }; }
+
+    /* 7. Clean-up: one all-or-nothing batch per group, progress recorded in
+       the same batch. Each batch has at most 4 writes. */
+    onStep("Leaving your groups");
+    groups = await myGroupIdsFromServer();
+    for (const gid of groups) {
+      const claims = await getDocsFromServer(query(collection(fb.db, "associations", gid, "invites"), where("acceptedBy", "==", uid)));
+      const writes = [
+        { op: "delete", path: ["associations", gid, "members", uid] },
+        { op: "delete", path: ["userGroups", uid, "groups", gid] },
+        ...claims.docs.map((d) => ({ op: "delete", path: ["associations", gid, "invites", d.id] })),
+        { op: "set", path: ["accountDeletions", uid], data: { stage: "cleaning", lastGroup: gid } },
+      ];
+      await commitTogether(writes, "leave group for account deletion");
+    }
+    /* Phase C: this account's own list of blocked golfers goes too. */
+    try {
+      const blocks = await getDocsFromServer(collection(fb.db, "userBlocks", uid, "golfers"));
+      if (!blocks.empty) await commitTogether(blocks.docs.map((d) => ({ op: "delete", path: ["userBlocks", uid, "golfers", d.id] })), "remove blocks for account deletion");
+    } catch { /* not worth stopping the deletion for */ }
+    const linked = await getDocsFromServer(query(collection(fb.db, "golfers"), where("linkedUid", "==", uid)));
+    await commitTogether([
+      ...linked.docs.map((d) => ({ op: "update", path: ["golfers", d.id], data: { linkedUid: null } })),
+      { op: "set", path: ["accountDeletions", uid], data: { stage: "auth-deleting" } },
+    ], "unlink golfer for account deletion");
+
+    /* 8. The sign-in itself. Success only when Firebase says so. */
+    onStep("Deleting your sign-in");
+    try {
+      await deleteUser(fb.auth.currentUser);
+    } catch (e) {
+      const code = String((e && (e.code || e.message)) || "");
+      if (!code.includes("requires-recent-login")) throw e;
+      await reconfirmSignIn(password);            /* once more, never a sign-out */
+      await deleteUser(fb.auth.currentUser);
+    }
+
+    /* Firebase has confirmed the account is gone. Clear this device. */
+    clearDeletionNote();
+    deletionPendingFlag = false;
+    try {
+      Object.keys(localStorage).filter((k) => k.startsWith("golf:v2:")).forEach((k) => localStorage.removeItem(k));
+    } catch {}
+    return { ok: true };
+  } catch (e) {
+    report(e);
+    const message = (e && (e.message || e.code)) || String(e);
+    return {
+      ok: false,
+      reason: recordWritten ? "AUTH" : "CLEANUP",
+      message: recordWritten
+        ? `Your account isn't deleted yet: ${message}. You are still signed in. Tap Try again — if it keeps failing, it finishes automatically within a day.`
+        : `Nothing was changed: ${message}.`,
+    };
+  }
+}
+
 export async function removeMemberships(uids) {
   const list = [...new Set((uids || []).filter(Boolean))].filter((u) => u !== uid);
   if (!list.length) return { removed: 0 };

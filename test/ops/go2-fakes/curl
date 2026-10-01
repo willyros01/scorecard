@@ -1,0 +1,79 @@
+#!/usr/bin/env python3
+"""A stand-in for curl, for test/ops/go2-tests.sh only.
+
+go2.txt talks to GitHub (raw files), the Firestore Rules API and the Identity
+Toolkit config API. This plays those three, keeping its state in $FAKE_DIR,
+and can fail on purpose:
+  $FAKE_DIR/fail-patch      exists → the next ruleset release fails (then removed)
+  $FAKE_DIR/fail-verify-N   holds N → the next N reads of the live Version 2.0
+                            rules return the old rules instead (then removed)
+Everything else (the Firestore data) goes to the emulators through golive.mjs,
+not through curl.
+"""
+import json, os, sys, pathlib
+
+FAKE = pathlib.Path(os.environ["FAKE_DIR"])
+REPO = pathlib.Path(os.environ["REPO_DIR"])
+LIVE_COMMIT = "58948239af100eac8b9a80df95af0ceff4959931"
+
+args = sys.argv[1:]
+method, data, out, url = "GET", None, None, None
+i = 0
+while i < len(args):
+    a = args[i]
+    if a == "-X": method = args[i + 1]; i += 2; continue
+    if a == "--data-binary": data = args[i + 1]; i += 2; continue
+    if a == "-o": out = args[i + 1]; i += 2; continue
+    if a == "-H": i += 2; continue
+    if a.startswith("http"): url = a
+    i += 1
+
+def reply(text, code=0):
+    if code:
+        sys.stderr.write(f"curl: (22) The requested URL returned error: 500 (fake)\n"); sys.exit(22)
+    if out: pathlib.Path(out).write_text(text)
+    else: sys.stdout.write(text)
+    sys.exit(0)
+
+def body():
+    if data and data.startswith("@"): return json.loads(pathlib.Path(data[1:]).read_text())
+    return json.loads(data) if data else {}
+
+if "raw.githubusercontent.com" in url:
+    parts = url.split("raw.githubusercontent.com/willyros01/scorecard/")[1].split("/", 1)
+    sha, rel = parts[0], parts[1]
+    if sha == LIVE_COMMIT and rel == "firestore.rules":
+        reply((FAKE / "old-rules.txt").read_text())
+    reply((REPO / rel).read_text())
+
+if "firebaserules.googleapis.com" in url:
+    rs = FAKE / "rulesets"; rs.mkdir(exist_ok=True)
+    release = FAKE / "release.txt"
+    if url.endswith("/releases/cloud.firestore") and method == "GET":
+        reply(json.dumps({"rulesetName": release.read_text().strip()}))
+    if url.endswith("/rulesets") and method == "POST":
+        n = len(list(rs.iterdir())) + 1
+        name = f"projects/scorecard-f41b8/rulesets/r{n}"
+        (rs / f"r{n}.txt").write_text(body()["source"]["files"][0]["content"])
+        reply(json.dumps({"name": name}))
+    if url.endswith("/releases/cloud.firestore") and method == "PATCH":
+        flag = FAKE / "fail-patch"
+        if flag.exists(): flag.unlink(); reply("", 500)
+        release.write_text(body()["release"]["rulesetName"])
+        reply("{}")
+    if "/rulesets/" in url and method == "GET":
+        rid = url.rsplit("/", 1)[1]
+        content = (rs / f"{rid}.txt").read_text()
+        v = FAKE / "fail-verify"
+        if v.exists() and "PHASE D" in content:
+            left = int(v.read_text()) - 1
+            if left <= 0: v.unlink()
+            else: v.write_text(str(left))
+            content = (FAKE / "old-rules.txt").read_text()
+        reply(json.dumps({"source": {"files": [{"name": "firestore.rules", "content": content}]}}))
+
+if "identitytoolkit.googleapis.com/admin/v2" in url:
+    reply("{}")
+
+sys.stderr.write(f"fake curl: no rule for {method} {url}\n")
+sys.exit(22)

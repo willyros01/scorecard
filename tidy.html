@@ -53,6 +53,7 @@
  */
 
 const stateEl = document.getElementById("state");
+let signedOut = false;   /* set by connect() when nobody is signed in */
 const findingsEl = document.getElementById("findings");
 const actionsEl = document.getElementById("actions");
 const logEl = document.getElementById("log");
@@ -93,19 +94,39 @@ async function connect() {
     import(`${SDK}/firebase-auth.js`),
     import(`${SDK}/firebase-firestore.js`),
   ]);
-  const instance = app.initializeApp(config.firebaseConfig);
+  /* Automated tests only: on this machine's own address with ?emulators=1,
+     the page talks to the Firebase emulators, exactly as the app does. */
+  const emulators = ["localhost", "127.0.0.1"].includes(location.hostname)
+    && new URLSearchParams(location.search).has("emulators");
+  const instance = app.initializeApp(emulators
+    ? { apiKey: "fake-api-key", projectId: "demo-scorecard", authDomain: "localhost", appId: "demo" }
+    : config.firebaseConfig);
   const authority = auth.getAuth(instance);
   db = store.getFirestore(instance);
+  if (emulators) {
+    auth.connectAuthEmulator(authority, "http://127.0.0.1:9099", { disableWarnings: true });
+    store.connectFirestoreEmulator(db, "127.0.0.1", 8080);
+  }
   mod = store;
 
   return new Promise((resolve) => {
     auth.onAuthStateChanged(authority, async (user) => {
-      if (!user) { try { await auth.signInAnonymously(authority); } catch { resolve(false); } return; }
+      /* Version 2.0: no anonymous sign-in. This tool uses the sign-in the app
+         left in this browser; without one there is nothing it may read. */
+      if (!user || user.isAnonymous) { signedOut = true; resolve(false); return; }
       uid = user.uid;
       email = user.email || "";
       resolve(true);
     });
   });
+}
+
+/* Whether the name claim golferNames/{key} belongs to this golfer. */
+async function nameClaimedBy(key, golferId) {
+  try {
+    const snap = await mod.getDoc(mod.doc(db, "golferNames", key));
+    return snap.exists() && (snap.data() || {}).golferId === golferId;
+  } catch { return false; }
 }
 
 /* ---------- look, but change nothing ---------- */
@@ -426,7 +447,7 @@ async function repair() {
         recentWindow: g.window,
         handicapIndex: g.correctIndex,
         roundCount: g.realCount,
-        editedIn: g.homeGroup || (groups[0] || {}).id || "",
+        editedIn: g.homeGroup || (plan.groups[0] || {}).id || "",
       }, { merge: true });
       fixed++;
       say(`${g.name}: ${g.realCount} round${g.realCount === 1 ? "" : "s"}, index ${g.correctIndex == null ? "not established" : g.correctIndex.toFixed(1)}`);
@@ -490,9 +511,12 @@ async function repair() {
         for (const spare of merge.absorb) {
           tidyBatch.set(doc(db, "golfers", spare.id),
             { archived: true, archivedAt: Date.now(), nameKey: null,
-              mergedInto: merge.keeper.id, editedIn: (groups[0] || {}).id || "" },
+              mergedInto: merge.keeper.id, editedIn: (plan.groups[0] || {}).id || "" },
             { merge: true });
-          if (spare.nameKey) tidyBatch.delete(doc(db, "golferNames", spare.nameKey));
+          /* Free the name only if the claim is THIS record's. Duplicates share
+             one name, and the claim usually belongs to the record being kept;
+             freeing it would let a second person take the kept golfer's name. */
+          if (spare.nameKey && await nameClaimedBy(spare.nameKey, spare.id)) tidyBatch.delete(doc(db, "golferNames", spare.nameKey));
         }
         await tidyBatch.commit();
 
@@ -518,9 +542,9 @@ async function repair() {
              marked archived and hidden everywhere instead, and their name is
              released for reuse. Nothing is destroyed. */
           batch.set(doc(db, "golfers", g.id),
-            { archived: true, archivedAt: Date.now(), nameKey: null, editedIn: (groups[0] || {}).id || "" },
+            { archived: true, archivedAt: Date.now(), nameKey: null, editedIn: (plan.groups[0] || {}).id || "" },
             { merge: true });
-          if (g.nameKey) batch.delete(doc(db, "golferNames", g.nameKey));
+          if (g.nameKey && await nameClaimedBy(g.nameKey, g.id)) batch.delete(doc(db, "golferNames", g.nameKey));
         }
         await batch.commit();
       }
@@ -552,7 +576,7 @@ async function repair() {
 
 (async function run() {
   try {
-    if (!(await connect())) { stateEl.textContent = "Could not sign in to Firebase."; return; }
+    if (!(await connect())) { stateEl.textContent = signedOut ? "Not signed in. Open The Scorecard in this browser, sign in with your email and password, then open this page again." : "Could not sign in to Firebase."; return; }
     stateEl.textContent = "Checking your data…";
     findings = await inspect();
     draw();

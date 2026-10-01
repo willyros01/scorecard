@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Invitation links on the Cuberoot site open the app (spec Change 1, Phase 1). -->
+  <key>com.apple.developer.associated-domains</key>
+  <array>
+    <string>applinks:www.cuberoot-systems.com</string>
+  </array>
+</dict>
+</plist>

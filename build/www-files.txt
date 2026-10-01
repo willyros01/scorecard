@@ -1,0 +1,16 @@
+# Files packaged into the iPhone app (spec: New files, "Files that are NOT packaged").
+# One path per line. Folders end with /.
+index.html
+styles.css
+version.js
+firebase-config.js
+quick-start.html
+icon.svg
+app.js
+store.js
+model.js
+outbox.js
+courses-api.js
+platform.js
+migrate.js
+vendor/

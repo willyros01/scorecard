@@ -1,9 +1,9 @@
 import * as db from "./store.js";
 import * as model from "./model.js";
 import * as lookup from "./courses-api.js";
+import * as platform from "./platform.js";
 
 const VERSION = (typeof self !== "undefined" && self.APP_VERSION) || "dev";
-const SUPER_ADMIN = "willyros01@gmail.com";
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -233,6 +233,20 @@ let toldAboutPromotion = false;
 let editingGame = false;
 let invitedGolfer = null;
 let invitedGroupName = "";
+/* Version 2.0 Phase B: which account card a signed-out (or old guest) screen
+   shows — "create" or "signin". Null means the screen's own default. */
+let accountMode = null;
+const claimedOnce = new Set();   /* golfers this session has already tried to claim (screenEnter) */
+/* Version 2.0 Phase C: the PUBLIC group. */
+let showApply = false;          /* signed out: the Apply form is open */
+let applySentTo = "";           /* signed out: the application just sent */
+let applications = [];          /* reviewers: pending applications */
+let publicReports = [];         /* reviewers: reports of golfers' names */
+let approvalsWaiting = [];      /* reviewers: approved, not joined yet */
+let blocked = [];               /* this account's blocked golfers (PUBLIC) */
+let rawGolfers = [];            /* golfers as delivered, before blocking */
+let confirmReject = null;       /* the application key awaiting a second tap */
+let confirmationSent = false;   /* the confirmation email was sent this session */
 
 /* Kept beside the handlers so adding a button and forgetting the selector
    cannot happen silently — a test compares this list against the markup. */
@@ -353,6 +367,26 @@ function flashMsg(msg) { flash = msg; render(); setTimeout(() => { flash = null;
 function screenJoin() {
   const invite = db.readJoinLink();
 
+  /* Version 2.0 Phase B: nobody is signed in automatically any more. An
+     invitation or a code first asks for an account (create one, or sign in),
+     then shows the invitation itself — which can only be read with one. */
+  if (!db.hasUser()) return screenSignedOut(invite);
+
+  /* Offline, "nothing found" only means "not downloaded yet" (Change 3,
+     Part C). Never offer to start a new group, or call an invitation unknown,
+     on the strength of that. */
+  if (db.readsOffline() && !(invite && invitedGolfer)) {
+    return `<div class="stack">
+      ${flashBar()}
+      <div class="card padded">
+        <h2 class="panel-title">You're offline</h2>
+        <p class="lead">${invite ? "This invitation can't be opened until you reconnect." : "Your groups appear when you reconnect."}</p>
+        <p class="hint">Nothing has been lost. This screen updates by itself once there is a connection.</p>
+      </div>
+      ${versionBlock()}
+    </div>`;
+  }
+
   if (invite) {
     /* A named invitation greets them by name and needs one tap. The name is
        read from the database, not from the link — a URL can be edited. */
@@ -375,7 +409,7 @@ function screenJoin() {
             <button class="btn" data-act="accept-named" ${joining ? "disabled" : ""}>${joining ? "Joining…" : "Yes, that's me — join"}</button>
           </div>
           <p class="hint">${invite.role === "admin"
-            ? "You are joining as an <b>admin</b>, so you will be asked to set a password afterwards."
+            ? "You are joining as an <b>admin</b>."
             : "Nothing to type. Your rounds and handicap come with you."}</p>
           <p class="hint">Not you? <button class="linkbtn" data-act="not-me">This is somebody else's invitation</button></p>
         </div>
@@ -390,14 +424,14 @@ function screenJoin() {
           ? "You have been invited to help run the group"
           : "You have been invited"}</h2>
         <p class="hint">${invite.role === "admin" && !invite.golferId
-          ? "You will be an admin: you can add courses, manage the roster and post rounds for anybody. You are not added as a player, so no handicap is kept for you. You will be asked to set a password next."
-          : "Type the name you play under and you are in. No account, no password."}</p>
+          ? "You will be an admin: you can add courses, manage the roster and post rounds for anybody. You are not added as a player, so no handicap is kept for you."
+          : "Type the name you play under and you are in."}</p>
         <label class="lbl">${invite.role === "admin" && !invite.golferId ? "Your name" : "Your name"}</label>
         <input class="field" name="join-name" value="${esc(joinForm.name)}" placeholder="e.g. Willy Rosales" autocomplete="name">
         <div class="inline-actions stacked">
           <button class="btn" data-act="accept-invite" ${joining ? "disabled" : ""}>${joining ? "Joining…" : "Join the group"}</button>
         </div>
-        <p class="hint">Using more than one device? Tap this same link on each of them.</p>
+        <p class="hint">Using more than one device? Sign in there with the same email and password.</p>
       </div>
       ${versionBlock()}
     </div>`;
@@ -410,9 +444,7 @@ function screenJoin() {
         <h2 class="panel-title">Join with a code</h2>
         <p class="hint">Six characters, like ABC234.</p>
         <div class="note tip">A group code joins you as a <b>guest</b>. If you are already an admin
-        here, your role is kept — the code will not take it away. If you are an admin of this group
-        on <b>another device</b>, sign in with your email and password instead, or this device
-        becomes a second, separate person.</div>
+        here, your role is kept — the code will not take it away.</div>
         <label class="lbl">Your name</label>
         <input class="field" name="join-name" value="${esc(joinForm.name)}" placeholder="e.g. Willy" autocomplete="name">
         <label class="lbl">Group code</label>
@@ -432,6 +464,7 @@ function screenJoin() {
     ${flashBar()}
 
     ${signedIn ? `
+      ${confirmEmailCard()}
       <div class="card padded" style="border:2px solid var(--pencil)">
         <div class="name">Expecting to see a group here?</div>
         <p class="hint">If you already belong to one, <b>do not create another</b> — a second group
@@ -446,7 +479,7 @@ function screenJoin() {
         you.</p>
       </div>
 
-      <div class="card padded">
+      ${db.canCreateGroups() ? `<div class="card padded">
         <h2 class="panel-title">Start your group</h2>
         <p class="hint">Signed in as <b>${esc(db.currentEmail())}</b>. This is the same account on every device, so your groups follow you.</p>
         <label class="lbl">Your name</label>
@@ -461,37 +494,424 @@ function screenJoin() {
         <div class="inline-actions stacked">
           <button class="btn" data-act="begin" ${joining ? "disabled" : ""}>${joining ? "One moment…" : "Create the group"}</button>
         </div>
-      </div>
+      </div>` : `<div class="card padded">
+        <h2 class="panel-title">Not in a group yet</h2>
+        <p class="hint">New groups are created by The Scorecard's owner. Ask your group for an invitation link or its code.</p>
+      </div>`}
       ${migrationCard()}
-    ` : `
-      <div class="card padded">
-        <h2 class="panel-title">Sign in</h2>
-        <p class="hint">Needed once, so this is the same account whether you open the app in Safari or from your home screen. Without it, each one becomes a separate person with a separate group — which is exactly what went wrong before.</p>
-        ${db.currentEmail() ? `<div class="note tip">This device is already known to Google as <b>${esc(db.currentEmail())}</b>. Use that email and choose a password for it — that keeps your existing data. A different email would start a separate, empty account.</div>` : ""}
-        <label class="lbl">Email</label>
-        <input class="field" name="email" type="email" value="${esc(authForm.email || db.currentEmail())}" placeholder="you@example.com" autocomplete="username" autocapitalize="none">
-        <label class="lbl">Password</label>
-        <input class="field" name="password" type="password" placeholder="At least 6 characters" autocomplete="current-password">
-        <div class="inline-actions stacked">
-          <button class="btn" data-act="sign-in" ${joining ? "disabled" : ""}>${joining ? "Signing in…" : "Sign in"}</button>
-        </div>
-        <p class="hint">New email? An account is made for you. <b>This is a password for this app only</b> — not your email password. Pick a different one.</p>
-        <div class="inline-actions stacked">
-          <button class="btn ghost" data-act="reset-password">Forgot the password</button>
-        </div>
-      </div>
-      <p class="hint" style="text-align:center">
-        Been sent an invitation? Tap that link instead — guests need no account.
-      </p>
-      <p class="hint" style="text-align:center">
-        Looking for the Google button? It only works in the Safari browser, never in an app opened from the home screen. Email and password works in both.
-      </p>
-      <p class="hint" style="text-align:center">
-        <button class="linkbtn" data-act="enter-code">I was given a code</button>
-      </p>
-    `}
+    ` : ""}
     ${versionBlock()}
   </div>`;
+}
+
+/* ---------------- Version 2.0 Phase C: the PUBLIC group ---------------- */
+
+/* Signed out: apply to the PUBLIC group with full name and email (R1). */
+function screenApply() {
+  if (applySentTo) {
+    return `<div class="stack">
+      ${flashBar()}
+      <div class="card padded">
+        <h2 class="panel-title">Application sent</h2>
+        <p class="lead">Thank you. Every application is read by a person, so it can take a day or two.</p>
+        <p class="hint">When it is approved, an email goes to <b>${esc(applySentTo)}</b> with a link to choose your password. Then open The Scorecard and sign in with that email and password.</p>
+        <p class="hint">The email comes from Firebase, which The Scorecard uses for accounts. It sometimes lands in junk mail.</p>
+        <div class="inline-actions stacked"><button class="btn ghost" data-act="hide-apply">Back to Sign in</button></div>
+      </div>
+      ${versionBlock()}
+    </div>`;
+  }
+  return `<div class="stack">
+    ${flashBar()}
+    ${offlineAccountNote()}
+    <div class="card padded">
+      <h2 class="panel-title">Apply to join the public group</h2>
+      <p class="hint">The public group is open to any golfer who wants a handicap. Give your full name and your email — no password yet. When a person has approved it, you get an email to choose your password.</p>
+      <label class="lbl">Full name</label>
+      <input class="field" name="apply-name" value="${esc(joinForm.name || "")}" placeholder="e.g. Willy Rosales" autocomplete="name" maxlength="80">
+      <label class="lbl">Email</label>
+      <input class="field" name="apply-email" type="email" value="${esc(authForm.email || "")}" placeholder="you@example.com" autocomplete="email" autocapitalize="none" maxlength="254">
+      <div class="note tip">Other members of the public group see your <b>full name</b> and your <b>handicap index</b>, and nothing else. Your rounds stay private.</div>
+      <div class="inline-actions stacked">
+        <button class="btn" data-act="submit-application" ${joining ? "disabled" : ""}>${joining ? "Sending…" : "Send my application"}</button>
+        <button class="btn ghost" data-act="hide-apply">Back</button>
+      </div>
+      <p class="hint"><button class="linkbtn" data-act="open-privacy">Privacy</button> · <button class="linkbtn" data-act="open-support">Support</button></p>
+    </div>
+    ${versionBlock()}
+  </div>`;
+}
+
+async function submitApplicationHere() {
+  const fullName = ((view.querySelector('[name="apply-name"]') || {}).value || "").trim();
+  const email = ((view.querySelector('[name="apply-email"]') || {}).value || "").trim();
+  joinForm.name = fullName; authForm = { email, password: "" };
+  if (fullName.length < 2) { flashMsg("Type your full name"); return; }
+  if (!email) { flashMsg("Type your email address"); return; }
+  joining = true;
+  busy("Sending your application");
+  render();
+  try {
+    await db.submitApplication({ fullName, email });
+    applySentTo = email;
+  } catch (err) {
+    const code = String((err && (err.code || err.message)) || "");
+    if (code.includes("app/exists")) flashMsg("There is already an application for that email. You will get an email when it is decided.");
+    else if (code.includes("app/email")) flashMsg("That email does not look right. Check it for a typo.");
+    else if (code.includes("app/name")) flashMsg("Type your full name (up to 80 characters).");
+    else flashMsg(`It was not sent: ${code || "no connection"}. Check the connection and try again.`);
+  } finally {
+    joining = false;
+    idle();
+    render();
+  }
+}
+
+/* After any sign-in: join the PUBLIC group if an approval is waiting for this
+   email. Quiet when there is none. */
+async function checkPublicApproval() {
+  /* Phase D: also learn, once per sign-in, whether this account may create groups. */
+  await db.loadGroupCreator();
+  let result;
+  try { result = await db.joinPublicIfApproved(); }
+  catch (e) {
+    flashMsg("Your approval for the public group was found, but joining did not finish. Open the app again to retry.");
+    return;
+  }
+  if (!result || !result.joined) return;
+  if (!db.currentAssociation()) {
+    await start(db.PUBLIC_ID);
+    tab = "enter";
+    flashMsg("Welcome to the public group. Post your rounds on the Enter tab.");
+  } else {
+    flashMsg("You are now in the public group too. Tap the group name at the top to switch to it.");
+  }
+}
+
+/* Signed in, in no group, email not confirmed: somebody approved for the
+   public group who already had an account confirms their email here. */
+function confirmEmailCard() {
+  if (db.emailConfirmed()) return "";
+  return `<div class="card padded">
+    <div class="name">Applied to the public group?</div>
+    <p class="hint">Once your application is approved, confirm your email address and you join straight away.</p>
+    <div class="inline-actions stacked">
+      <button class="btn ghost" data-act="send-confirmation">${confirmationSent ? "Send the confirmation email again" : "Send me the confirmation email"}</button>
+      ${confirmationSent ? `<button class="btn" data-act="confirmed-email">I have confirmed it — continue</button>` : ""}
+    </div>
+    ${confirmationSent ? `<p class="hint">Sent to <b>${esc(db.currentEmail())}</b>. Open the link in it, then come back and tap Continue. It sometimes lands in junk mail.</p>` : ""}
+  </div>`;
+}
+
+/* Shown under the ranking in the public group (Apple guideline 1.2). */
+function publicSafetyNote() {
+  return `${blocked.length && !db.canManage() ? `<div class="card list">
+      <div class="list-row"><span class="grow"><span class="name">Golfers you blocked</span><br><span class="sub">Hidden from your screens. Only you see this list.</span></span></div>
+      ${blocked.map((b) => `<div class="list-row"><span class="grow"><span class="name">${esc(b.name || "A golfer")}</span></span>
+        <button class="rowbtn" data-act="unblock" data-id="${esc(b.golferId)}">Unblock</button></div>`).join("")}
+    </div>` : ""}
+    <p class="hint">See a name that shouldn't be here? Tap <b>Report or block</b> under it. Reports go to the people who run the public group. You can also write to <button class="linkbtn" data-act="open-support">Support</button>.</p>`;
+}
+
+function openGolferActions(golferId) {
+  const golfer = golferById(golferId) || allGolfers.find((g) => g.id === golferId);
+  if (!golfer) return;
+  sheetEl.hidden = false;
+  sheetEl.innerHTML = `<div class="sheet-body">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <h2>${esc(golfer.name)}</h2><button class="rowbtn" data-close="1">Close</button></div>
+    <label class="lbl">Report this name to the people who run the public group</label>
+    <textarea class="field" name="report-reason" rows="3" maxlength="500" placeholder="What is wrong with it? (optional)"></textarea>
+    <div class="inline-actions stacked">
+      <button class="btn" data-pc="report" data-id="${esc(golfer.id)}">Send the report</button>
+      <button class="btn ghost" data-pc="block" data-id="${esc(golfer.id)}">Block — hide ${esc(golfer.name)} from my screens</button>
+    </div>
+    <p class="hint">Blocking only changes what you see. You can unblock under the ranking at any time.</p>
+  </div>`;
+}
+
+/* Reviewers: the waiting applications. */
+function applicationsSection() {
+  return `<section class="panel">
+    <div class="panel-head"><h2 class="panel-title">Applications</h2></div>
+    ${applications.length === 0 ? `<div class="card"><p class="blank">No applications waiting.</p></div>` : `
+    <div class="card list">
+      ${applications.map((a) => {
+        const inProgress = a.status === "approving";
+        const mine = inProgress && a.reviewedBy === db.status().uid;
+        return `<div class="list-row">
+        <span class="grow"><span class="name">${esc(a.fullName)}</span><br><span class="sub">${esc(a.email)}${inProgress
+          ? (mine ? " · approval not finished — tap Approve to finish it" : " · being approved by another reviewer")
+          : ""}</span></span>
+        <span class="inline-actions">
+          <button class="rowbtn" data-act="review-application" data-id="${esc(a.key)}">${mine ? "Finish" : "Approve"}</button>
+          ${inProgress ? "" : `<button class="rowbtn ${confirmReject === a.key ? "danger" : ""}" data-act="reject-application" data-id="${esc(a.key)}">${confirmReject === a.key ? "Tap to reject" : "Reject"}</button>`}
+        </span>
+      </div>`;
+      }).join("")}
+    </div>`}
+    ${approvalsWaiting.length ? `<div class="card list" style="margin-top:0.6rem">
+      <div class="list-row"><span class="grow"><span class="name">Approved, not joined yet</span><br><span class="sub">They need to choose a password from the email, then sign in.</span></span></div>
+      ${approvalsWaiting.map((p) => `<div class="list-row">
+        <span class="grow"><span class="name">${esc(p.displayName || p.key)}</span><br><span class="sub">${esc(p.key)}</span></span>
+        <button class="rowbtn" data-act="resend-approval-email" data-id="${esc(p.key)}">Send the email again</button>
+      </div>`).join("")}
+    </div>` : ""}
+    <p class="hint">Approving creates their account and emails them a link to choose a password. Their golfer name must be unique; if it is taken, add a middle initial.</p>
+  </section>`;
+}
+
+function openApproveSheet(key) {
+  const a = applications.find((x) => x.key === key);
+  if (!a) return;
+  sheetEl.hidden = false;
+  sheetEl.innerHTML = `<div class="sheet-body">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <h2>Approve ${esc(a.fullName)}</h2><button class="rowbtn" data-close="1">Close</button></div>
+    <p class="hint">${esc(a.email)}</p>
+    <label class="lbl">Their golfer name in the public group</label>
+    <input class="field" name="approve-name" value="${esc(a.golferName || a.fullName)}" maxlength="80">
+    <div class="inline-actions stacked">
+      <button class="btn" data-pc="approve" data-id="${esc(a.key)}">Approve and send the email</button>
+    </div>
+    <p class="hint">They get an email from Firebase to choose their password, then they sign in and they are in.</p>
+  </div>`;
+}
+
+/* Phase D: what an admin (not the owner) sees of the members: the regular
+   members, each of whom they may remove. The owner and other admins are
+   listed without a button — only the owner changes those. */
+function adminMembersSection() {
+  const mine = db.status().uid;
+  const list = [...members].sort((a, b) => String(a.displayName || "").localeCompare(String(b.displayName || "")));
+  const label = (m) => m.role === "owner" ? "owner" : m.role === "admin" ? "admin" : "member";
+  return `<section class="panel">
+    <div class="panel-head"><h2 class="panel-title">Members</h2></div>
+    <div class="card list">
+      ${list.map((m) => `<div class="list-row">
+        <span class="grow"><span class="name">${esc(m.displayName || "Unnamed")}</span><br><span class="sub">${label(m)}${m.uid === mine ? " · you" : ""}</span></span>
+        ${m.role === "member" && m.uid !== mine ? `<button class="rowbtn warn" data-drop-member="${esc(m.uid)}">Remove from group</button>` : ""}
+      </div>`).join("")}
+    </div>
+    <p class="hint">Removing someone takes away their access to this group. Their golfer, rounds and handicap stay. Only the owner makes or removes admins.</p>
+  </section>`;
+}
+
+/* Reviewers: reports of golfers' names. */
+function reportsSection() {
+  return `<section class="panel">
+    <div class="panel-head"><h2 class="panel-title">Reports</h2></div>
+    ${publicReports.length === 0 ? `<div class="card"><p class="blank">No reports.</p></div>` : `
+    <div class="card list">
+      ${publicReports.map((r) => {
+        const member = members.find((m) => m.golferId === r.golferId && m.role === "member");
+        return `<div class="list-row">
+          <span class="grow"><span class="name">${esc(r.displayName || (golferById(r.golferId) || {}).name || "A golfer")}</span><br>
+            <span class="sub">${esc(r.reason || "No reason given")}</span></span>
+          <span class="inline-actions">
+            <button class="rowbtn" data-act="dismiss-report" data-id="${esc(r.id)}">Dismiss</button>
+            ${member ? `<button class="rowbtn danger" data-act="remove-reported" data-id="${esc(r.id)}">Remove from group</button>` : ""}
+          </span>
+        </div>`;
+      }).join("")}
+    </div>`}
+    <p class="hint">Removing someone takes away their access to the public group. Their rounds stay. To rename a golfer instead, use Manage.</p>
+  </section>`;
+}
+
+/* ---------------- Version 2.0 Phase B: accounts ---------------- */
+
+/* Signing in or creating an account needs a connection; say so up front. */
+function offlineAccountNote() {
+  return typeof navigator !== "undefined" && navigator.onLine === false
+    ? `<div class="note">You're offline. Signing in needs a connection — this screen works again once you reconnect.</div>`
+    : "";
+}
+
+/* The account card shared by the signed-out screen and the old-guest screen. */
+function signInCard({ heading, lead = "", backAct = "", backLabel = "" }) {
+  return `<div class="card padded">
+    <h2 class="panel-title">${heading}</h2>
+    ${lead}
+    <label class="lbl">Email</label>
+    <input class="field" name="email" type="email" value="${esc(authForm.email || "")}" placeholder="you@example.com" autocomplete="username" autocapitalize="none">
+    <label class="lbl">Password for this app</label>
+    <input class="field" name="password" type="password" placeholder="Your Scorecard password" autocomplete="current-password">
+    <div class="inline-actions stacked">
+      <button class="btn" data-act="sign-in" ${joining ? "disabled" : ""}>${joining ? "Signing in…" : "Sign in"}</button>
+      <button class="btn ghost" data-act="reset-password">Forgot the password</button>
+    </div>
+    <p class="hint"><b>Not your email password.</b> The Scorecard password, for this app only.</p>
+    ${backAct ? `<p class="hint"><button class="linkbtn" data-act="${backAct}">${backLabel}</button></p>` : ""}
+  </div>`;
+}
+
+/* Email, password and the password again — a typo in a new password locks
+   somebody out of an account they have only just made. */
+function newAccountFields() {
+  return `<label class="lbl">Email</label>
+    <input class="field" name="email" type="email" value="${esc(authForm.email || "")}" placeholder="you@example.com" autocomplete="username" autocapitalize="none">
+    <label class="lbl">Choose a password for this app</label>
+    <input class="field" name="password" type="password" placeholder="At least 6 characters" autocomplete="new-password">
+    <label class="lbl">The same password again</label>
+    <input class="field" name="password-again" type="password" placeholder="At least 6 characters" autocomplete="new-password">
+    <p class="hint"><b>Not your email password.</b> Pick a different one, for The Scorecard only.</p>`;
+}
+
+/* Nobody signed in. With an invitation or a code, the account comes first
+   (create one, or sign in to an existing one); otherwise it is Sign in. */
+function screenSignedOut(invite) {
+  if (showApply && !invite) return screenApply();
+  const joiningSomething = !!invite || showCodeEntry;
+  const mode = accountMode || (joiningSomething ? "create" : "signin");
+  const adminOnly = invite && invite.role === "admin" && !invite.golferId;
+  const heading = invite
+    ? (adminOnly ? "You have been invited to help run a group" : "You have been invited to a group")
+    : showCodeEntry ? "Join with a code" : "Sign in";
+  const next = invite ? "Then you will see your invitation." : "Then you will type the group code.";
+
+  if (joiningSomething && mode === "create") {
+    return `<div class="stack">
+      ${flashBar()}
+      ${offlineAccountNote()}
+      <div class="card padded">
+        <h2 class="panel-title">${heading}</h2>
+        <p class="hint">First, create your account: your email and a password. It is the same account on every device, so your groups and handicap follow you. ${next}</p>
+        ${newAccountFields()}
+        <div class="inline-actions stacked">
+          <button class="btn" data-act="create-account" ${joining ? "disabled" : ""}>${joining ? "Creating your account…" : "Create my account"}</button>
+        </div>
+        <p class="hint"><button class="linkbtn" data-act="account-mode-signin">I already have an account — sign in</button></p>
+        ${showCodeEntry && !invite ? `<div class="inline-actions stacked"><button class="btn ghost" data-act="hide-code">Back</button></div>` : ""}
+      </div>
+      ${versionBlock()}
+    </div>`;
+  }
+
+  return `<div class="stack">
+    ${flashBar()}
+    ${offlineAccountNote()}
+    ${signInCard({
+      heading,
+      lead: joiningSomething
+        ? `<p class="hint">Sign in with your email and Scorecard password. ${next}</p>`
+        : platform.isApp()
+          ? `<p class="hint">Use your email and Scorecard password. It is the same account on every device.</p>
+             <p class="hint"><button class="linkbtn" data-act="open-guide">Used The Scorecard in Safari? Read this first</button></p>`
+          : `<p class="hint">Use your email and Scorecard password. It is the same account in Safari, on your home screen and in the iPhone app.</p>`,
+      backAct: joiningSomething ? "account-mode-create" : "",
+      backLabel: "New here? Create your account",
+    })}
+    ${joiningSomething ? (showCodeEntry && !invite ? `<div class="inline-actions stacked"><button class="btn ghost" data-act="hide-code">Back</button></div>` : "") : `
+      <div class="card padded">
+        <div class="name">New to The Scorecard?</div>
+        <p class="hint">Any golfer can apply to join the public group and keep a handicap there.</p>
+        <div class="inline-actions stacked"><button class="btn ghost" data-act="show-apply">Apply to join the public group</button></div>
+        <p class="hint">Invited to a private group? Tap the link you were sent instead.</p>
+      </div>
+      <p class="hint" style="text-align:center">
+        <button class="linkbtn" data-act="enter-code">I was given a code</button>
+      </p>`}
+    ${versionBlock()}
+  </div>`;
+}
+
+/* An old guest session from before Version 2.0. The rules refuse it
+   everything but finding its own groups and deleting itself, so the email and
+   password are set here, on the SAME account: nothing moves, nothing is lost. */
+function screenUpgrade() {
+  if (accountMode === "signin") {
+    return `<div class="stack">
+      ${flashBar()}
+      ${offlineAccountNote()}
+      ${signInCard({
+        heading: "Sign in",
+        lead: `<p class="hint">Only if you already made an account with an email and a password. This device's guest place is not carried over — for that, go back and set an email and password instead.</p>`,
+        backAct: "account-mode-create",
+        backLabel: "Back — keep my place on this device",
+      })}
+      ${versionBlock()}
+    </div>`;
+  }
+  return `<div class="stack">
+    ${flashBar()}
+      ${offlineAccountNote()}
+    <div class="card padded">
+      <h2 class="panel-title">Set your email and password</h2>
+      <p class="lead">The Scorecard now signs everybody in with an email and a password.</p>
+      <p class="hint">Set yours once. You stay the same person: your groups, your role, your rounds and your handicap all stay with you, here and on any device where you sign in.</p>
+      ${newAccountFields()}
+      <div class="inline-actions stacked">
+        <button class="btn" data-act="upgrade-account" ${joining ? "disabled" : ""}>${joining ? "Saving…" : "Keep my place"}</button>
+      </div>
+      <p class="hint"><button class="linkbtn" data-act="account-mode-signin">I already have an account with an email — sign in</button></p>
+      <p class="hint">Would rather leave? <b>Delete my account</b> is at the foot of this screen.</p>
+    </div>
+    ${versionBlock()}
+  </div>`;
+}
+
+/* Reads the new-account fields; returns null (after saying why) if unusable. */
+function readNewAccountFields() {
+  const email = ((view.querySelector('[name="email"]') || {}).value || "").trim();
+  const password = (view.querySelector('[name="password"]') || {}).value || "";
+  const again = (view.querySelector('[name="password-again"]') || {}).value || "";
+  authForm = { email, password: "" };
+  if (!email) { flashMsg("Type your email address"); return null; }
+  if (password.length < 6) { flashMsg("The password needs at least six characters"); return null; }
+  if (password !== again) { flashMsg("The two passwords are different. Type them again."); return null; }
+  return { email, password };
+}
+
+async function createAccountHere() {
+  const fields = readNewAccountFields();
+  if (!fields) return;
+  joining = true;
+  busy("Creating your account");
+  render();
+  try {
+    await db.createAccount(fields);
+    accountMode = null;
+    await loadInvitedDetails();
+    joining = false;
+    flashMsg("Account created. Use this email and password on your other devices.");
+  } catch (err) {
+    joining = false;
+    const code = String((err && (err.code || err.message)) || "");
+    if (code.includes("email-already-in-use")) {
+      accountMode = "signin";
+      flashMsg("That email already has an account. Sign in with it instead.");
+    } else {
+      openSignInProblem(err, fields.email);
+    }
+  } finally {
+    idle();
+    render();
+  }
+}
+
+async function upgradeAccount() {
+  const fields = readNewAccountFields();
+  if (!fields) return;
+  joining = true;
+  busy("Setting your email and password");
+  render();
+  try {
+    await db.setMyPassword(fields);
+    accountMode = null;
+    joining = false;
+    await settleGroup(db.recallAssociation());
+    await loadInvitedDetails();
+    tab = "enter";
+    flashMsg(`Done. You are signed in as ${fields.email} — use it on every device.`);
+    await checkPublicApproval();
+  } catch (err) {
+    joining = false;
+    openSignInProblem(err, fields.email);
+  } finally {
+    idle();
+    render();
+  }
 }
 
 let legacy = null;          /* { v1, preview } once found */
@@ -501,7 +921,7 @@ let showCodeEntry = false;
 let joining = false;
 
 function migrationCard() {
-  if (!legacy) return "";
+  if (!legacy || !db.canCreateGroups()) return "";
   const p = legacy.preview;
   return `<div class="card padded">
     <h2 class="panel-title">Bring your existing rounds across</h2>
@@ -691,6 +1111,12 @@ function screenEnter() {
      Seeding it here covers every route in, including a fresh join. */
   if (!db.canManage() && !form.golferId) {
     let mine = typeof db.myGolferId === "function" ? db.myGolferId(allGolfers) : "";
+    /* Version 2.0: the membership records which golfer this is (golferId),
+       and the own golfer record may still be loading. */
+    if (!mine && typeof db.myGolferIdNow === "function") {
+      const recorded = db.myGolferIdNow();
+      if (recorded && allGolfers.some((g) => g.id === recorded)) mine = recorded;
+    }
 
     /* Fall back to matching on the name they joined under.
      *
@@ -703,7 +1129,9 @@ function screenEnter() {
       const me = members.find((m) => m.uid === db.status().uid);
       const named = me && String(me.displayName || "").trim().toLowerCase();
       if (named) {
-        const match = allGolfers.find((g) => String(g.name || "").trim().toLowerCase() === named);
+        /* Real golfer records only: a directory entry (name and index of
+           somebody else) is never "you", and has no link to claim. */
+        const match = allGolfers.find((g) => !g.fromDirectory && String(g.name || "").trim().toLowerCase() === named);
         if (match) {
           mine = match.id;
 
@@ -715,7 +1143,9 @@ function screenEnter() {
            * a guest could post a round and then not delete it. Claiming an
            * unlinked golfer as yourself is explicitly permitted, so this write
            * is allowed and it makes the two agree. */
-          if (!match.linkedUid) db.claimGolfer(match.id);
+          /* Once per golfer per session: this runs while drawing the screen,
+             and the claim itself redraws it. */
+          if (match.linkedUid == null && !claimedOnce.has(match.id)) { claimedOnce.add(match.id); db.claimGolfer(match.id); }
         }
       }
     }
@@ -1081,6 +1511,9 @@ function screenSummary() {
         </div>
       </div>
     </section>
+    ${/* A regular member still sees the group's ranking (names and indexes)
+         before posting anything — and, in the public group, Report or block. */
+      !db.canManage() ? groupRankingSection() : ""}
     ${versionBlock()}`;
   }
 
@@ -1121,10 +1554,16 @@ function screenSummary() {
     })()}
 
     <div class="indexes">${sortedGolfers()
-      .filter((g) => rounds.some((r) => r.golferId === g.id))
+      /* A regular member sees other golfers through the directory only, so
+         "has rounds" is judged by the published index instead. */
+      .filter((g) => (g.fromDirectory ? shownIndex(g) != null : rounds.some((r) => r.golferId === g.id)))
       .filter((g) => g.id !== db.myGolferId(allGolfers) || shownIndex(g) == null)
       .map((g) => {
       const n = rounds.filter((r) => r.golferId === g.id).length;
+      if (g.fromDirectory) return `<div class="idx">
+        <div class="name truncate">${esc(g.name)}</div>
+        <div class="big">${shownIndex(g).toFixed(1)}</div>
+      </div>`;
       return `<button class="idx" data-golfer-index="${g.id}">
         <div class="name truncate">${esc(g.name)}</div>
         <div class="big ${shownIndex(g) == null ? "none" : ""}">${shownIndex(g) == null ? "—" : shownIndex(g).toFixed(1)}</div>
@@ -1152,6 +1591,7 @@ function screenSummary() {
 /* ================= rankings ================= */
 
 function rankingSection() {
+  if (!db.canManage()) return groupRankingSection();
   const period = { year: rankPeriod.year, month: rankPeriod.month };
   const scoped = rounds.filter((r) => model.inPeriod(r, period));
   const table = model.periodRanking(scoped, golfers, { minRounds: 3 });
@@ -1186,6 +1626,37 @@ function rankingSection() {
   </section>`;
 }
 
+/* The ranking a regular member sees (Version 2.0, Phase A): every golfer in
+   the group from 1 to N by handicap index, with rank, name and index only.
+   Rows do not open anything. Golfers without an index yet come last. */
+function groupRankingSection() {
+  const rows = sortedGolfers()
+    .map((g) => ({ id: g.id, name: g.name, index: shownIndex(g) }))
+    .sort((a, b) => (a.index == null) - (b.index == null) || (a.index ?? 0) - (b.index ?? 0) || a.name.localeCompare(b.name));
+  let place = 0, seen = 0, previous;
+  for (const r of rows) {
+    if (r.index == null) { r.place = null; continue; }
+    seen++;
+    if (r.index !== previous) { place = seen; previous = r.index; }
+    r.place = place;   /* equal indexes share a place */
+  }
+  const mine = db.myGolferId(allGolfers);
+  return `<section class="panel">
+    <div class="panel-head"><h2 class="panel-title">Group ranking</h2></div>
+    ${rows.length === 0 ? `<div class="card"><p class="blank">No golfers yet.</p></div>` : `
+    <div class="card list">
+      ${rows.map((r) => `<div class="list-row${r.id === mine ? " me" : ""}">
+        <span class="rank">${r.place || "—"}</span>
+        <span class="grow"><span class="name">${esc(r.name)}</span>
+          ${db.isPublicGroup() && r.id !== mine ? `<br><button class="linkbtn" data-act="golfer-actions" data-id="${esc(r.id)}">Report or block</button>` : ""}</span>
+        <span class="netavg">${r.index == null ? "—" : r.index.toFixed(1)}<br><span class="sub">index</span></span>
+      </div>`).join("")}
+    </div>
+    <p class="hint">Ranked by handicap index, lowest first. Only names and indexes are shown; each golfer's rounds stay private.</p>`}
+    ${db.isPublicGroup() ? publicSafetyNote() : ""}
+  </section>`;
+}
+
 /* ================= games ================= */
 
 function screenGames() {
@@ -1201,7 +1672,9 @@ function screenGames() {
       : "No games yet. Whoever organises your group sets these up."}</p></div>` : ""}
     ${games.length ? `<div class="card list">
       ${games.map((g) => {
-        const played = rounds.filter((r) => r.gameId === g.id);
+        /* A regular member cannot see other players' rounds; the game's
+           published result sheet says who played. */
+        const played = db.canManage() ? rounds.filter((r) => r.gameId === g.id) : (g.results || []);
         return `<button class="list-row" data-game="${g.id}">
           <span class="grow">
             <span class="name">${esc(g.name || courseName(g.courseId))}</span><br>
@@ -1320,17 +1793,47 @@ function fastEntryPanel(game) {
   </section>`;
 }
 
+/* Writes the game's result sheet when it differs from what is published. */
+function publishSheetIfChanged(game, played, board) {
+  const byRound = new Map(board.map((row) => [row.roundId, row]));
+  const results = played.map((r) => {
+    const row = byRound.get(r.id) || {};
+    return { id: r.id, golferId: r.golferId, name: row.name || (golferById(r.golferId) || {}).name || "",
+             date: r.date || "", gross: r.gross ?? null, adjusted: r.adjusted ?? null,
+             courseHandicap: row.courseHandicap ?? r.courseHandicap ?? null, teeName: r.teeName || "",
+             estimated: !!row.estimated };
+  }).sort((a, b) => a.id.localeCompare(b.id));
+  /* Compared with the keys in a fixed order: Firestore hands maps back with
+     their keys in its own order, and a plain comparison would then differ
+     forever and write on every redraw. Also written at most once per content
+     per session, since this runs while the screen is being drawn. */
+  const stable = (list) => JSON.stringify(list.map((o) => Object.keys(o).sort().map((k) => [k, o[k] ?? null])));
+  const now = stable(results);
+  const before = stable([...(game.results || [])].sort((a, b) => String(a.id).localeCompare(String(b.id))));
+  if (now !== before && publishedSheets.get(game.id) !== now) {
+    publishedSheets.set(game.id, now);
+    db.publishGameResults(game.id, results);
+  }
+}
+const publishedSheets = new Map();   /* game id -> the sheet this session last published */
+
 function gameDetail(gameId) {
   const game = games.find((g) => g.id === gameId);
   if (!game) { openGame = null; return screenGames(); }
 
-  const played = rounds.filter((r) => r.gameId === gameId);
+  /* Version 2.0, Phase A: a regular member reads the result sheet published
+     on the game (names and scores), never the players' rounds. Owners and
+     admins work from the rounds and publish the sheet as they look at it. */
+  const sheet = db.canManage() ? null : (game.results || []);
+  const played = sheet || rounds.filter((r) => r.gameId === gameId);
+  const people = sheet ? sheet.map((r) => ({ id: r.golferId, name: r.name })) : allGolfers;
   const multiDay = !!(game.endDate && game.endDate !== game.date);
-  const standings = multiDay ? model.gameStandings(played, allGolfers, game) : { days: [], players: [] };
+  const standings = multiDay ? model.gameStandings(played, people, game) : { days: [], players: [] };
   /* allGolfers, not the roster. Somebody who played in this game but has since
      been taken off the roster must still appear in its result — a past
      leaderboard should not change because the roster did. */
-  const board = model.gameLeaderboard(played, allGolfers);
+  const board = model.gameLeaderboard(played, people);
+  if (!sheet) publishSheetIfChanged(game, played, board);
 
   /* Rounds played on a day this game covers but not yet part of it.
      This is what saves entering a tournament twice: post rounds as normal on
@@ -1611,7 +2114,7 @@ function openShare(text, title, options = {}) {
     </div>
     <div class="inline-actions stacked">
       <button class="btn ghost" data-send="save">Save as a file</button>
-      ${navigator.share ? `<button class="btn ghost" data-send="native">More apps…</button>` : ""}
+      ${platform.canShare() ? `<button class="btn ghost" data-send="native">More apps…</button>` : ""}
     </div>
   </div>`;
   sheetEl.dataset.text = text;
@@ -1629,10 +2132,10 @@ function screenManage() {
   <section class="panel">
     <div class="panel-head"><h2 class="panel-title">Golfers in this group</h2><span class="panel-count">${golfers.length || ""}</span></div>
     <div class="card">
-      ${!golfers.length && db.canManage() ? `<div class="welcome" style="border:0;padding:1.4rem 1rem">
+      ${!golfers.length && db.canManage() && !db.readsOffline() ? `<div class="welcome" style="border:0;padding:1.4rem 1rem">
         <p style="margin:0 0 1rem">Nobody is on this roster yet. If your golfers already exist from before, put them back in one tap.</p>
         <div class="inline-actions stacked">
-          <a class="btn" href="./rebuild.html" style="text-decoration:none;display:flex;align-items:center;justify-content:center">Rebuild the roster</a>
+          <button class="btn" data-act="open-tool" data-tool="rebuild">Rebuild the roster</button>
         </div>
       </div>` : ""}
       ${golfers.length ? `<div class="list">
@@ -1699,6 +2202,8 @@ function screenManage() {
               ? (db.isOwner()
                   ? `<button class="rowbtn wide" data-reinvite="${g.id}" title="Let them join again">Joined ✓</button>`
                   : `<button class="rowbtn wide" disabled>Joined ✓</button>`)
+              /* The public group is joined by application only, never by invitation. */
+              : db.isPublicGroup() ? ""
               : (waiting
                   ? `<button class="rowbtn wide" data-invite-golfer="${g.id}" title="Invited ${esc(invitedOn)} — send it again">Re-send</button>`
                   : `<button class="rowbtn wide primary" data-invite-golfer="${g.id}">Invite</button>`)}
@@ -1785,7 +2290,7 @@ function groupSwitcher() {
         <span class="chev">${g.id === current ? "✓" : "›"}</span>
       </div>`).join("")}
     </div>
-    ${db.isOwner() || !current ? `<div class="inline-actions stacked">
+    ${db.canCreateGroups() ? `<div class="inline-actions stacked">
       <button class="btn ghost" data-act="new-group">Start another group</button>
     </div>` : ""}
     <p class="hint">A golfer's handicap is the same in every group — it is built from all their rounds, wherever they played them.</p>
@@ -1809,6 +2314,16 @@ function screenAdmin() {
      turning them away with nothing — being told "not your area" while holding
      a real admin role is exactly what looked like a broken button. */
   if (!db.isOwner()) {
+    /* Phase D: an admin removes regular members of this group. Phase C: an
+       admin of the PUBLIC group also reviews applications and reports. */
+    if (db.canManage()) {
+      return `${flashBar()}
+        ${db.isPublicGroup() ? safe("Applications", applicationsSection) : ""}
+        ${db.isPublicGroup() ? safe("Reports", reportsSection) : ""}
+        ${safe("Members", adminMembersSection)}
+        ${db.needsPassword() ? safe("Set a password", passwordPrompt) : ""}
+        ${versionBlock()}`;
+    }
     if (db.needsPassword()) {
       return `${flashBar()}
         ${safe("Set a password", passwordPrompt)}
@@ -1818,6 +2333,8 @@ function screenAdmin() {
   }
 
   return `${flashBar()}
+  ${db.isPublicGroup() ? safe("Applications", applicationsSection) : ""}
+  ${db.isPublicGroup() ? safe("Reports", reportsSection) : ""}
   ${safe("Set a password", passwordPrompt)}
   ${safe("People", peopleSection)}
   ${safe("Group", groupSection)}
@@ -1941,7 +2458,7 @@ function peopleSection() {
           ${p.state === "joined" && p.role !== "owner"
             ? `<button class="rowbtn" data-role="${p.key}:${p.role === "admin" ? "member" : "admin"}">${p.role === "admin" ? "Make guest" : "Make admin"}</button>
                <button class="rowbtn warn" data-drop-member="${p.key}">Remove</button>`
-            : p.state === "waiting"
+            : p.state === "waiting" && !db.isPublicGroup()
               ? `<button class="rowbtn" data-invite-golfer="${esc(p.golferId)}">Send again</button>`
               : ""}
         </div>`).join("") : `<p class="blank" style="padding:1rem">Nobody yet.</p>`}
@@ -1957,7 +2474,11 @@ function peopleSection() {
         </div>
       </div>` : ""}
 
-      <div class="inline-form bordered">
+      ${db.isPublicGroup() ? `<div class="inline-form bordered">
+        <p class="hint" style="margin:0">People join the public group only by applying — see
+        <b>Applications</b> above. There are no invitation links or codes for it. To make somebody a
+        reviewer, tap <b>Make admin</b> beside their name.</p>
+      </div>` : `<div class="inline-form bordered">
         <p class="hint" style="margin:0 0 0.7rem">Invitations for people who play are on the
         <b>Manage</b> tab, beside each name — that way the link carries their name and ties them to
         their existing rounds.</p>
@@ -1967,7 +2488,7 @@ function peopleSection() {
           <button class="btn compact" data-act="invite-nonplayer">Invite an admin who doesn't play</button>
           <button class="btn ghost compact" data-act="show-code">Show the code</button>
         </div>
-      </div>
+      </div>`}
     </div>
     <p class="hint"><b>Guests</b> post their own rounds and see the results. <b>Admins</b> also add courses, manage the roster and post for anybody. <b>You</b> can do everything, and only you can change these.</p>
   </section>`;
@@ -1983,7 +2504,8 @@ function groupSection() {
         <button class="btn ghost" data-act="rename-group">Save the name</button>
       </div>
     </div>
-    <p class="hint"><a href="./rebuild.html">Rebuild the roster</a> · <a href="./tidy.html">Check and tidy the data</a> · <a href="./cleanup.html">Clean up unused groups</a></p>
+    <p class="hint"><button class="linkbtn" data-act="open-tool" data-tool="rebuild">Rebuild the roster</button> · <button class="linkbtn" data-act="open-tool" data-tool="tidy">Check and tidy the data</button> · <button class="linkbtn" data-act="open-tool" data-tool="cleanup">Clean up unused groups</button></p>
+    ${platform.isApp() ? `<p class="hint">Opens in Safari. Sign in there with the owner's email if asked.</p>` : ""}
   </section>
 
   <section class="panel">
@@ -2061,7 +2583,7 @@ function openBackupSheet() {
     </div>
     <div class="inline-actions stacked">
       <button class="btn ghost" data-send="copy">Copy the text</button>
-      ${navigator.share ? `<button class="btn ghost" data-send="native">More apps…</button>` : ""}
+      ${platform.canShare() ? `<button class="btn ghost" data-send="native">More apps…</button>` : ""}
     </div>
     <p class="hint">Save it somewhere lets you choose the folder — iCloud Drive, Google Drive, Dropbox or anywhere else on the device. A file kept off the phone is the one that survives losing the phone.</p>
   </div>`;
@@ -2077,6 +2599,22 @@ function openBackupSheet() {
 async function saveBackup() {
   const text = sheetEl.dataset.text || "";
   const name = sheetEl.dataset.filename || "scorecard-backup.txt";
+
+  /* Inside the iPhone app: write the file, confirm it is really written, then
+     open the share sheet with it. The sheet stays open with a clear message if
+     the write fails — nothing is reported as saved that wasn't. */
+  if (platform.isApp()) {
+    try {
+      await platform.saveFile(name, text, sheetEl.dataset.title || "Scorecard backup");
+      sheetEl.hidden = true;
+      flashMsg("Choose Save to Files, then pick iCloud Drive or any folder you like.");
+      render();
+    } catch (e) {
+      if (e && /cancel/i.test(String(e.message || e))) return;   /* they closed the share sheet */
+      flashMsg("The backup was NOT saved: " + ((e && e.message) || "the file could not be written") + ". Try Email or Copy instead.");
+    }
+    return;
+  }
 
   if (window.showSaveFilePicker) {
     try {
@@ -2199,7 +2737,7 @@ function accountSection() {
         ${settled ? `
           <p class="hint">Use this email and password on your other devices and you are one person everywhere.</p>
         ` : `
-          <div class="note"><b>One step left.</b> You are signed in through Google, which only works here in Safari. Set a password so you can reach this same account from the home-screen app, where Google cannot work.</div>
+          <div class="note"><b>One step left.</b> No password is set on this account yet. Set one so you can sign in on your other devices.</div>
           <label class="lbl">Password for this app</label>
           <input class="field" name="password" type="password" placeholder="Invent one, at least 6 characters" autocomplete="new-password">
           <div class="inline-actions stacked">
@@ -2208,11 +2746,11 @@ function accountSection() {
           <p class="hint"><b>Not the password for your email account.</b> This is a new one, for this app only. Write it down — you will type it on every other device, with the email above.</p>
         `}
 
-        <div class="inline-actions stacked">
+        ${db.deletionPending() ? "" : `<div class="inline-actions stacked">
           <button class="btn ${confirmSignOut ? "danger" : "ghost"}" data-act="sign-out">
             ${confirmSignOut ? "Tap again to sign out" : "Sign out of this device"}
           </button>
-        </div>
+        </div>`}
         <p class="hint">${confirmSignOut
           ? "Nothing is deleted — this device simply returns to the first screen. Wait a few seconds to cancel."
           : "Signing out deletes nothing. It returns this device to the first screen."}</p>
@@ -2223,25 +2761,18 @@ function accountSection() {
   return `<section class="panel">
     <div class="panel-head"><h2 class="panel-title">Account</h2></div>
     <div class="card padded">
-      <div class="name">This device only${db.canManage() ? " — and you are " + (db.myRole() === "owner" ? "the owner" : "an admin") : ""}</div>
-      <p class="hint">Right now this device is not tied to any account. That means Safari and the home-screen app count as two different people, each with their own groups. Signing in fixes that.</p>
-      ${db.canManage() ? `<div class="note"><b>Worth doing today.</b> Your role is real and works properly, but it exists only in this browser. Without an account it cannot follow you to another device, and it disappears if this browser's data is cleared.</div>` : ""}
-
-      <div class="note tip"><b>If you have version 1 data, do this in order.</b> Tap the Google button first — it can only work here in Safari — then come back and set a password. Setting a password without that step would create a separate, empty account.</div>
-
-      <div class="inline-actions stacked">
-        <button class="btn ghost" data-act="google">Sign in with Google — Safari only</button>
-      </div>
-      <p class="hint">Never works in an app opened from the home screen; iOS blocks the window Google needs.</p>
+      <div class="name">Sign in as the owner</div>
+      <div class="note"><b>Sign in with the owner's email address.</b> Use the email and the Scorecard password you set as owner — not your email account's password. Signing in with any other email opens a different account that does not own this group.</div>
+      ${db.canManage() ? `<p class="hint">Your role only lasts on this device until you sign in.</p>` : ""}
 
       <label class="lbl">Email</label>
       <input class="field" name="email" type="email" value="${esc(authForm.email)}" placeholder="you@example.com" autocomplete="username" autocapitalize="none">
       <label class="lbl">Password for this app</label>
-      <input class="field" name="password" type="password" placeholder="Invent one, at least 6 characters" autocomplete="new-password">
+      <input class="field" name="password" type="password" placeholder="Your Scorecard password" autocomplete="current-password">
       <div class="inline-actions stacked">
-        <button class="btn" data-act="sign-in" ${joining ? "disabled" : ""}>${joining ? "Signing in…" : "Set the password"}</button>
+        <button class="btn" data-act="sign-in" ${joining ? "disabled" : ""}>${joining ? "Signing in…" : "Sign in"}</button>
       </div>
-      <p class="hint"><b>Not your email password.</b> A new one, for this app only. You will type it on your other devices.</p>
+      <p class="hint"><b>Not your email password.</b> The Scorecard password, for this app only.</p>
       ${hasGroup ? `<p class="hint">Your groups and rounds stay exactly as they are — signing in attaches this device to an account, it does not move anything.</p>` : ""}
     </div>
   </section>`;
@@ -2388,6 +2919,8 @@ function versionBlock() {
     <div><b>The Scorecard</b> <span class="mono">v${VERSION}</span></div>
     <div class="sub">${rounds.length} round${rounds.length === 1 ? "" : "s"} · ${golfers.length} golfer${golfers.length === 1 ? "" : "s"} · ${courses.length} course${courses.length === 1 ? "" : "s"}</div>
     <div class="sub">${esc(sync.text)} · World Handicap System, best 8 of last 20</div>
+    <div class="sub"><button class="linkbtn" data-act="open-user-guide">User guide</button> · <button class="linkbtn" data-act="open-support">Support</button> · <button class="linkbtn" data-act="open-privacy">Privacy</button></div>
+    ${db.hasUser() ? `<div class="sub"><button class="linkbtn" data-act="delete-account">Delete my account</button></div>` : ""}
   </section>`;
 }
 
@@ -2501,6 +3034,111 @@ function openPasswordSheet({ heading, because, allowLater = false } = {}) {
   </div>`;
 }
 
+/* ================= Delete my account (Change 7) ================= */
+
+function openDeleteAccount({ resume = false, problem = "" } = {}) {
+  const needsPassword = db.hasPassword() && !(db.currentEmail() || "").startsWith("delete-");
+  const blockers = db.deletionBlockers();
+  sheetEl.hidden = false;
+  sheetEl.dataset.report = "";
+  sheetEl.innerHTML = `<div class="sheet-body">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <h2>${resume ? "Your account isn't deleted yet" : "Delete your account?"}</h2>
+      <button class="rowbtn" data-close="1">${resume ? "Later" : "Keep it"}</button>
+    </div>
+    ${problem ? `<div class="note warn">${esc(problem)}</div>` : ""}
+    ${resume
+      ? `<p class="lead">The deletion you started didn't finish. You are still signed in. Tap Try again to finish it — if it keeps failing, it finishes automatically within a day.</p>`
+      : `<p class="lead">Your email and sign-in are deleted and you leave every group. Your golfer name, rounds and handicap stay with the group so its history and handicaps stay correct, and an admin can keep entering your scores. This can't be undone.</p>`}
+    ${!resume && blockers.abandoned ? `<div class="note warn"><b>${blockers.abandoned} earlier change${blockers.abandoned === 1 ? "" : "s"} could not be saved.</b> They will never upload. Dismiss them to continue.
+      <div class="inline-actions stacked"><button class="btn ghost" data-del="dismiss">Dismiss them</button></div></div>` : ""}
+    ${needsPassword ? `<label class="lbl">Your Scorecard password</label>
+      <input class="field" name="delete-password" type="password" autocomplete="current-password" placeholder="To confirm it's you">` : ""}
+    <div class="inline-actions stacked">
+      <button class="btn danger" data-del="go">${resume ? "Try again" : "Delete my account"}</button>
+      ${resume ? "" : `<button class="btn ghost" data-close="1">Keep it</button>`}
+    </div>
+  </div>`;
+}
+
+/* Version 2.0 Phase C: the report, block and approve sheets. */
+sheetEl.addEventListener("click", async (e) => {
+  const t = e.target.closest("[data-pc]");
+  if (!t) return;
+  const { pc, id } = t.dataset;
+  if (pc === "report") {
+    const golfer = allGolfers.find((g) => g.id === id) || golferById(id) || {};
+    const reason = ((sheetEl.querySelector('[name="report-reason"]') || {}).value || "").trim();
+    sheetEl.hidden = true;
+    busy("Sending the report");
+    try { await db.reportGolfer({ golferId: id, displayName: golfer.name || "", reason }); flashMsg("Report sent to the people who run the public group. Thank you."); }
+    catch { flashMsg("The report was not sent. Check the connection and try again."); }
+    finally { idle(); }
+    return render();
+  }
+  if (pc === "block") {
+    const golfer = allGolfers.find((g) => g.id === id) || golferById(id) || {};
+    sheetEl.hidden = true;
+    busy("Blocking");
+    try { await db.blockGolfer({ golferId: id, name: golfer.name || "" }); flashMsg(`${golfer.name || "They"} will no longer appear on your screens.`); }
+    catch { flashMsg("Couldn't block — the message above says why."); }
+    finally { idle(); }
+    return render();
+  }
+  if (pc === "approve") {
+    const a = applications.find((x) => x.key === id);
+    const name = ((sheetEl.querySelector('[name="approve-name"]') || {}).value || "").trim();
+    if (!a) { sheetEl.hidden = true; return render(); }
+    if (name.length < 2) { flashMsg("Type their golfer name"); return; }
+    sheetEl.hidden = true;
+    busy(`Approving ${a.fullName}`);
+    try {
+      const result = await db.approveApplication({ application: a, golferName: name });
+      flashMsg(result.already
+        ? `${a.fullName} was already approved. Nothing more to do.`
+        : result.emailFailed
+          ? `${a.fullName} is approved, but the password email did not send. Use "Send the email again" under Applications.`
+          : result.existingAccount
+            ? `${a.fullName} is approved. They already had an account: they sign in with it (the email also lets them choose a new password), then confirm their email to join.`
+            : `${a.fullName} is approved. The email to choose a password has gone to ${a.email}.`);
+    } catch (err) {
+      const code = String((err && (err.code || err.message)) || "");
+      if (code.includes("name-taken")) { flashMsg(`The name "${name}" is already used. Add a middle initial or a nickname and approve again.`); openApproveSheet(id); }
+      else if (code.includes("app/busy")) flashMsg("Another reviewer is approving this application right now. Nothing was changed.");
+      else if (code.includes("app/rejected")) flashMsg("This application was rejected, so it cannot be approved.");
+      else if (code.includes("app/gone")) flashMsg("This application no longer exists.");
+      else flashMsg(`The approval did not finish: ${code || "no connection"}. Tap Finish to complete it — it is safe to repeat.`);
+    } finally { idle(); }
+    return render();
+  }
+});
+
+sheetEl.addEventListener("click", async (e) => {
+  const button = e.target.closest("[data-del]");
+  if (!button) return;
+  if (button.dataset.del === "dismiss") { db.dismissAbandoned(); return openDeleteAccount(); }
+  if (button.dataset.del !== "go") return;
+  const password = ((sheetEl.querySelector('[name="delete-password"]') || {}).value) || "";
+  const resume = db.deletionPending();
+  button.disabled = true;
+  busy("Deleting your account");
+  let result;
+  try {
+    result = await db.deleteMyAccount({ password, onStep: (step) => { busyWhat = step; paintBusy(); } });
+  } finally { idleAll(); }
+  if (result && result.ok) {
+    sheetEl.hidden = false;
+    sheetEl.innerHTML = `<div class="sheet-body"><h2>Your account has been deleted</h2>
+      <p class="lead">Your sign-in is gone and you have left every group. This app will now start fresh.</p>
+      <div class="inline-actions stacked"><button class="btn" data-del="restart">Done</button></div></div>`;
+    return;
+  }
+  openDeleteAccount({ resume: db.deletionPending() || resume, problem: (result && result.message) || "Something went wrong. Nothing was reported as deleted." });
+});
+sheetEl.addEventListener("click", (e) => {
+  if (e.target.closest('[data-del="restart"]')) location.reload();
+});
+
 function openNotice({ title, detail, advice, action }) {
   sheetEl.hidden = false;
   sheetEl.dataset.report = "";
@@ -2595,13 +3233,13 @@ sheetEl.addEventListener("click", async (e) => {
       action.disabled = false;
       action.textContent = "Send this report";
       flashMsg("Couldn't send it directly. Opening your mail app instead.");
-      location.href = `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(sheetEl.dataset.subject || "BUG")}&body=${encodeURIComponent(context())}`;
+      platform.openExternal(`mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(sheetEl.dataset.subject || "BUG")}&body=${encodeURIComponent(context())}`);
     }
     return;
   }
 
   if (what === "email") {
-    location.href = `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(sheetEl.dataset.subject || "BUG")}&body=${encodeURIComponent(context())}`;
+    platform.openExternal(`mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(sheetEl.dataset.subject || "BUG")}&body=${encodeURIComponent(context())}`);
     return;
   }
 
@@ -2625,7 +3263,14 @@ function visibleTabs() {
     ["games", "Games", "⚑"],
   ];
   if (db.canManage()) tabs.push(["manage", "Manage", "⚙"]);
-  if (db.isOwner()) tabs.push(["admin", "Admin", "★"]);
+  /* Phase C: admins of the PUBLIC group review applications on this tab;
+     the count of waiting ones is shown on it. */
+  /* Phase D: admins have the tab too, to remove regular members (and, in the
+     public group, to review applications and reports). */
+  if (db.isOwner() || db.canManage()) {
+    const waiting = db.isPublicGroup() ? applications.length + publicReports.length : 0;
+    tabs.push(["admin", waiting ? `Admin (${waiting})` : "Admin", "★"]);
+  }
   return tabs;
 }
 
@@ -2730,6 +3375,10 @@ function renderNow() {
   try {
     if (!ready || settling) {
       view.innerHTML = bootCard();
+    } else if (db.isAnonymousSession()) {
+      tabsEl.innerHTML = "";
+      view.innerHTML = screenUpgrade();
+      document.getElementById("brandSub").textContent = "One step to keep your place";
     } else if (!db.currentAssociation()) {
       tabsEl.innerHTML = "";
       view.innerHTML = screenJoin();
@@ -2842,7 +3491,7 @@ document.getElementById("statusBtn").onclick = () => {
     <div class="inline-actions stacked">
       <button class="btn ghost" data-quick="backup">Back up my data</button>
       <button class="btn ${db.hasPassword() ? "ghost" : ""}" data-quick="setpassword">${db.hasPassword() ? "Change my password" : "Set a password"}</button>
-      <button class="btn ghost warn" data-quick="signout">Sign out of this device</button>
+      ${db.deletionPending() ? "" : `<button class="btn ghost warn" data-quick="signout">Sign out of this device</button>`}
     </div>
     <p class="hint">Signing out deletes nothing. It returns this device to the first screen.${email ? "" : " Without an account, you will need your invitation link to come back."}</p>
   </div>`;
@@ -3107,10 +3756,10 @@ view.addEventListener("click", async (e) => {
         <input type="radio" name="invite-role" value="member" checked>
         <span><b>Guest</b> — posts their own rounds, sees results. No password.</span>
       </label>
-      <label class="checkline">
+      ${db.isOwner() ? `<label class="checkline">
         <input type="radio" name="invite-role" value="admin">
         <span><b>Admin</b> — also manages the roster and posts for anybody. Sets a password.</span>
-      </label>
+      </label>` : ""}
       <p class="hint">A guest link keeps working for that same person on another device. An admin link works once.</p>
 
       <div class="inline-actions stacked">
@@ -3390,16 +4039,42 @@ view.addEventListener("click", async (e) => {
         const code = String((err && (err.code || err.message)) || "");
         const stale = code.includes("requires-recent-login");
         openProblem({
-          title: stale ? "Google needs to confirm you again" : "The password could not be set",
+          title: stale ? "Please sign in again first" : "The password could not be set",
           detail: stale
-            ? "Firebase will not attach a password to an account that signed in days ago."
+            ? "For safety, Firebase will not attach a password to an account that signed in days ago."
             : code || "No detail was given.",
           advice: stale
-            ? "Tap Sign in with Google just above this panel, pick your account, then set the password straight away."
+            ? "Sign out of this device, sign back in, then set the password straight away. If this account has no other way to sign in, email support."
             : "Try again. If it keeps failing, email this to support.",
         });
       } finally { idle(); }
       return render();
+    }
+    case "delete-account":
+      openDeleteAccount({ resume: db.deletionPending() });
+      return;
+    case "open-guide":
+      platform.openExternal(`${platform.guideUrl()}#moving`);
+      return;
+    /* The online guide, support and privacy pages on the Cuberoot site, from
+       the foot of every screen. They open in Safari. */
+    case "open-user-guide":
+      platform.openExternal(platform.guideUrl(), "tab");
+      return;
+    case "open-support":
+      platform.openExternal(platform.supportUrl(), "tab");
+      return;
+    case "open-privacy":
+      platform.openExternal(platform.privacyUrl(), "tab");
+      return;
+    case "open-tool": {
+      /* The one-time data tools are web pages, never part of the iPhone app.
+         In a browser they open as always; in the app, in Safari. */
+      const tool = { rebuild: "rebuild", tidy: "tidy", cleanup: "cleanup" }[d.tool];
+      if (!tool) return;
+      if (platform.isApp()) platform.openExternal(`${platform.webBase()}${tool}.html`);
+      else location.href = `./${tool}.html`;
+      return;
     }
     case "reset-password": {
       const address = ((view.querySelector('[name="email"]') || {}).value || authForm.email).trim();
@@ -3484,7 +4159,84 @@ view.addEventListener("click", async (e) => {
     /* Named apart from the Admin tab's "show-code" on purpose: both lived in
        this one switch, so the first case matched and the Show the code button
        silently did nothing at all. */
-    case "enter-code": showCodeEntry = true; return render();
+    case "enter-code": showCodeEntry = true; accountMode = null; return render();
+    case "create-account": return createAccountHere();
+    case "show-apply": showApply = true; applySentTo = ""; return render();
+    case "hide-apply": showApply = false; applySentTo = ""; return render();
+    case "submit-application": return submitApplicationHere();
+    case "send-confirmation": {
+      busy("Sending the confirmation email");
+      try { await db.sendEmailConfirmation(); confirmationSent = true; flashMsg("Sent. Open the link in the email, then tap Continue."); }
+      catch (e) { flashMsg(`It was not sent: ${String((e && (e.code || e.message)) || "no connection")}.`); }
+      finally { idle(); }
+      return render();
+    }
+    case "confirmed-email": {
+      busy("Checking");
+      try {
+        const ok = await db.refreshEmailState();
+        if (!ok) { flashMsg("Not confirmed yet. Open the link in the email first."); return render(); }
+        const result = await db.joinPublicIfApproved();
+        if (result && result.joined) { await start(db.PUBLIC_ID); tab = "enter"; flashMsg("Welcome to the public group. Post your rounds on the Enter tab."); }
+        else flashMsg("Your email is confirmed. There is no approval for it yet — you will get an email when there is.");
+      } catch { flashMsg("That did not finish. Check the connection and try again."); }
+      finally { idle(); }
+      return render();
+    }
+    case "golfer-actions": return openGolferActions(d.id);
+    case "unblock": {
+      busy("Unblocking");
+      try { await db.unblockGolfer(d.id); flashMsg("Unblocked."); }
+      catch { flashMsg("Couldn't unblock — the message above says why."); }
+      finally { idle(); }
+      return render();
+    }
+    case "review-application": return openApproveSheet(d.id);
+    case "resend-approval-email": {
+      busy("Sending the email");
+      try { await db.resendApprovalEmail(d.id); flashMsg(`The password email has gone to ${d.id} again.`); }
+      catch (e) { flashMsg(`It was not sent: ${String((e && (e.code || e.message)) || "no connection")}.`); }
+      finally { idle(); }
+      return render();
+    }
+    case "reject-application": {
+      if (confirmReject !== d.id) {
+        confirmReject = d.id;
+        setTimeout(() => { if (confirmReject === d.id) { confirmReject = null; render(); } }, 4000);
+        return render();
+      }
+      confirmReject = null;
+      const a = applications.find((x) => x.key === d.id);
+      if (!a) return render();
+      busy("Rejecting");
+      try { await db.rejectApplication(a); flashMsg(`${a.fullName}'s application was rejected. No email is sent.`); }
+      catch { flashMsg("Couldn't reject it — the message above says why."); }
+      finally { idle(); }
+      return render();
+    }
+    case "dismiss-report": {
+      busy("Dismissing");
+      try { await db.dismissReport(d.id); flashMsg("Report dismissed."); }
+      catch { flashMsg("Couldn't dismiss it — the message above says why."); }
+      finally { idle(); }
+      return render();
+    }
+    case "remove-reported": {
+      const r = publicReports.find((x) => x.id === d.id);
+      const member = r && members.find((m) => m.golferId === r.golferId && m.role === "member");
+      if (!member) return render();
+      busy("Removing them from the group");
+      try {
+        await db.removeMemberships([member.uid]);
+        await db.dismissReport(r.id);
+        flashMsg(`${r.displayName || "They"} no longer have access to the public group. Their rounds stay.`);
+      } catch { flashMsg("Couldn't remove them — the message above says why."); }
+      finally { idle(); }
+      return render();
+    }
+    case "upgrade-account": return upgradeAccount();
+    case "account-mode-signin": accountMode = "signin"; return render();
+    case "account-mode-create": accountMode = "create"; return render();
     case "hide-code": showCodeEntry = false; return render();
     case "create-group": return createGroup();
     case "import-v1": return importV1();
@@ -3777,7 +4529,7 @@ view.addEventListener("click", async (e) => {
             advice: "Wait a moment and try again.",
           });
         }
-        const guide = `${location.origin}${location.pathname}quick-start.html`;
+        const guide = platform.guideUrl();
         openShare([
           `${association ? association.name : "Our golf group"} — you are invited to help run the group.`,
           "", `Join here: ${link}`, "", `How it works, in one page: ${guide}`, "",
@@ -3891,10 +4643,6 @@ view.addEventListener("click", async (e) => {
       flashMsg("Saved. Everybody in the group can search for courses now.");
       return render();
     }
-    case "google":
-      try { await db.signInWithGoogle(); flashMsg("Signed in"); }
-      catch { flashMsg("Sign-in didn't complete."); }
-      return render();
   }
 });
 
@@ -4005,7 +4753,8 @@ sheetEl.addEventListener("click", async (e) => {
   const inviting = e.target.closest("[data-invite]");
   if (inviting) {
     const chosen = sheetEl.querySelector('[name="invite-role"]:checked');
-    const role = chosen ? chosen.value : "member";
+    /* Phase D: only the owner sends admin invitations. */
+    const role = chosen && chosen.value === "admin" && db.isOwner() ? "admin" : "member";
     const golferId = inviting.dataset.golfer || null;
     const named = golferId ? golferById(golferId) : null;
     sheetEl.hidden = true;
@@ -4013,7 +4762,7 @@ sheetEl.addEventListener("click", async (e) => {
     try {
       if (role === "admin") await db.ensureAdminCode();
       const link = db.inviteLink(role, golferId);
-      if (golferId) db.noteInvitation(golferId, role);
+      if (golferId) db.noteInvitation(golferId, role, named);
       if (!link) {
         /* This used to flashMsg and return without redrawing, so the button
            looked completely dead. Say it properly instead. */
@@ -4026,7 +4775,7 @@ sheetEl.addEventListener("click", async (e) => {
         return;
       }
 
-      const guide = `${location.origin}${location.pathname}quick-start.html`;
+      const guide = platform.guideUrl();
       const text = [
         named
           ? `${named.name} — you are invited to keep your handicap with ${association ? association.name : "our golf group"}.`
@@ -4037,8 +4786,8 @@ sheetEl.addEventListener("click", async (e) => {
         `How it works, in one page: ${guide}`,
         "",
         named
-          ? "Tap the link and it will greet you by name. One button and you are in — nothing to type."
-          : "Tap the link, type the name you play under, and you are in. No account, no password.",
+          ? "Tap the link, create your account (your email and a password) or sign in, and it greets you by name. One button and you are in."
+          : "Tap the link, create your account (your email and a password) or sign in, then type the name you play under.",
         role === "admin"
           ? "This makes you an admin, so you will be asked to set a password. It works once, so keep it to yourself."
           : "No account and no password needed.",
@@ -4316,15 +5065,15 @@ sheetEl.addEventListener("click", async (e) => {
   if (how === "download") { downloadBackup(); return; }
 
   if (how === "whatsapp") {
-    open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank");
+    platform.openExternal(`https://wa.me/?text=${encodeURIComponent(text)}`, "tab");
     return;
   }
   if (how === "email") {
-    location.href = `mailto:?subject=${encodeURIComponent(sheetEl.dataset.title || "")}&body=${encodeURIComponent(text)}`;
+    platform.openExternal(`mailto:?subject=${encodeURIComponent(sheetEl.dataset.title || "")}&body=${encodeURIComponent(text)}`);
     return;
   }
   if (how === "sms") {
-    location.href = `sms:?&body=${encodeURIComponent(text)}`;
+    platform.openExternal(`sms:?&body=${encodeURIComponent(text)}`);
     return;
   }
 
@@ -4332,11 +5081,7 @@ sheetEl.addEventListener("click", async (e) => {
     send.disabled = true;
     const was = send.textContent;
     try {
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        await navigator.clipboard.writeText(text);
-      } else {
-        throw new Error("no clipboard");
-      }
+      await platform.copy(text);
       send.textContent = "Copied";
       setTimeout(() => { send.textContent = was; send.disabled = false; }, 1600);
     } catch {
@@ -4363,8 +5108,8 @@ sheetEl.addEventListener("click", async (e) => {
   }
 
   if (how === "native") {
-    if (!navigator.share) { flashMsg("This device has no share sheet. Use one of the other buttons."); return; }
-    try { await navigator.share({ text }); }
+    if (!platform.canShare()) { flashMsg("This device has no share sheet. Use one of the other buttons."); return; }
+    try { await platform.share({ text }); }
     catch (err) {
       /* Cancelling is not a failure and should say nothing. */
       if (err && err.name !== "AbortError") flashMsg("Sharing did not open. Try Email or WhatsApp.");
@@ -4400,7 +5145,13 @@ async function signIn() {
   try {
     const result = await db.signInWithEmail({ email, password });
     joining = false;
-    await settleGroup(db.currentAssociation());
+    accountMode = null;
+    if (db.readJoinLink()) {
+      /* Signed in from an invitation: show the invitation next. */
+      await loadInvitedDetails();
+    } else {
+      await settleGroup(db.currentAssociation() || db.recallAssociation());
+    }
 
     /* Land on Enter. Signing in used to leave people on whichever tab they
        happened to be on — usually Admin, which is not where anybody wants to
@@ -4412,6 +5163,9 @@ async function signIn() {
         ? `Password set on ${result.email}. That is now your one account — use this email and password on every device.`
         : result.outcome === "created" ? "Account created. Use this email and password on your other devices."
         : `Signed in as ${email}.`);
+    /* Phase C: an approval for the public group waiting for this email.
+       Its own message, if any, replaces the one above. */
+    await checkPublicApproval();
   } catch (err) {
     joining = false;
     openSignInProblem(err, email);
@@ -4460,6 +5214,13 @@ function openSignInProblem(error, email) {
   } else if (code.includes("weak-password")) {
     title = "Password too short";
     detail = "Use at least six characters.";
+  } else if (code.includes("email-already-in-use") || code.includes("credential-already-in-use")) {
+    title = "That email already has an account";
+    detail = "Sign in with it instead, or use a different email.";
+    offerReset = true;
+  } else if (code.includes("wrong-email")) {
+    title = "That is not this account's email";
+    detail = "Use the email this account already has.";
   }
 
   sheetEl.hidden = false;
@@ -4845,6 +5606,18 @@ function postRound() {
   flashMsg(`Round posted — differential ${round.differential.toFixed(1)}`);
 }
 
+/* Owners and admins keep the group's directory (name and index only, which is
+   all a regular member may see of other golfers) in step with the golfer
+   records, a few seconds after anything changes. Only differences are written. */
+let directoryTimer = null;
+function scheduleDirectoryRefresh() {
+  if (!db.canManage()) return;
+  clearTimeout(directoryTimer);
+  directoryTimer = setTimeout(() => {
+    db.refreshGroupDirectory(allGolfers.filter((g) => roster.includes(g.id))).catch(() => {});
+  }, 4000);
+}
+
 /* ================= start ================= */
 
 async function start(assocId) {
@@ -4859,13 +5632,34 @@ async function start(assocId) {
     lookup.setSharedKey(doc.lookupKey || "");
     render();
   });
-  db.watchGolfers((list) => { allGolfers = list; refreshScope(); render(); });
+  db.watchGolfers((list) => { rawGolfers = list; applyBlocks(); render(); scheduleDirectoryRefresh(); });
   db.watchRoster((ids) => { roster = ids; refreshScope(); render(); });
   db.watchRounds((list) => { rounds = list; render(); });
   db.watchCourses((list) => { courses = list; render(); });
   db.watchGames((list) => { games = list; render(); });
   db.watchMembers((list) => { members = list; render(); });
+  /* Phase C: in the PUBLIC group, blocks for everybody; applications and
+     reports for its reviewers. */
+  applications = []; publicReports = []; blocked = []; approvalsWaiting = [];
+  if (db.isPublicGroup()) {
+    db.watchBlocks((list) => { blocked = list; applyBlocks(); render(); });
+    if (db.canManage()) {
+      db.watchApplications((list) => { applications = list; render(); });
+      db.watchApprovals((list) => { approvalsWaiting = list; render(); });
+      db.watchReports((list) => { publicReports = list; render(); });
+    }
+  }
   render();
+}
+
+/* A regular member of the PUBLIC group never sees a golfer they blocked —
+   not in the directory, the ranking or anywhere else. Admins see everybody,
+   because they have to act on reports. */
+function applyBlocks() {
+  const hidden = new Set(db.isPublicGroup() && !db.canManage() ? blocked.map((b) => b.golferId) : []);
+  const mine = db.myGolferId(rawGolfers);
+  allGolfers = hidden.size ? rawGolfers.filter((g) => !hidden.has(g.id) || g.id === mine) : rawGolfers;
+  refreshScope();
 }
 
 /* Works out which group this account should actually be looking at.
@@ -4917,32 +5711,59 @@ async function settleGroupInner(preferred) {
 
 db.onChange((s) => { sync = s; render(); });
 
+/* The steps boot() runs for an invitation that names somebody: fetch them so
+   the screen can greet them. Also used when a link arrives while the iPhone
+   app is already open (Change 2). */
+async function loadInvitedDetails() {
+  invitedGolfer = null;
+  invitedGroupName = "";
+  /* Only an account can read an invitation (Phase B); signed out or an old
+     guest session, the account screen comes first. */
+  if (!db.hasUser() || db.isAnonymousSession()) return;
+  const link = db.readJoinLink();
+  if (link && link.golferId) {
+    /* Go-live fix 1: from the invitation record, not the private golfer. */
+    const inv = await db.invitationFor(link.associationId, link.golferId);
+    invitedGolfer = inv && inv.name ? inv : null;
+    invitedGroupName = inv ? inv.groupName : "";
+  }
+}
+
 (async function boot() {
   render();
+  await platform.initLinks();   /* iPhone app: the link that opened it, if any */
+  platform.onLink(async () => { await loadInvitedDetails(); render(); });
   await db.init();
+  await db.checkPendingDeletion();
   markBoot("group");
 
-  const invite = db.readJoinLink();
   const remembered = db.recallAssociation();
 
-  await settleGroup(remembered);
+  /* An old guest session (Phase B) can read nothing until it has an email and
+     password, so it goes straight to that screen. Signed out: nothing to load. */
+  const account = db.hasUser() && !db.isAnonymousSession();
+  if (account) await settleGroup(remembered);
   markBoot("data");
 
   /* Look for a version 1 scorecard whether or not there is already a group.
      Somebody who created one first still needs a way to bring their data in. */
-  legacy = await db.readLegacyV1();
+  if (account) legacy = await db.readLegacyV1();
 
   /* If the link names somebody, fetch them so the screen can greet them. */
-  const link = db.readJoinLink();
-  if (link && link.golferId) {
-    invitedGolfer = await db.golferNamedInLink(link.golferId);
-    /* Usually null — a group document is not readable until you belong to it.
-       The screen falls back to a generic heading rather than looking broken. */
-    const group = await db.loadAssociation(link.associationId);
-    invitedGroupName = group ? group.name : "";
-  }
+  if (account) await loadInvitedDetails();
+  if (account) await checkPublicApproval();
 
   markBoot("ready");
   ready = true;
   render();
+  if (db.offlineCopyUnavailable()) flashMsg("Offline data unavailable on this device — the app needs a connection to show your group.");
+  if (db.deletionPending()) openDeleteAccount({ resume: true });
+
+  /* Coming back online on the first screen: look for the groups again. */
+  addEventListener("online", async () => {
+    if (db.currentAssociation() || !db.hasUser() || db.isAnonymousSession()) return render();
+    await settleGroup(db.recallAssociation());
+    await loadInvitedDetails();
+    render();
+  });
 })();

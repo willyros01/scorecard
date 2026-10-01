@@ -1,12 +1,87 @@
 rules_version = '2';
 
-/* LAST CHANGED IN APP VERSION 2.21.0
+/* LAST CHANGED FOR VERSION 2.0, PHASE D + GO-LIVE FIXES (Oct 1) — not published yet
+ *
+ * Go-live fixes (review of Sep 30, approved by Willy):
+ *   1. No signed-in account may read an unclaimed golfer any more. A named
+ *      invitation is greeted from associations/{id}/invitations/{golferId},
+ *      written by the owner or an admin when the invitation is sent.
+ *   2. Approving a PUBLIC application is claimed (pending → approving) by one
+ *      reviewer, then finished by that reviewer only; the approval document
+ *      can be created once, only under that claim. Safe to retry; two
+ *      reviewers cannot approve the same application.
+ *
+ * What changes in Phase D (Willy's rules, Sep 30):
+ *   - Only accounts listed in groupCreators may create a group. The setup
+ *     script lists Willy's account; no app can write the list.
+ *   - The admin invitation secret moves from the group document (which every
+ *     member can read) to associations/{id}/secrets/admin, which only the
+ *     owner can read. So only the owner can send an admin invitation; admins
+ *     invite regular members only.
+ *   - Only the owner promotes or demotes (unchanged).
+ *   - A group's admins may remove its regular members — never the owner, never
+ *     another admin. (This replaces the PUBLIC-only rule of Phase C.)
+ *   - The group creator (Willy) may list every golfer, as today, so the Tidy
+ *     page keeps working unchanged. Nobody else may.
+ *   - An owner or admin of a group a golfer plays in may archive that golfer
+ *     (Tidy's merge and clean-up), changing nothing else. The live rules
+ *     refused this whenever the golfer was off the roster, so Tidy's merge
+ *     and unused-golfer clean-up never finished.
+ *
+ * What changes in Phase C (onboarding design Revision 2, R1-R3, R11, R12):
+ *   - publicApplications/{email}: anyone, even signed out, may create ONE
+ *     application (full name and email, status pending). Applicants can never
+ *     read, change or delete it. Reviewers (admins of the PUBLIC group) read,
+ *     approve, reject and delete.
+ *   - publicApprovals/{email}: written by a reviewer on approval. Read by the
+ *     account with that email once the email is confirmed, which then joins
+ *     the PUBLIC group as the golfer the reviewer chose, and nobody else.
+ *   - The PUBLIC group has the fixed id PUBLIC. No app can create a group with
+ *     that id, nobody joins it with a code, and only its admins add golfers.
+ *     Its admins may remove regular members.
+ *   - Members of any group now read only their OWN membership; admins read
+ *     all (a member list shows who is in the group, which strangers in the
+ *     PUBLIC group must not see).
+ *   - reports: a member may report a golfer's name to the group's admins
+ *     (Apple guideline 1.2). userBlocks: each account keeps its own list of
+ *     golfers it has blocked.
+ *
+ * What changes in Phase B (onboarding design Revision 2, R4 and R5):
+ *   - Everything in the app now needs a real account: signed in with an email
+ *     and password. An anonymous session (the old guest sign-in) is refused
+ *     everywhere except the few reads and writes it needs to find its own
+ *     groups and delete itself (Delete my account records its request before
+ *     it attaches the throwaway email; see authed() below).
+ *   - The check is the email on the sign-in token. A guest that sets an email
+ *     and password keeps the SAME account and passes from then on; so does the
+ *     throwaway credential Delete my account attaches.
+ *
+ * What changed in Phase A (onboarding design Revision 2):
+ *   - rounds: readable only by an admin of the group, or by the golfer the
+ *     round belongs to. The rule that let ANY signed-in account read every
+ *     round in the database (the recursive rounds read) is removed.
+ *   - golfers: a private record. Readable by its linked account, by admins of
+ *     a group listed in its `groups`, or (single read, never a list) while it
+ *     is still unclaimed so an invitation can greet the invitee.
+ *   - directory: a new per-group list of name and handicap index only, which
+ *     every member of the group may read. This is what regular members see.
+ *   - games: readable by admins, and by members whose golfer is listed in the
+ *     game's participantGolferIds.
+ *   - golferNames: single reads only (the uniqueness check); nobody can list
+ *     every name, and only the golfer or an admin can change or remove one.
+ *   - invites: single reads by anyone signed in (as before); lists by members.
+ *
+ * Earlier history:
  *
  * This is here only so you can compare it against what is published in the
  * Firebase console if you are ever in doubt. It does NOT track the app version:
  * most releases change no rules at all, and there is nothing to republish for
  * those. The number only moves when these rules genuinely change, and Claude
  * says so at the top of the message when that happens.
+ *
+ * What changed in 2.22.0: two additions for the iPhone app's Delete my account.
+ * A person may delete their OWN invitation claim, and may read and write their
+ * OWN deletion request (accountDeletions/{uid}). Nothing else changed.
  *
  * What changed in 2.21.0: an account may read its OWN membership documents
  * wherever they are, so it can find its groups when the pointer list is
@@ -37,7 +112,20 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    /* Phase B: a real account — signed in with an email and password. An
+       anonymous session has no email on its token and is refused. */
     function signedIn() {
+      return request.auth != null
+        && request.auth.token.get('email', '') is string
+        && request.auth.token.get('email', '') != '';
+    }
+
+    /* Any sign-in at all, anonymous included. Used ONLY where an old guest
+       session must still be able to see its own groups and delete itself:
+       its own deletion record, its own group list, its own membership
+       documents, the groups it created, and the golfer linked to it. Every
+       one of these is limited to the caller's own uid. */
+    function authed() {
       return request.auth != null;
     }
 
@@ -86,6 +174,72 @@ service cloud.firestore {
         && exists(/databases/$(database)/documents/associations/$(request.resource.data.editedIn)/roster/$(golferId));
     }
 
+    /* Admin of at least one of the groups a golfer plays in. Rules cannot loop,
+       so the golfer record carries a short list of its groups (at most 10) and
+       each entry is checked in turn. Repeated reads of one document count once
+       toward Firestore's per-request limit. */
+    function adminOfAny(groups) {
+      return groups is list && (
+           (groups.size() > 0 && isAdmin(groups[0]))
+        || (groups.size() > 1 && isAdmin(groups[1]))
+        || (groups.size() > 2 && isAdmin(groups[2]))
+        || (groups.size() > 3 && isAdmin(groups[3]))
+        || (groups.size() > 4 && isAdmin(groups[4]))
+        || (groups.size() > 5 && isAdmin(groups[5]))
+        || (groups.size() > 6 && isAdmin(groups[6]))
+        || (groups.size() > 7 && isAdmin(groups[7]))
+        || (groups.size() > 8 && isAdmin(groups[8]))
+        || (groups.size() > 9 && isAdmin(groups[9])));
+    }
+
+    function golferDoc(golferId) {
+      return get(/databases/$(database)/documents/golfers/$(golferId)).data;
+    }
+
+    /* An admin of a group this golfer plays in (looked up on the golfer). */
+    function adminOfGolfer(golferId) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/golfers/$(golferId))
+        && adminOfAny(golferDoc(golferId).get('groups', []));
+    }
+
+    /* The golfer on this account's membership in a group. */
+    function myGolferIn(assocId) {
+      return get(memberPath(assocId)).data.get('golferId', '');
+    }
+
+    /* Phase D: the accounts allowed to create groups (Willy's). */
+    function groupCreator() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/groupCreators/$(request.auth.uid));
+    }
+
+    function adminSecret(assocId) {
+      return get(/databases/$(database)/documents/associations/$(assocId)/secrets/admin).data;
+    }
+
+    /* Phase C: the PUBLIC group's fixed id, and the confirmed email of the
+       caller as a document key (lower case). */
+    function publicId() {
+      return 'PUBLIC';
+    }
+
+    function verifiedEmail() {
+      return signedIn() && request.auth.token.get('email_verified', false) == true;
+    }
+
+    function myEmailKey() {
+      return request.auth.token.email.lower();
+    }
+
+    function approvalPath(emailKey) {
+      return /databases/$(database)/documents/publicApprovals/$(emailKey);
+    }
+
+    function reviewer() {
+      return isAdmin(publicId());
+    }
+
     /* The edit window runs from entry time, not the date played, and is
        measured against request.time — the server's clock, not the device's. */
     function withinEditWindow() {
@@ -101,15 +255,24 @@ service cloud.firestore {
          membership write never happened — that is what makes an abandoned
          group findable and removable instead of stranded forever. */
       allow read: if isMember(assocId)
-        || (signedIn() && resource.data.ownerUid == request.auth.uid);
+        || (authed() && resource.data.ownerUid == request.auth.uid);
 
-      allow create: if signedIn()
-        && request.resource.data.ownerUid == request.auth.uid;
+      /* Phase C: never the PUBLIC group's id — that group is created once, by
+         the owner's setup script. */
+      /* Phase D: only a group creator, and never with the admin secret on the
+         group document itself. */
+      allow create: if groupCreator()
+        && assocId != publicId()
+        && request.resource.data.ownerUid == request.auth.uid
+        && !request.resource.data.keys().hasAny(['adminCode']);
 
       /* The owner may rename the group or rotate the join code, but may not
          hand ownership away by editing this document. */
       allow update: if isOwner(assocId)
-        && request.resource.data.ownerUid == resource.data.ownerUid;
+        && request.resource.data.ownerUid == resource.data.ownerUid
+        /* Phase D: the admin secret may only stay as it was or be removed
+           (moved to secrets/admin), never set here again. */
+        && request.resource.data.get('adminCode', null) in [null, resource.data.get('adminCode', null)];
 
       /* Only whoever created it, and only ever their own. Needed so the
          cleanup tool can remove groups that failed to set up properly. */
@@ -119,7 +282,9 @@ service cloud.firestore {
 
       match /members/{memberUid} {
 
-        allow read: if isMember(assocId)
+        /* Phase C: your own membership, or all of them if you are an admin. */
+        allow read: if isAdmin(assocId)
+          || (signedIn() && memberUid == request.auth.uid)
           || (signedIn() && association(assocId).ownerUid == request.auth.uid);
 
         /* Two ways a membership is created, and only ever for yourself.
@@ -143,26 +308,77 @@ service cloud.firestore {
             (request.resource.data.role == 'owner'
               && association(assocId).ownerUid == request.auth.uid)
             ||
-            (request.resource.data.role == 'member'
+            (assocId != publicId()
+              && request.resource.data.role == 'member'
               && request.resource.data.joinCode == association(assocId).joinCode)
             ||
             /* An admin invitation carries a DIFFERENT secret. Checking it here
                is what makes a pre-set role safe: a guest link cannot be edited
                into an admin one, because the guest code will not match. */
-            (request.resource.data.role == 'admin'
-              && request.resource.data.joinCode == association(assocId).adminCode)
+            (assocId != publicId()
+              && request.resource.data.role == 'admin'
+              && exists(/databases/$(database)/documents/associations/$(assocId)/secrets/admin)
+              && request.resource.data.joinCode == adminSecret(assocId).adminCode)
+            ||
+            /* Phase C: an approved applicant joins the PUBLIC group, as the
+               golfer the reviewer chose, once their email is confirmed. */
+            (assocId == publicId()
+              && request.resource.data.role == 'member'
+              && verifiedEmail()
+              && exists(approvalPath(myEmailKey()))
+              && request.resource.data.golferId == get(approvalPath(myEmailKey())).data.golferId
+              && request.resource.data.keys().hasOnly(['uid', 'role', 'displayName', 'joinedAt', 'golferId'])
+              && request.resource.data.uid == request.auth.uid)
           );
 
-        /* Only the owner changes roles, and never the owner's own. */
-        allow update: if isOwner(assocId)
-          && memberUid != association(assocId).ownerUid;
+        /* Only the owner changes roles, and never the owner's own.
+           Phase A: a member may also record WHICH golfer they are on their own
+           membership (golferId), and nothing else, and only a golfer that is
+           really linked to their account. Games use it to tell who played. */
+        allow update: if (isOwner(assocId)
+            && memberUid != association(assocId).ownerUid)
+          || (signedIn() && memberUid == request.auth.uid
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['golferId'])
+              && myGolfer(request.resource.data.golferId));
 
         /* People may leave; the owner may remove others; the owner cannot be
            removed by anybody, including themselves. */
         allow delete: if (memberUid != association(assocId).ownerUid
             && (memberUid == request.auth.uid || isOwner(assocId)))
+          /* Phase D: a group's admins may remove its regular members. */
+          || (isAdmin(assocId) && resource.data.role == 'member')
           /* or the owner clearing the group out before deleting it */
           || (signedIn() && association(assocId).ownerUid == request.auth.uid);
+      }
+
+      /* ---------------- Phase D: the owner's secrets ---------------- */
+
+      /* The admin invitation secret. Only the owner reads or changes it, so
+         only the owner can send an admin invitation. */
+      match /secrets/{secretId} {
+        allow read, write: if isOwner(assocId);
+      }
+
+      /* ---------------- invitation records (go-live fix 1) ---------------- */
+
+      /* Written when the owner or an admin sends a named invitation: only
+         what the invitee needs to see before joining (their name, index and
+         the group's name). Read one at a time by its id, which only the link
+         carries; never listed except by the group's admins. Admins write
+         member invitations only; the owner may write either. */
+      match /invitations/{golferId} {
+        allow get: if signedIn();
+        allow list: if isAdmin(assocId);
+        allow create, update: if isAdmin(assocId)
+          && request.resource.data.keys().hasOnly(['golferId', 'name', 'handicapIndex', 'groupName', 'role', 'sentBy', 'sentAt'])
+          && request.resource.data.golferId == golferId
+          && request.resource.data.name is string && request.resource.data.name.size() <= 120
+          && request.resource.data.get('groupName', '') is string && request.resource.data.get('groupName', '').size() <= 120
+          && request.resource.data.role in ['member', 'admin']
+          && (request.resource.data.role == 'member' || isOwner(assocId))
+          && request.resource.data.sentBy == request.auth.uid
+          && exists(/databases/$(database)/documents/associations/$(assocId)/roster/$(golferId));
+        allow delete: if isAdmin(assocId);
       }
 
       /* ---------------- invitation claims ---------------- */
@@ -177,7 +393,8 @@ service cloud.firestore {
        * Readable by anyone signed in, because somebody holding a link must be
        * able to discover it is already taken before they try. */
       match /invites/{golferId} {
-        allow read: if signedIn();
+        allow get: if signedIn();
+        allow list: if isMember(assocId);
 
         /* Create only if nobody has claimed it, and only for yourself. */
         allow create: if signedIn()
@@ -191,7 +408,7 @@ service cloud.firestore {
           && request.resource.data.acceptedBy == request.auth.uid
           && request.resource.data.role != 'admin';
 
-        allow delete: if isOwner(assocId);
+        allow delete: if isOwner(assocId) || (signedIn() && resource.data.acceptedBy == request.auth.uid);
       }
 
       /* ---------------- roster: which golfers play in this group ---------------- */
@@ -200,7 +417,9 @@ service cloud.firestore {
          because a person belongs to no single group. */
       match /roster/{golferId} {
         allow read: if isMember(assocId);
-        allow create, update: if isMember(assocId);
+        /* Phase C: in the PUBLIC group only its admins add golfers. */
+        allow create, update: if isMember(assocId)
+          && (assocId != publicId() || isAdmin(assocId));
         allow delete: if isAdmin(assocId)
           || (signedIn() && association(assocId).ownerUid == request.auth.uid);
       }
@@ -208,7 +427,11 @@ service cloud.firestore {
       /* ---------------- rounds ---------------- */
 
       match /rounds/{roundId} {
-        allow read: if isMember(assocId);
+        /* Phase A: an admin sees the group's rounds; everybody else only their
+           own golfer's. A regular member's app must query where golferId is
+           their own golfer, or the whole query is refused. */
+        allow read: if isAdmin(assocId)
+          || (isMember(assocId) && myGolfer(resource.data.golferId));
         /* The owner may clear these out when deleting the whole group. */
         allow delete: if signedIn() && association(assocId).ownerUid == request.auth.uid;
 
@@ -241,10 +464,50 @@ service cloud.firestore {
           || (isMember(assocId) && withinEditWindow() && myGolfer(resource.data.golferId));
       }
 
+      /* ---------------- directory: name and index only ---------------- */
+
+      /* What a regular member may see of the other golfers in the group:
+         display name and handicap index, and nothing else. Firestore cannot
+         hide fields of a document, so private golfer data never goes here. */
+      match /directory/{golferId} {
+        allow read: if isMember(assocId);
+        allow create, update: if isAdmin(assocId)
+          || (isMember(assocId)
+              && myGolfer(golferId)
+              && request.resource.data.keys().hasOnly(['golferId', 'displayName', 'handicapIndex', 'updatedAt'])
+              && request.resource.data.golferId == golferId);
+        allow delete: if isAdmin(assocId)
+          || (signedIn() && association(assocId).ownerUid == request.auth.uid);
+      }
+
+      /* ---------------- reports (Apple guideline 1.2) ---------------- */
+
+      /* A member reports a golfer's name to the group's admins. Only the
+         admins read them; nobody can change one. */
+      match /reports/{reportId} {
+        allow create: if isMember(assocId)
+          && request.resource.data.keys().hasOnly(['golferId', 'displayName', 'reason', 'reportedBy', 'createdAt'])
+          && request.resource.data.reportedBy == request.auth.uid
+          && request.resource.data.createdAt == request.time
+          && request.resource.data.golferId is string
+          && request.resource.data.golferId.size() <= 128
+          && request.resource.data.get('displayName', '') is string
+          && request.resource.data.get('displayName', '').size() <= 120
+          && request.resource.data.reason is string
+          && request.resource.data.reason.size() <= 500;
+        allow read, delete: if isAdmin(assocId);
+      }
+
       /* ---------------- games ---------------- */
 
       match /games/{gameId} {
-        allow read: if isMember(assocId);
+        /* Phase A: admins, the game's creator, and members who played in it.
+           The shared result sheet lives on the game document itself
+           (published by an admin), so reading it never opens anybody's rounds. */
+        allow read: if isAdmin(assocId)
+          || (isMember(assocId) && (
+               resource.data.get('createdBy', '') == request.auth.uid
+               || myGolferIn(assocId) in resource.data.get('participantGolferIds', [])));
         allow create: if isMember(assocId)
           && request.resource.data.createdBy == request.auth.uid;
         allow update, delete: if isAdmin(assocId)
@@ -268,10 +531,19 @@ service cloud.firestore {
      * be in a group you are not. Deleting is not permitted from the app —
      * rounds reference golfers, and an orphaned round has no owner. */
     match /golfers/{golferId} {
-      /* Readable by anyone signed in. A golfer is shared across groups, and an
-         invitation must show somebody their own name before they belong to
-         anything. */
-      allow read: if signedIn();
+      /* A private record: its own account, or admins of a group it plays in.
+         Go-live fix 1: the exception that let any signed-in account read an
+         UNCLAIMED golfer (to greet an invitee) is gone; the greeting now comes
+         from the invitation record (associations/{id}/invitations/{golferId}). */
+      allow get: if signedIn() && (
+        resource.data.get('linkedUid', null) == request.auth.uid
+        || adminOfAny(resource.data.get('groups', [])));
+      /* Lists only of your OWN golfer (a query where linkedUid is you) — how
+         the app finds which golfer you are, and what Delete my account uses. */
+      /* Phase D (Willy's choice B): the group creator may also list every
+         golfer, as today, so Tidy keeps working unchanged. Nobody else. */
+      allow list: if (authed() && resource.data.get('linkedUid', null) == request.auth.uid)
+        || groupCreator();
 
       /* Creating is an everyday act — adding a person to a roster. The name
          index below stops duplicates. */
@@ -297,6 +569,15 @@ service cloud.firestore {
            by the branch above, which requires the link to be unchanged. */
         || (request.resource.data.linkedUid == null
             && editingAsAdmin(golferId))
+        /* Phase D: an owner or admin of a group this golfer plays in (from the
+           golfer's own list of groups) may ARCHIVE it — Tidy's merge and
+           clean-up — changing nothing else. The roster check above cannot
+           allow this: a merged duplicate has just left the roster, and an
+           unused golfer was never on one. */
+        || (adminOfAny(resource.data.get('groups', []))
+            && request.resource.data.get('archived', false) == true
+            && request.resource.data.diff(resource.data).affectedKeys()
+                 .hasOnly(['archived', 'archivedAt', 'nameKey', 'mergedInto', 'editedIn']))
       );
 
       /* CLOSED, deliberately. A delete carries no data, so the rules have
@@ -313,8 +594,15 @@ service cloud.firestore {
        Firestore refuses a second document with the same id, which is what
        makes the guarantee real rather than a check the app could skip. */
     match /golferNames/{nameKey} {
-      allow read: if signedIn();
-      allow create, update, delete: if signedIn();
+      /* Phase A: single reads only (the uniqueness check); nobody can list
+         every name in the database. Creating a claim is open to a signed-in
+         account (adding or joining as a golfer); changing or removing one is
+         for that golfer's own account or an admin of a group it plays in. */
+      allow get: if signedIn();
+      allow list: if false;
+      allow create: if signedIn() && request.resource.data.golferId is string;
+      allow update, delete: if signedIn() && (
+        myGolfer(resource.data.golferId) || adminOfGolfer(resource.data.golferId));
     }
 
     /* ---------------- finding rounds wherever they are ---------------- */
@@ -341,12 +629,17 @@ service cloud.firestore {
      * This is narrow on purpose: you may read a membership document only if it
      * is YOUR OWN, so it reveals nothing about anybody else. Read only. */
     match /{path=**}/members/{memberUid} {
-      allow read: if signedIn() && memberUid == request.auth.uid;
+      /* 2.22.0 fix: the app finds its memberships with a query on the uid
+         FIELD (where uid == me). The rules cannot match a field filter against
+         the document id, so that query was always refused — which stopped
+         Delete my account at its first step. The uid field is checked too. */
+      allow read: if authed()
+        && (memberUid == request.auth.uid || resource.data.get('uid', '') == request.auth.uid);
     }
 
-    match /{path=**}/rounds/{roundId} {
-      allow read: if signedIn();
-    }
+    /* Phase A: the recursive rounds read that let ANY signed-in account read
+       every round in the database is removed. Rebuild the roster now reads
+       only the groups its admin manages. */
 
     /* ---------------- which groups an account belongs to ---------------- */
 
@@ -355,7 +648,97 @@ service cloud.firestore {
        which is exactly what happened between Safari and the home-screen app.
        Yours only, readable and writable by nobody else. */
     match /userGroups/{userId}/groups/{assocId} {
-      allow read, write: if signedIn() && userId == request.auth.uid;
+      allow read: if authed() && userId == request.auth.uid;
+      /* Deleting your own entry is part of Delete my account. Adding one
+         needs a real account. */
+      allow delete: if authed() && userId == request.auth.uid;
+      allow create, update: if signedIn() && userId == request.auth.uid;
+    }
+
+    /* ---------------- Phase C: the PUBLIC group ---------------- */
+
+    /* One application per email, created without signing in. Full name and
+       email only; no password, no account yet (R1, R3). */
+    match /publicApplications/{emailKey} {
+      allow create: if request.resource.data.keys().hasOnly(['fullName', 'email', 'status', 'createdAt'])
+        && request.resource.data.keys().hasAll(['fullName', 'email', 'status', 'createdAt'])
+        && request.resource.data.fullName is string
+        && request.resource.data.fullName.size() >= 2
+        && request.resource.data.fullName.size() <= 80
+        && request.resource.data.email is string
+        && request.resource.data.email.size() <= 254
+        && request.resource.data.email.lower() == emailKey
+        && emailKey.matches('^[^@ ]+@[^@ ]+[.][^@ ]+$')
+        && request.resource.data.status == 'pending'
+        && request.resource.data.createdAt == request.time;
+      allow read, delete: if reviewer();
+      /* Go-live fix 2: an approval is claimed first (pending → approving, by
+         one reviewer), then finished (approving → approved, by that same
+         reviewer), or released back to pending. A second reviewer cannot take
+         an approval in progress unless it has been stuck for 10 minutes.
+         Rejecting is only possible while pending. */
+      allow update: if reviewer()
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['status', 'reviewedBy', 'reviewedAt', 'golferId', 'golferName', 'approvingAt'])
+        && request.resource.data.reviewedBy == request.auth.uid
+        && (
+          (resource.data.status == 'pending'
+            && request.resource.data.status == 'approving'
+            && request.resource.data.approvingAt == request.time
+            && request.resource.data.golferId is string
+            && request.resource.data.golferName is string)
+          || (resource.data.status == 'approving'
+            && request.resource.data.status == 'approving'
+            && request.resource.data.approvingAt == request.time
+            && (resource.data.reviewedBy == request.auth.uid
+                || request.time > resource.data.approvingAt + duration.value(10, 'm')))
+          || (resource.data.status == 'approving'
+            && resource.data.reviewedBy == request.auth.uid
+            && request.resource.data.status in ['approved', 'pending'])
+          || (resource.data.status == 'pending'
+            && request.resource.data.status == 'rejected')
+        );
+    }
+
+    /* Written by a reviewer on approval. The applicant's app reads it once the
+       email is confirmed, joins the PUBLIC group with it, then removes it. */
+    match /publicApprovals/{emailKey} {
+      allow read: if reviewer() || (verifiedEmail() && myEmailKey() == emailKey);
+      /* Go-live fix 2: created once, only by the reviewer holding the claim on
+         the application, and only for the golfer named in that claim. */
+      allow create: if reviewer()
+        && request.resource.data.keys().hasOnly(['golferId', 'displayName', 'approvedBy', 'approvedAt'])
+        && request.resource.data.approvedBy == request.auth.uid
+        && get(/databases/$(database)/documents/publicApplications/$(emailKey)).data.status == 'approving'
+        && get(/databases/$(database)/documents/publicApplications/$(emailKey)).data.reviewedBy == request.auth.uid
+        && request.resource.data.golferId == get(/databases/$(database)/documents/publicApplications/$(emailKey)).data.golferId;
+      allow delete: if reviewer()
+        || (verifiedEmail() && myEmailKey() == emailKey
+            && exists(/databases/$(database)/documents/associations/$(publicId())/members/$(request.auth.uid)));
+    }
+
+    /* Each account's own list of golfers it has blocked (Apple guideline 1.2).
+       The app hides them; nobody else can see the list. */
+    match /userBlocks/{userId}/golfers/{golferId} {
+      allow read, delete: if signedIn() && userId == request.auth.uid;
+      allow create, update: if signedIn() && userId == request.auth.uid
+        && request.resource.data.keys().hasOnly(['name', 'blockedAt'])
+        && request.resource.data.get('name', '') is string
+        && request.resource.data.get('name', '').size() <= 120;
+    }
+
+    /* Phase D: who may create groups. You may check your own entry; nobody
+       can list it, and no app can write it (the setup script does). */
+    match /groupCreators/{userId} {
+      allow get: if signedIn() && userId == request.auth.uid;
+      allow list, write: if false;
+    }
+
+    /* ---------------- account deletion requests ---------------- */
+
+    /* The daily admin job treats the document contents as untrusted. */
+    match /accountDeletions/{userId} {
+      allow read, write: if authed() && userId == request.auth.uid;
     }
 
     /* ---------------- join codes ---------------- */
