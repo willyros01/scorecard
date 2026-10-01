@@ -57,6 +57,10 @@ const PUBLIC_ID = "PUBLIC";
 const PUBLIC_NAME = "Public group";
 
 const die = (msg) => { console.error(`ERROR: ${msg}`); process.exit(1); };
+/* Any unexpected failure (a dropped connection, say) ends with one plain
+   line instead of a stack trace. Exit code 1, so go2.txt recovers. */
+process.on("uncaughtException", (e) => die(`${(e && e.message) || e}${e && e.cause ? ` (${e.cause.message || e.cause})` : ""}`));
+process.on("unhandledRejection", (e) => die(`${(e && e.message) || e}${e && e.cause ? ` (${e.cause.message || e.cause})` : ""}`));
 if (!TOKEN) die("ACCESS_TOKEN is missing.");
 if (!OWNER_EMAIL) die("OWNER_EMAIL is missing.");
 if (!["count", "plan", "apply", "verify", "rollback", "status", "mark"].includes(MODE)) die(`unknown mode ${MODE}`);

@@ -132,6 +132,39 @@ check(await as(G.token, "GET", `${FS}/${DBP}/associations/G1`) === 403, "GO5 an 
 
 const back = run("rollback");
 check(back.ok && (await get("associations/G1")).adminCode === "LEG001", "GO6 rollback puts the admin code back on the group");
+check((await get("migrations/v2"))?.state === "rolled-back", "GO6 the marker says rolled-back");
+
+/* GO7–GO9: go-live fix 3 — a failure part-way, the marker, resume, and a
+   rollback that works even when this computer's copy is lost. */
+await put("associations/G2", { id: "G2", name: "Sunday Group", ownerUid: W.uid, joinCode: "JOIN02", adminCode: "LEG002" });
+await put(`associations/G2/members/${W.uid}`, { uid: W.uid, role: "owner", displayName: "Willy Rosales" });
+await put("golfers/gInv", { name: "Ines Invited", nameKey: "ines-invited", linkedUid: null, invitedAt: 1759000000000, invitedAs: "member" });
+await put("golfers/gY", { name: "Yuri Golfer", nameKey: "yuri-golfer", linkedUid: null });
+for (const id of ["gInv", "gY"]) await put(`associations/G2/roster/${id}`, { golferId: id });
+const failing = (() => { try { return { ok: true, out: execFileSync("node", [path.join(tmp, "golive.mjs"), "apply"],
+  { env: { ...env, BATCH_SIZE: "1", FAIL_AFTER_COMMITS: "2" }, encoding: "utf8" }) }; }
+  catch (e) { return { ok: false, out: `${e.stdout || ""}${e.stderr || ""}` }; } })();
+check(!failing.ok && /stopped part-way/.test(failing.out), "GO7 a failure part-way stops with a clear message");
+const m7 = await get("migrations/v2");
+check(m7 && m7.state === "data-failed" && /stopped on purpose/.test(m7.error || ""), "GO7 the marker records data-failed and why");
+check(/data-failed/.test(run("status").out), "GO7 status shows how far it got");
+const codes7 = (m7.adminCodes || []).map((x) => x.adminCode).sort().join(",");
+check(codes7 === "LEG001,LEG002", "GO7 the marker holds every admin code before it moved");
+fs.rmSync(path.join(tmp, "backup"), { recursive: true, force: true });   // this computer's copy is lost
+const back7 = run("rollback");
+check(back7.ok && (await get("associations/G1")).adminCode === "LEG001" && (await get("associations/G2")).adminCode === "LEG002",
+  "GO8 rollback from the database marker alone puts both admin codes back");
+const resumed = run("apply");
+check(resumed.ok && /OK: everything is in place/.test(resumed.out), "GO8 running apply again finishes the job");
+check((await get("migrations/v2")).state === "data-done" && run("verify").ok, "GO8 marker data-done and verify agrees");
+check((await get("associations/G2")).adminCode == null && (await get("associations/G2/secrets/admin"))?.adminCode === "LEG002", "GO8 G2's admin code moved");
+const inv = await get("associations/G2/invitations/gInv");
+check(inv && inv.name === "Ines Invited" && inv.groupName === "Sunday Group" && inv.role === "member", "GO9 an invitation already sent gets its greeting record");
+check(!(await get("associations/G2/invitations/gY")), "GO9 no record for a golfer never invited");
+const invited = await signUp({ email: "ines@example.com", password: "ines-pass-1" });
+check(await as(invited.token, "GET", `${FS}/${DBP}/associations/G2/invitations/gInv`) === 200, "GO9 the invitee reads the greeting record");
+check(await as(invited.token, "GET", `${FS}/${DBP}/golfers/gInv`) === 403, "GO9 ... but not the golfer record (go-live fix 1)");
+check(await as(invited.token, "GET", `${FS}/${DBP}/migrations/v2`) === 403, "GO9 nobody can read the migration marker from an app");
 
 console.log(`\nRESULT: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

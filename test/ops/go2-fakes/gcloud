@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# A stand-in for gcloud, for test/ops/go2-tests.sh only. Answers exactly the
+# questions go2.txt asks, as Cloud Shell would for the Scorecard project.
+case "$*" in
+  "config set project"*) exit 0 ;;
+  "config get-value project"*) echo "scorecard-f41b8" ;;
+  "auth list"*) echo "willyros01@gmail.com" ;;
+  "projects describe"*) echo "scorecard-f41b8" ;;
+  "auth print-access-token"*) echo "owner" ;;
+  *) echo "fake gcloud: unexpected: $*" >&2; exit 1 ;;
+esac
