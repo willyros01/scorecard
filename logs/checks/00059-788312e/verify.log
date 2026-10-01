@@ -1,0 +1,11 @@
+OK    V1 npm ci succeeded from the committed lockfile
+OK    V2 every package is exactly the approved version
+
+  vendor/firebase/firebase-10.12.0.js  384.1kb
+
+⚡ Done in 63ms
+OK    V3 the committed bundle is identical to a fresh build
+OK    V4 no remote code in the 15 packaged files
+OK    V5 Capacitor core, cli and ios are 8.5.2
+store.js:1519:  const url = EMULATORS ? `${location.origin}${location.pathname}?emulators=1&apply=1` : `${platform.joinBase()}?apply=1`;
+FAIL  V6 location.origin is still used

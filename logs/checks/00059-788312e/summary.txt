@@ -1,0 +1,21 @@
+kind:    checks
+result:  bootstrap=success verify=failure web=skipped
+branch:  v2
+commit:  788312ef00d0604f6c5cfaff9d25ced4b651830f
+run:     59 (id 36923099766)
+time:    2026-10-01T20:39:04Z
+
+--- last lines of bootstrap.log ---
+
+--- last lines of verify.log ---
+OK    V1 npm ci succeeded from the committed lockfile
+OK    V2 every package is exactly the approved version
+
+  vendor/firebase/firebase-10.12.0.js  384.1kb
+
+⚡ Done in 63ms
+OK    V3 the committed bundle is identical to a fresh build
+OK    V4 no remote code in the 15 packaged files
+OK    V5 Capacitor core, cli and ios are 8.5.2
+store.js:1519:  const url = EMULATORS ? `${location.origin}${location.pathname}?emulators=1&apply=1` : `${platform.joinBase()}?apply=1`;
+FAIL  V6 location.origin is still used
