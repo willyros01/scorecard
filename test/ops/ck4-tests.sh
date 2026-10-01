@@ -222,6 +222,11 @@ allowed "CK9 the second of 2 today passes"                                    co
 read -r U8 T8 <<<"$(applicant "max.over@example.com" "Max Over")"
 refused "CK9 the third of 2 today is refused"                                 commit_as "${T8}" "$(auto_writes max.over@example.com gMax 'Max Over' max-over "${U8}" 3 true)"
 refused "CK9 ... and so is skipping the count"                                commit_as "${T8}" "$(auto_writes max.over@example.com gMax 'Max Over' max-over "${U8}" 2 true)"
+refused "CK9 ... and so is leaving the counter out"                           commit_as "${T8}" "$(auto_writes max.over@example.com gMax 'Max Over' max-over "${U8}" 2 true | jq -c 'del(.[2])')"
+put "settings/publicApplications" '{"mode":"auto","dailyLimit":20}'
+refused "CK9 under the limit, leaving the counter out is still refused"       commit_as "${T8}" "$(auto_writes max.over@example.com gMax 'Max Over' max-over "${U8}" 3 true | jq -c 'del(.[2])')"
+allowed "CK9 under the limit, with the counter, it passes"                    commit_as "${T8}" "$(auto_writes max.over@example.com gMax 'Max Over' max-over "${U8}" 3 true)"
+refused "CK9 a reviewer cannot claim an application already approved by Auto" ts_update "${TR}" "publicApplications/max.over@example.com" "{\"status\":\"approving\",\"reviewedBy\":\"${R}\",\"golferId\":\"gX\",\"golferName\":\"Max Over\"}" approvingAt
 
 echo
 echo "RESULT: ${pass} passed, ${fail} failed"

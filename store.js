@@ -1530,13 +1530,16 @@ export const isApplyLink = () => {
 export async function finishApplyLink({ email, password }) {
   const address = String(email || "").trim();
   const cred = await fb.mod.auth.signInWithEmailLink(fb.auth, address, platform.signInLinkUrl());
-  await fb.mod.auth.updatePassword(cred.user, password);
+  /* The link is spent now. If the password cannot be set, carry on (they are
+     signed in) and say so: Forgot the password sets one later. */
+  let passwordFailed = false;
+  try { await fb.mod.auth.updatePassword(cred.user, password); } catch { passwordFailed = true; }
   try { localStorage.removeItem(APPLY_EMAIL_KEY); } catch {}
   try { history.replaceState(null, "", EMULATORS ? `${location.pathname}?emulators=1` : location.pathname); } catch {}
   platform.clearLinkQuery();
   await refreshToken();
   await ensureAccountEmail();
-  return { ok: true };
+  return { ok: true, passwordFailed };
 }
 
 /* Auto: join the public group by yourself. Every Level 1 check is made again
@@ -1547,6 +1550,9 @@ export async function autoJoinPublic() {
   if (!user || !user.email || !user.emailVerified) return { waiting: true, reason: "email" };
   const { getDoc } = fb.mod.store;
   const key = emailKey(user.email);
+  /* Already in (an earlier try stopped part-way): just finish. */
+  const already = await getDoc(ref("associations", PUBLIC_ID, "members", uid)).catch(() => null);
+  if (already && already.exists()) { await finishPublicJoin(); return { joined: true, already: true }; }
   const settings = await readApplicationSettings();
   if (settings.mode !== "auto") return { waiting: true, reason: "manual" };
   let app;

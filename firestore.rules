@@ -270,9 +270,9 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/settings/publicApplications).data;
     }
 
+    /* (A missing settings document fails the read, which means: not Auto.) */
     function autoMode() {
-      return exists(/databases/$(database)/documents/settings/publicApplications)
-        && settingsDoc().get('mode', 'manual') == 'auto';
+      return settingsDoc().get('mode', 'manual') == 'auto';
     }
 
     /* Level 1 "Full name": two or more words, plain letters (hyphen and
@@ -309,12 +309,14 @@ service cloud.firestore {
         && validAutoName(get(appPath(emailKey)).data.fullName)
         && request.resource.data.displayName == get(appPath(emailKey)).data.fullName
         && request.resource.data.nameKey == autoNameKey(get(appPath(emailKey)).data.fullName)
-        && !exists(/databases/$(database)/documents/golferNames/$(request.resource.data.nameKey))
         && getAfter(/databases/$(database)/documents/golferNames/$(request.resource.data.nameKey)).data.golferId == request.resource.data.golferId
         && getAfter(/databases/$(database)/documents/golfers/$(request.resource.data.golferId)).data.linkedUid == request.auth.uid
         && !exists(/databases/$(database)/documents/blockedEmails/$(emailKey))
         && !exists(/databases/$(database)/documents/blockedDomains/$(emailKey.split('@')[1]))
         && !exists(/databases/$(database)/documents/blockedNames/$(request.resource.data.nameKey))
+        /* The day's counter must move by exactly one in this same batch, and
+           stay within the limit. */
+        && getAfter(counterPath()).data.count == (exists(counterPath()) ? get(counterPath()).data.count : 0) + 1
         && getAfter(counterPath()).data.count <= settingsDoc().get('dailyLimit', 20);
     }
 
@@ -810,7 +812,9 @@ service cloud.firestore {
             && request.resource.data.status == 'approving'
             && request.resource.data.approvingAt == request.time
             && request.resource.data.golferId is string
-            && request.resource.data.golferName is string)
+            && request.resource.data.golferName is string
+            /* beta.4: not while the applicant's own Auto approval exists. */
+            && !exists(approvalPath(emailKey)))
           || (resource.data.status == 'approving'
             && request.resource.data.status == 'approving'
             && request.resource.data.approvingAt == request.time

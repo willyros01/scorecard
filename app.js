@@ -756,8 +756,9 @@ async function finishApplyHere() {
   joining = true;
   busy("Finishing");
   render();
+  let finished = { ok: false };
   try {
-    await db.finishApplyLink(fields);
+    finished = await db.finishApplyLink(fields);
   } catch (err) {
     joining = false; idle();
     const code = String((err && (err.code || err.message)) || "");
@@ -771,16 +772,23 @@ async function finishApplyHere() {
     }
     return render();
   }
+  /* Approved by a reviewer already? Join that way; otherwise try Auto. */
   let result = { waiting: true };
-  try { result = await db.autoJoinPublic(); } catch { result = { waiting: true }; }
+  try {
+    const manual = await db.joinPublicIfApproved();
+    if (manual && manual.joined) { await db.finishPublicJoin().catch(() => {}); result = { joined: true }; }
+    else result = await db.autoJoinPublic();
+  } catch { result = { waiting: true }; }
   joining = false;
   idleAll();
+  const pw = finished && finished.passwordFailed
+    ? " Your password could not be set: on the Sign in screen, tap Forgot the password to choose one." : "";
   if (result.joined) {
     await start(db.PUBLIC_ID);
     tab = "enter";
-    flashMsg("Welcome to the public group. Post your rounds on the Enter tab.");
+    flashMsg(`Welcome to the public group. Post your rounds on the Enter tab.${pw}`);
   } else {
-    flashMsg("Your email is confirmed and your password is set. Your application now waits for a person to review it. You will get an email when it is approved.");
+    flashMsg(`Your email is confirmed${pw ? "" : " and your password is set"}. Your application now waits for a person to review it. You will get an email when it is approved.${pw}`);
   }
   render();
 }
@@ -839,8 +847,10 @@ async function checkPublicApproval() {
   /* beta.4: an automatic join that stopped part-way finishes here; an
      application still pending tries Auto again (the switch, the checks and
      the daily limit are all re-checked). */
-  if (result && result.joined) { try { await db.finishPublicJoin(); } catch {} }
-  else if (db.emailConfirmed()) {
+  /* finishPublicJoin checks for itself (member of the public group, own
+     application still pending), so it is always safe to call. */
+  try { await db.finishPublicJoin(); } catch {}
+  if (!(result && result.joined) && db.emailConfirmed()) {
     try { const auto = await db.autoJoinPublic(); if (auto && auto.joined) result = { joined: true }; } catch {}
   }
   if (!result || !result.joined) return;
@@ -3013,7 +3023,14 @@ function mySeasonCard() {
     window = model.insertIntoWindow(window, { roundId: r.id, date: r.date, differential: +r.differential, assocId: r.assocId });
   }
   const then = window.length >= 3 ? model.displayIndex(window) : null;
-  const move = now != null && then != null ? Math.round((now - then) * 10) / 10 : null;
+  /* The trend compares this group's rounds with this group's rounds (the
+     index shown above is the golfer's own, from every group). */
+  let all = [];
+  for (const r of [...myRounds].filter((r) => Number.isFinite(+r.differential)).sort((a, b) => a.date.localeCompare(b.date))) {
+    all = model.insertIntoWindow(all, { roundId: r.id, date: r.date, differential: +r.differential, assocId: r.assocId });
+  }
+  const nowHere = all.length >= 3 ? model.displayIndex(all) : null;
+  const move = nowHere != null && then != null ? Math.round((nowHere - then) * 10) / 10 : null;
   return `<section class="panel my-season">
     <div class="panel-head"><h2 class="panel-title">My season</h2></div>
     <div class="ck-tiles">
@@ -3023,7 +3040,7 @@ function mySeasonCard() {
     <p class="hint">${move == null ? "Your 6-month trend appears once you have rounds from 6 months ago."
       : move === 0 ? "Your index is the same as 6 months ago."
       : move < 0 ? `Your index is down ${Math.abs(move).toFixed(1)} since 6 months ago. Well played.`
-      : `Your index is up ${move.toFixed(1)} since 6 months ago.`}</p>
+      : `Your index is up ${move.toFixed(1)} since 6 months ago.`}${move == null ? "" : " Based on your rounds in this group."}</p>
   </section>`;
 }
 
