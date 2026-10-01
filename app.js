@@ -242,6 +242,7 @@ let showApply = false;          /* signed out: the Apply form is open */
 let applySentTo = "";           /* signed out: the application just sent */
 let applications = [];          /* reviewers: pending applications */
 let publicReports = [];         /* reviewers: reports of golfers' names */
+let approvalsWaiting = [];      /* reviewers: approved, not joined yet */
 let blocked = [];               /* this account's blocked golfers (PUBLIC) */
 let rawGolfers = [];            /* golfers as delivered, before blocking */
 let confirmReject = null;       /* the application key awaiting a second tap */
@@ -635,14 +636,27 @@ function applicationsSection() {
     <div class="panel-head"><h2 class="panel-title">Applications</h2></div>
     ${applications.length === 0 ? `<div class="card"><p class="blank">No applications waiting.</p></div>` : `
     <div class="card list">
-      ${applications.map((a) => `<div class="list-row">
-        <span class="grow"><span class="name">${esc(a.fullName)}</span><br><span class="sub">${esc(a.email)}</span></span>
+      ${applications.map((a) => {
+        const inProgress = a.status === "approving";
+        const mine = inProgress && a.reviewedBy === db.status().uid;
+        return `<div class="list-row">
+        <span class="grow"><span class="name">${esc(a.fullName)}</span><br><span class="sub">${esc(a.email)}${inProgress
+          ? (mine ? " · approval not finished — tap Approve to finish it" : " · being approved by another reviewer")
+          : ""}</span></span>
         <span class="inline-actions">
-          <button class="rowbtn" data-act="review-application" data-id="${esc(a.key)}">Approve</button>
-          <button class="rowbtn ${confirmReject === a.key ? "danger" : ""}" data-act="reject-application" data-id="${esc(a.key)}">${confirmReject === a.key ? "Tap to reject" : "Reject"}</button>
+          <button class="rowbtn" data-act="review-application" data-id="${esc(a.key)}">${mine ? "Finish" : "Approve"}</button>
+          ${inProgress ? "" : `<button class="rowbtn ${confirmReject === a.key ? "danger" : ""}" data-act="reject-application" data-id="${esc(a.key)}">${confirmReject === a.key ? "Tap to reject" : "Reject"}</button>`}
         </span>
-      </div>`).join("")}
+      </div>`;
+      }).join("")}
     </div>`}
+    ${approvalsWaiting.length ? `<div class="card list" style="margin-top:0.6rem">
+      <div class="list-row"><span class="grow"><span class="name">Approved, not joined yet</span><br><span class="sub">They need to choose a password from the email, then sign in.</span></span></div>
+      ${approvalsWaiting.map((p) => `<div class="list-row">
+        <span class="grow"><span class="name">${esc(p.displayName || p.key)}</span><br><span class="sub">${esc(p.key)}</span></span>
+        <button class="rowbtn" data-act="resend-approval-email" data-id="${esc(p.key)}">Send the email again</button>
+      </div>`).join("")}
+    </div>` : ""}
     <p class="hint">Approving creates their account and emails them a link to choose a password. Their golfer name must be unique; if it is taken, add a middle initial.</p>
   </section>`;
 }
@@ -656,7 +670,7 @@ function openApproveSheet(key) {
       <h2>Approve ${esc(a.fullName)}</h2><button class="rowbtn" data-close="1">Close</button></div>
     <p class="hint">${esc(a.email)}</p>
     <label class="lbl">Their golfer name in the public group</label>
-    <input class="field" name="approve-name" value="${esc(a.fullName)}" maxlength="80">
+    <input class="field" name="approve-name" value="${esc(a.golferName || a.fullName)}" maxlength="80">
     <div class="inline-actions stacked">
       <button class="btn" data-pc="approve" data-id="${esc(a.key)}">Approve and send the email</button>
     </div>
@@ -3080,13 +3094,20 @@ sheetEl.addEventListener("click", async (e) => {
     busy(`Approving ${a.fullName}`);
     try {
       const result = await db.approveApplication({ application: a, golferName: name });
-      flashMsg(result.existingAccount
-        ? `${a.fullName} is approved. They already had an account: they sign in with it (the email also lets them choose a new password), then confirm their email to join.`
-        : `${a.fullName} is approved. The email to choose a password has gone to ${a.email}.`);
+      flashMsg(result.already
+        ? `${a.fullName} was already approved. Nothing more to do.`
+        : result.emailFailed
+          ? `${a.fullName} is approved, but the password email did not send. Use "Send the email again" under Applications.`
+          : result.existingAccount
+            ? `${a.fullName} is approved. They already had an account: they sign in with it (the email also lets them choose a new password), then confirm their email to join.`
+            : `${a.fullName} is approved. The email to choose a password has gone to ${a.email}.`);
     } catch (err) {
       const code = String((err && (err.code || err.message)) || "");
       if (code.includes("name-taken")) { flashMsg(`The name "${name}" is already used. Add a middle initial or a nickname and approve again.`); openApproveSheet(id); }
-      else flashMsg(`The approval did not finish: ${code || "no connection"}. Tap Approve again — it is safe to repeat.`);
+      else if (code.includes("app/busy")) flashMsg("Another reviewer is approving this application right now. Nothing was changed.");
+      else if (code.includes("app/rejected")) flashMsg("This application was rejected, so it cannot be approved.");
+      else if (code.includes("app/gone")) flashMsg("This application no longer exists.");
+      else flashMsg(`The approval did not finish: ${code || "no connection"}. Tap Finish to complete it — it is safe to repeat.`);
     } finally { idle(); }
     return render();
   }
@@ -4171,6 +4192,13 @@ view.addEventListener("click", async (e) => {
       return render();
     }
     case "review-application": return openApproveSheet(d.id);
+    case "resend-approval-email": {
+      busy("Sending the email");
+      try { await db.resendApprovalEmail(d.id); flashMsg(`The password email has gone to ${d.id} again.`); }
+      catch (e) { flashMsg(`It was not sent: ${String((e && (e.code || e.message)) || "no connection")}.`); }
+      finally { idle(); }
+      return render();
+    }
     case "reject-application": {
       if (confirmReject !== d.id) {
         confirmReject = d.id;
@@ -4734,7 +4762,7 @@ sheetEl.addEventListener("click", async (e) => {
     try {
       if (role === "admin") await db.ensureAdminCode();
       const link = db.inviteLink(role, golferId);
-      if (golferId) db.noteInvitation(golferId, role);
+      if (golferId) db.noteInvitation(golferId, role, named);
       if (!link) {
         /* This used to flashMsg and return without redrawing, so the button
            looked completely dead. Say it properly instead. */
@@ -4758,8 +4786,8 @@ sheetEl.addEventListener("click", async (e) => {
         `How it works, in one page: ${guide}`,
         "",
         named
-          ? "Tap the link and it will greet you by name. One button and you are in — nothing to type."
-          : "Tap the link, type the name you play under, and you are in. No account, no password.",
+          ? "Tap the link, create your account (your email and a password) or sign in, and it greets you by name. One button and you are in."
+          : "Tap the link, create your account (your email and a password) or sign in, then type the name you play under.",
         role === "admin"
           ? "This makes you an admin, so you will be asked to set a password. It works once, so keep it to yourself."
           : "No account and no password needed.",
@@ -5612,11 +5640,12 @@ async function start(assocId) {
   db.watchMembers((list) => { members = list; render(); });
   /* Phase C: in the PUBLIC group, blocks for everybody; applications and
      reports for its reviewers. */
-  applications = []; publicReports = []; blocked = [];
+  applications = []; publicReports = []; blocked = []; approvalsWaiting = [];
   if (db.isPublicGroup()) {
     db.watchBlocks((list) => { blocked = list; applyBlocks(); render(); });
     if (db.canManage()) {
       db.watchApplications((list) => { applications = list; render(); });
+      db.watchApprovals((list) => { approvalsWaiting = list; render(); });
       db.watchReports((list) => { publicReports = list; render(); });
     }
   }
@@ -5693,11 +5722,10 @@ async function loadInvitedDetails() {
   if (!db.hasUser() || db.isAnonymousSession()) return;
   const link = db.readJoinLink();
   if (link && link.golferId) {
-    invitedGolfer = await db.golferNamedInLink(link.golferId);
-    /* Usually null — a group document is not readable until you belong to it.
-       The screen falls back to a generic heading rather than looking broken. */
-    const group = await db.loadAssociation(link.associationId);
-    invitedGroupName = group ? group.name : "";
+    /* Go-live fix 1: from the invitation record, not the private golfer. */
+    const inv = await db.invitationFor(link.associationId, link.golferId);
+    invitedGolfer = inv && inv.name ? inv : null;
+    invitedGroupName = inv ? inv.groupName : "";
   }
 }
 

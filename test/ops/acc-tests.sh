@@ -125,7 +125,7 @@ allowed "ACC3 an email member reads its own round"                           get
 allowed "ACC3 an email member lists the directory"                           query_as "${TE}" "associations/G1" directory false
 allowed "ACC3 a new email account reads courses"                             get_as "${TN}" "courses/c1"
 allowed "ACC3 a new email account reads an invitation (to accept it)"         get_as "${TN}" "associations/G1/invites/gU"
-allowed "ACC3 a new email account greets itself by an unclaimed golfer name" get_as "${TN}" "golfers/gU"
+refused "ACC3 a new email account cannot read an unclaimed golfer (go-live fix 1)" get_as "${TN}" "golfers/gU"
 refused "ACC3 a new email account cannot create a group (Phase D: group creators only)" write_as "${TN}" "associations/GN" "{\"name\":\"New group\",\"ownerUid\":\"${N}\"}"
 allowed "ACC3 a new email account adds it to its own group list"             write_as "${TN}" "userGroups/${N}/groups/GN" '{"assocId":"GN"}'
 

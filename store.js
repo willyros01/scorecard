@@ -1265,7 +1265,8 @@ export async function joinPublicIfApproved() {
 
 export function watchApplications(callback) {
   const { query, where } = fb.mod.store;
-  const stop = listen(query(col("publicApplications"), where("status", "==", "pending")),
+  /* Pending, and approvals in progress (so a stuck one can be finished). */
+  const stop = listen(query(col("publicApplications"), where("status", "in", ["pending", "approving"])),
     (snap) => callback(snap.docs.map((d) => ({ key: d.id, ...d.data() }))
       .sort((x, y) => ((x.createdAt && x.createdAt.seconds) || 0) - ((y.createdAt && y.createdAt.seconds) || 0))),
     (e) => report(e));
@@ -1281,38 +1282,64 @@ function randomPassword() {
   return Array.from(bytes, (b) => "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"[b % 56]).join("");
 }
 
-/* Approving (R2). In this order, so a failure part-way can simply be retried:
-   1. the name must be free (names are unique across the whole database);
-   2. one batch: the golfer, their name claim, the PUBLIC roster and directory
-      entries, the approval, and the application marked approved;
-   3. the account, made through a SEPARATE Firebase instance so the reviewer
-      stays signed in (an existing account is simply left as it is);
-   4. Firebase's own password email, which is the invitation.
-   Returns { ok, existingAccount }. */
+/* Approving (R2), go-live fix 2: safe to retry, and two reviewers can never
+   approve the same application.
+   1. CLAIM, in a transaction: the application goes from pending to approving,
+      holding this reviewer's id, the golfer id and the golfer name. A retry by
+      the same reviewer keeps the same golfer id. Another reviewer is refused
+      (by this code and by the rules) unless the claim is 10 minutes old.
+   2. The name must be free (names are unique across the whole database); if
+      it is taken, the claim is released so the name can be changed.
+   3. The ACCOUNT, through a separate Firebase instance so the reviewer stays
+      signed in. An existing account is left as it is (that is also what a
+      retry finds).
+   4. ONE BATCH, all or nothing: the golfer, the name claim, the PUBLIC roster
+      and directory entries, the approval, and the application approved. The
+      rules accept the approval only under this reviewer's claim.
+   5. Firebase's own password email, the invitation. If only this fails, the
+      approval stands and the email can be sent again from the Admin tab.
+   Returns { ok, existingAccount, golferId, emailFailed, already }. */
+const STALE_CLAIM_MS = 10 * 60 * 1000;
 export async function approveApplication({ application, golferName }) {
-  const { getDoc } = fb.mod.store;
+  const { getDoc, runTransaction, doc, serverTimestamp } = fb.mod.store;
   const name = String(golferName || "").trim().replace(/\s+/g, " ");
   const key = model.nameKey(name);
   if (!key) { const e = new Error("name"); e.code = "app/name"; throw e; }
-  const claim = await getDoc(ref("golferNames", key));
-  if (claim.exists()) { const e = new Error("name taken"); e.code = "app/name-taken"; throw e; }
+  const appRef = doc(fb.db, "publicApplications", application.key);
 
-  const golfer = model.buildGolfer({ name });
-  await commitTogether([
-    { op: "set", merge: false, path: ["golfers", golfer.id], data: { ...golfer, groups: [PUBLIC_ID] } },
-    { op: "set", merge: false, path: ["golferNames", key], data: { golferId: golfer.id, name: golfer.name } },
-    { op: "set", path: ["associations", PUBLIC_ID, "roster", golfer.id], data: { golferId: golfer.id, addedAt: Date.now() } },
-    { op: "set", merge: false, path: ["associations", PUBLIC_ID, "directory", golfer.id],
-      data: { golferId: golfer.id, displayName: golfer.name, handicapIndex: null } },
-    { op: "set", merge: false, path: ["publicApprovals", application.key],
-      data: { golferId: golfer.id, displayName: golfer.name, approvedBy: uid, approvedAt: { __serverTimestamp: true } } },
-    { op: "update", path: ["publicApplications", application.key],
-      data: { status: "approved", reviewedBy: uid, reviewedAt: { __serverTimestamp: true }, golferId: golfer.id } },
-  ], "approve an application");
+  /* 1. Claim. */
+  const claimed = await runTransaction(fb.db, async (tx) => {
+    const snap = await tx.get(appRef);
+    if (!snap.exists()) { const e = new Error("gone"); e.code = "app/gone"; throw e; }
+    const a = snap.data();
+    if (a.status === "approved") return { already: true, golferId: a.golferId };
+    if (a.status === "rejected") { const e = new Error("rejected"); e.code = "app/rejected"; throw e; }
+    let golferId = model.newId();
+    if (a.status === "approving") {
+      const at = a.approvingAt && a.approvingAt.toMillis ? a.approvingAt.toMillis() : 0;
+      const mine = a.reviewedBy === uid;
+      if (!mine && Date.now() - at < STALE_CLAIM_MS) { const e = new Error("busy"); e.code = "app/busy"; throw e; }
+      if (mine && a.golferId) golferId = a.golferId;   /* a retry: same golfer */
+    }
+    tx.update(appRef, { status: "approving", reviewedBy: uid, approvingAt: serverTimestamp(), golferId, golferName: name });
+    return { already: false, golferId };
+  });
+  if (claimed.already) return { ok: true, already: true, golferId: claimed.golferId };
+  const golferId = claimed.golferId;
+  const release = async () => {
+    try { await commitTogether([{ op: "update", path: ["publicApplications", application.key], data: { status: "pending", reviewedBy: uid } }], "release the approval"); } catch {}
+  };
 
+  /* 2. The name. */
+  const nameClaim = await getDoc(ref("golferNames", key));
+  if (nameClaim.exists() && (nameClaim.data() || {}).golferId !== golferId) {
+    await release();
+    const e = new Error("name taken"); e.code = "app/name-taken"; throw e;
+  }
+
+  /* 3. The account. */
   let existingAccount = false;
-  const name2 = `approver-${Date.now()}`;
-  const second = fb.mod.app.initializeApp(fb.config, name2);
+  const second = fb.mod.app.initializeApp(fb.config, `approver-${Date.now()}`);
   try {
     const secondAuth = fb.mod.auth.initializeAuth(second, { persistence: fb.mod.auth.inMemoryPersistence });
     if (EMULATORS) fb.mod.auth.connectAuthEmulator(secondAuth, AUTH_EMULATOR, { disableWarnings: true });
@@ -1320,18 +1347,54 @@ export async function approveApplication({ application, golferName }) {
       await fb.mod.auth.createUserWithEmailAndPassword(secondAuth, application.email, randomPassword());
     } catch (e) {
       const code = String((e && (e.code || e.message)) || "");
-      if (!code.includes("email-already-in-use")) throw e;
+      if (!code.includes("email-already-in-use")) throw e;   /* the claim stays: tap Approve again */
       existingAccount = true;
     }
     try { await fb.mod.auth.signOut(secondAuth); } catch {}
   } finally {
     try { await fb.mod.app.deleteApp(second); } catch {}
   }
-  /* Sent from the reviewer's own instance: it signs nobody in or out. For an
-     existing account it is still useful — it lets them choose a new password
-     if they have forgotten it — and the approval waits for them either way. */
-  await fb.mod.auth.sendPasswordResetEmail(fb.auth, application.email);
-  return { ok: true, existingAccount, golferId: golfer.id };
+
+  /* 4. Everything else, together. */
+  const golfer = model.buildGolfer({ name, id: golferId });
+  try {
+    await commitTogether([
+      { op: "set", merge: false, path: ["golfers", golferId], data: { ...golfer, groups: [PUBLIC_ID] } },
+      { op: "set", merge: false, path: ["golferNames", key], data: { golferId, name: golfer.name } },
+      { op: "set", path: ["associations", PUBLIC_ID, "roster", golferId], data: { golferId, addedAt: Date.now() } },
+      { op: "set", merge: false, path: ["associations", PUBLIC_ID, "directory", golferId],
+        data: { golferId, displayName: golfer.name, handicapIndex: null } },
+      { op: "set", merge: false, path: ["publicApprovals", application.key],
+        data: { golferId, displayName: golfer.name, approvedBy: uid, approvedAt: { __serverTimestamp: true } } },
+      { op: "update", path: ["publicApplications", application.key],
+        data: { status: "approved", reviewedBy: uid, reviewedAt: { __serverTimestamp: true } } },
+    ], "approve an application");
+  } catch (e) {
+    /* Nothing of the batch landed. If the application was approved meanwhile
+       (a retry that already finished), that is success. */
+    const now = await getDoc(appRef).catch(() => null);
+    if (now && now.exists() && now.data().status === "approved") return { ok: true, already: true, golferId };
+    throw e;   /* the claim stays: tap Approve again to retry */
+  }
+
+  /* 5. The email. */
+  let emailFailed = false;
+  try { await fb.mod.auth.sendPasswordResetEmail(fb.auth, application.email); }
+  catch { emailFailed = true; }
+  return { ok: true, existingAccount, golferId, emailFailed };
+}
+
+/* Approved, not joined yet (their approval is still waiting for them). */
+export function watchApprovals(callback) {
+  const stop = listen(col("publicApprovals"),
+    (snap) => callback(snap.docs.map((d) => ({ key: d.id, ...d.data() }))), (e) => report(e));
+  unsubscribers.push(stop);
+  return stop;
+}
+
+/* The password email again, for an approved applicant. */
+export async function resendApprovalEmail(email) {
+  await fb.mod.auth.sendPasswordResetEmail(fb.auth, String(email || "").trim());
 }
 
 export async function rejectApplication(application) {
@@ -1530,7 +1593,7 @@ export const joinLink = (association) =>
 /* Records that an invitation was sent, so the People list can show who is still
    outstanding. Written on the golfer — only the MOST RECENT invitation matters,
    and a list of old ones was impossible to read. */
-export function noteInvitation(golferId, role) {
+export function noteInvitation(golferId, role, golfer = null) {
   if (!golferId) return;
   outbox.enqueue({
     type: "update",
@@ -1539,6 +1602,20 @@ export function noteInvitation(golferId, role) {
             editedIn: assocId },
     opId: `golfer-invited-${golferId}`,
   });
+  /* Go-live fix 1: what the invitee sees before joining — their name, index
+     and the group's name — lives on the invitation record, readable by its id
+     alone. The golfer record itself stays private. */
+  if (golfer && golfer.name) {
+    const index = model.effectiveIndex(golfer).index;
+    outbox.enqueue({
+      type: "set",
+      path: ["associations", assocId, "invitations", golferId],
+      data: { golferId, name: String(golfer.name).slice(0, 120), handicapIndex: index == null ? null : index,
+              groupName: String((cachedAssociation && cachedAssociation.name) || "").slice(0, 120),
+              role: role === "admin" ? "admin" : "member", sentBy: uid, sentAt: { __serverTimestamp: true } },
+      opId: `invitation-${assocId}-${golferId}`,
+    });
+  }
   flush();
 }
 
@@ -1635,14 +1712,23 @@ export function readJoinLink() {
 /* The golfer a named invitation points at, read straight from the database so
    the screen shows their real name rather than one carried in the link — a URL
    can be edited, a document cannot. */
-export async function golferNamedInLink(golferId) {
-  if (!fb || !golferId) return null;
+/* Go-live fix 1: the greeting comes from the invitation record written when
+   the invitation was sent (name, index, group name), never from the golfer
+   record, which is private. Returns { id, name, handicapIndex, groupName }. */
+export async function invitationFor(associationId, golferId) {
+  if (!fb || !associationId || !golferId) return null;
   try {
     const { getDoc } = fb.mod.store;
-    const snap = await getDoc(ref("golfers", golferId));
+    const snap = await getDoc(ref("associations", associationId, "invitations", golferId));
     noteRead(snap, snap.exists());
-    return snap.exists() ? { ...snap.data(), id: snap.id } : null;
-  } catch { cacheMiss = true; return null; }
+    if (!snap.exists()) return null;
+    const d = snap.data() || {};
+    return { id: golferId, name: d.name || "", handicapIndex: d.handicapIndex == null ? null : Number(d.handicapIndex), groupName: d.groupName || "" };
+  } catch (e) {
+    const code = String((e && (e.code || e.message)) || "");
+    if (!code.includes("permission")) cacheMiss = true;
+    return null;
+  }
 }
 
 /* Accepting a named invitation.
@@ -1672,7 +1758,7 @@ export async function acceptNamedInvite({ associationId, code, golferId, role })
 
   const member = model.buildMember({
     uid,
-    displayName: (await golferNamedInLink(golferId) || {}).name || "",
+    displayName: (await invitationFor(associationId, golferId) || {}).name || "",
     role: role === "admin" ? "admin" : "member",
     joinCode: code,
   });

@@ -1,6 +1,15 @@
 rules_version = '2';
 
-/* LAST CHANGED FOR VERSION 2.0, PHASE D (groups and admins) — not published yet
+/* LAST CHANGED FOR VERSION 2.0, PHASE D + GO-LIVE FIXES (Oct 1) — not published yet
+ *
+ * Go-live fixes (review of Sep 30, approved by Willy):
+ *   1. No signed-in account may read an unclaimed golfer any more. A named
+ *      invitation is greeted from associations/{id}/invitations/{golferId},
+ *      written by the owner or an admin when the invitation is sent.
+ *   2. Approving a PUBLIC application is claimed (pending → approving) by one
+ *      reviewer, then finished by that reviewer only; the approval document
+ *      can be created once, only under that claim. Safe to retry; two
+ *      reviewers cannot approve the same application.
  *
  * What changes in Phase D (Willy's rules, Sep 30):
  *   - Only accounts listed in groupCreators may create a group. The setup
@@ -350,6 +359,28 @@ service cloud.firestore {
         allow read, write: if isOwner(assocId);
       }
 
+      /* ---------------- invitation records (go-live fix 1) ---------------- */
+
+      /* Written when the owner or an admin sends a named invitation: only
+         what the invitee needs to see before joining (their name, index and
+         the group's name). Read one at a time by its id, which only the link
+         carries; never listed except by the group's admins. Admins write
+         member invitations only; the owner may write either. */
+      match /invitations/{golferId} {
+        allow get: if signedIn();
+        allow list: if isAdmin(assocId);
+        allow create, update: if isAdmin(assocId)
+          && request.resource.data.keys().hasOnly(['golferId', 'name', 'handicapIndex', 'groupName', 'role', 'sentBy', 'sentAt'])
+          && request.resource.data.golferId == golferId
+          && request.resource.data.name is string && request.resource.data.name.size() <= 120
+          && request.resource.data.get('groupName', '') is string && request.resource.data.get('groupName', '').size() <= 120
+          && request.resource.data.role in ['member', 'admin']
+          && (request.resource.data.role == 'member' || isOwner(assocId))
+          && request.resource.data.sentBy == request.auth.uid
+          && exists(/databases/$(database)/documents/associations/$(assocId)/roster/$(golferId));
+        allow delete: if isAdmin(assocId);
+      }
+
       /* ---------------- invitation claims ---------------- */
 
       /* One document per invited golfer, recording which account accepted.
@@ -500,16 +531,12 @@ service cloud.firestore {
      * be in a group you are not. Deleting is not permitted from the app —
      * rounds reference golfers, and an orphaned round has no owner. */
     match /golfers/{golferId} {
-      /* Readable by anyone signed in. A golfer is shared across groups, and an
-         invitation must show somebody their own name before they belong to
-         anything. */
-      /* Phase A: a private record. Its own account; admins of a group it plays
-         in; or a single read of a golfer nobody has claimed yet, so that an
-         invitation can greet the invitee by name (the id is random and known
-         only to whoever holds the invitation). Never listed by anybody. */
+      /* A private record: its own account, or admins of a group it plays in.
+         Go-live fix 1: the exception that let any signed-in account read an
+         UNCLAIMED golfer (to greet an invitee) is gone; the greeting now comes
+         from the invitation record (associations/{id}/invitations/{golferId}). */
       allow get: if signedIn() && (
         resource.data.get('linkedUid', null) == request.auth.uid
-        || resource.data.get('linkedUid', null) == null
         || adminOfAny(resource.data.get('groups', [])));
       /* Lists only of your OWN golfer (a query where linkedUid is you) — how
          the app finds which golfer you are, and what Delete my account uses. */
@@ -645,20 +672,46 @@ service cloud.firestore {
         && request.resource.data.status == 'pending'
         && request.resource.data.createdAt == request.time;
       allow read, delete: if reviewer();
+      /* Go-live fix 2: an approval is claimed first (pending → approving, by
+         one reviewer), then finished (approving → approved, by that same
+         reviewer), or released back to pending. A second reviewer cannot take
+         an approval in progress unless it has been stuck for 10 minutes.
+         Rejecting is only possible while pending. */
       allow update: if reviewer()
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'reviewedBy', 'reviewedAt', 'golferId'])
-        && request.resource.data.status in ['approved', 'rejected']
-        && request.resource.data.reviewedBy == request.auth.uid;
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['status', 'reviewedBy', 'reviewedAt', 'golferId', 'golferName', 'approvingAt'])
+        && request.resource.data.reviewedBy == request.auth.uid
+        && (
+          (resource.data.status == 'pending'
+            && request.resource.data.status == 'approving'
+            && request.resource.data.approvingAt == request.time
+            && request.resource.data.golferId is string
+            && request.resource.data.golferName is string)
+          || (resource.data.status == 'approving'
+            && request.resource.data.status == 'approving'
+            && request.resource.data.approvingAt == request.time
+            && (resource.data.reviewedBy == request.auth.uid
+                || request.time > resource.data.approvingAt + duration.value(10, 'm')))
+          || (resource.data.status == 'approving'
+            && resource.data.reviewedBy == request.auth.uid
+            && request.resource.data.status in ['approved', 'pending'])
+          || (resource.data.status == 'pending'
+            && request.resource.data.status == 'rejected')
+        );
     }
 
     /* Written by a reviewer on approval. The applicant's app reads it once the
        email is confirmed, joins the PUBLIC group with it, then removes it. */
     match /publicApprovals/{emailKey} {
       allow read: if reviewer() || (verifiedEmail() && myEmailKey() == emailKey);
-      allow create, update: if reviewer()
+      /* Go-live fix 2: created once, only by the reviewer holding the claim on
+         the application, and only for the golfer named in that claim. */
+      allow create: if reviewer()
         && request.resource.data.keys().hasOnly(['golferId', 'displayName', 'approvedBy', 'approvedAt'])
-        && request.resource.data.golferId is string
-        && request.resource.data.approvedBy == request.auth.uid;
+        && request.resource.data.approvedBy == request.auth.uid
+        && get(/databases/$(database)/documents/publicApplications/$(emailKey)).data.status == 'approving'
+        && get(/databases/$(database)/documents/publicApplications/$(emailKey)).data.reviewedBy == request.auth.uid
+        && request.resource.data.golferId == get(/databases/$(database)/documents/publicApplications/$(emailKey)).data.golferId;
       allow delete: if reviewer()
         || (verifiedEmail() && myEmailKey() == emailKey
             && exists(/databases/$(database)/documents/associations/$(publicId())/members/$(request.auth.uid)));

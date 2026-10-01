@@ -76,6 +76,12 @@ ts_write(){ local tok="$1" path="$2" f="$3" ts="${4:-}" body; mapfile -t H < <(a
   body="$(jq -nc --arg n "${DB}/${path}" --argjson f "$(fields "${f}")" --arg ts "${ts}" \
     '{writes:[({update:{name:$n,fields:$f}} + (if $ts == "" then {} else {updateTransforms:[{fieldPath:$ts,setToServerValue:"REQUEST_TIME"}]} end))]}')"
   curl -g -sS -o /dev/null -w '%{http_code}' "${H[@]}" -H 'Content-Type: application/json' --data-binary "${body}" "${FS}/${DB}:commit"; }
+# ts_update TOKEN PATH FIELDS-JSON TIMESTAMP-FIELD → HTTP status. Changes only the
+# given fields, plus the timestamp field set to the server's time.
+ts_update(){ local tok="$1" path="$2" f="$3" ts="$4" body; mapfile -t H < <(auth_args "${tok}")
+  body="$(jq -nc --arg n "${DB}/${path}" --argjson f "$(fields "${f}")" --arg ts "${ts}" \
+    '{writes:[{update:{name:$n,fields:$f},updateMask:{fieldPaths:($f|keys)},updateTransforms:[{fieldPath:$ts,setToServerValue:"REQUEST_TIME"}],currentDocument:{exists:true}}]}')"
+  curl -g -sS -o /dev/null -w '%{http_code}' "${H[@]}" -H 'Content-Type: application/json' --data-binary "${body}" "${FS}/${DB}:commit"; }
 get_any(){ mapfile -t H < <(auth_args "$1"); curl -g -sS -o /dev/null -w '%{http_code}' "${H[@]}" "${FS}/${DB}/$2"; }
 # token_claim TOKEN CLAIM → the claim's value from the ID token
 token_claim(){ python3 - "$1" "$2" <<'PY'
@@ -140,14 +146,28 @@ allowed "PUB1 a reviewer lists applications"                                  qu
 allowed "PUB1 the owner lists applications"                                   query_as "${TW}" "" publicApplications false
 refused "PUB1 an outsider cannot approve it"                                  write_as "${TX}" "publicApplications/${APP}" "{\"status\":\"approved\",\"reviewedBy\":\"${X}\"}"
 refused "PUB1 a reviewer cannot change the applicant's name"                  write_as "${TR}" "publicApplications/${APP}" "{\"fullName\":\"Changed\",\"status\":\"approved\",\"reviewedBy\":\"${R}\"}"
-allowed "PUB1 a reviewer marks it approved"                                   write_as "${TR}" "publicApplications/${APP}" "{\"status\":\"approved\",\"reviewedBy\":\"${R}\",\"golferId\":\"gP\"}"
-allowed "PUB1 a reviewer deletes a rejected application"                      delete_as "${TR}" "publicApplications/mixed@example.com"
+refused "PUB1 approving without claiming first is refused (go-live fix 2)"     write_as "${TR}" "publicApplications/${APP}" "{\"status\":\"approved\",\"reviewedBy\":\"${R}\",\"golferId\":\"gP\"}"
+refused "PUB1 a claim without the server's time is refused"                   write_as "${TR}" "publicApplications/${APP}" "{\"status\":\"approving\",\"reviewedBy\":\"${R}\",\"golferId\":\"gP\",\"golferName\":\"Pat Applicant\"}"
+allowed "PUB1 a reviewer claims the approval (pending → approving)"           ts_update "${TR}" "publicApplications/${APP}" "{\"status\":\"approving\",\"reviewedBy\":\"${R}\",\"golferId\":\"gP\",\"golferName\":\"Pat Applicant\"}" approvingAt
+refused "PUB1 a second reviewer cannot take a fresh claim (simultaneous approval)" ts_update "${TW}" "publicApplications/${APP}" "{\"status\":\"approving\",\"reviewedBy\":\"${W}\",\"golferId\":\"gZ\",\"golferName\":\"Someone\"}" approvingAt
+refused "PUB1 a second reviewer cannot finish someone else's claim"          write_as "${TW}" "publicApplications/${APP}" "{\"status\":\"approved\",\"reviewedBy\":\"${W}\"}"
+refused "PUB1 an application being approved cannot be rejected"              write_as "${TR}" "publicApplications/${APP}" "{\"status\":\"rejected\",\"reviewedBy\":\"${R}\"}"
+allowed "PUB1 the same reviewer may renew the claim (a retry)"                ts_update "${TR}" "publicApplications/${APP}" "{\"status\":\"approving\",\"reviewedBy\":\"${R}\"}" approvingAt
+ts_write - "publicApplications/rej@example.com" '{"fullName":"Rex Rejected","email":"rej@example.com","status":"pending"}' createdAt >/dev/null
+allowed "PUB1 a pending application can be rejected"                          write_as "${TR}" "publicApplications/rej@example.com" "{\"status\":\"rejected\",\"reviewedBy\":\"${R}\"}"
+refused "PUB1 a rejected application cannot be claimed for approval"          ts_update "${TR}" "publicApplications/rej@example.com" "{\"status\":\"approving\",\"reviewedBy\":\"${R}\",\"golferId\":\"gQ\",\"golferName\":\"Rex\"}" approvingAt
+allowed "PUB1 a reviewer deletes a rejected application"                      delete_as "${TR}" "publicApplications/rej@example.com"
 
 echo "== PUB2 approval: the reviewer makes the account; the set-password email confirms it"
 put "golfers/gP" '{"name":"Pat Applicant","linkedUid":null,"groups":["PUBLIC"]}'
 refused "PUB2 a PUBLIC member cannot write an approval"                       ts_write "${TM}" "publicApprovals/${APP}" "{\"golferId\":\"gP\",\"displayName\":\"Pat Applicant\",\"approvedBy\":\"${M}\"}" approvedAt
 refused "PUB2 a reviewer cannot sign an approval as somebody else"           ts_write "${TR}" "publicApprovals/${APP}" "{\"golferId\":\"gP\",\"displayName\":\"Pat Applicant\",\"approvedBy\":\"${W}\"}" approvedAt
-allowed "PUB2 a reviewer writes the approval"                                 ts_write "${TR}" "publicApprovals/${APP}" "{\"golferId\":\"gP\",\"displayName\":\"Pat Applicant\",\"approvedBy\":\"${R}\"}" approvedAt
+refused "PUB2 another reviewer cannot write the approval under R's claim"     ts_write "${TW}" "publicApprovals/${APP}" "{\"golferId\":\"gP\",\"displayName\":\"Pat Applicant\",\"approvedBy\":\"${W}\"}" approvedAt
+refused "PUB2 the approval must name the claimed golfer"                      ts_write "${TR}" "publicApprovals/${APP}" "{\"golferId\":\"gM\",\"displayName\":\"Mia\",\"approvedBy\":\"${R}\"}" approvedAt
+allowed "PUB2 the claiming reviewer writes the approval"                      ts_write "${TR}" "publicApprovals/${APP}" "{\"golferId\":\"gP\",\"displayName\":\"Pat Applicant\",\"approvedBy\":\"${R}\"}" approvedAt
+refused "PUB2 the approval cannot be written twice"                           ts_write "${TR}" "publicApprovals/${APP}" "{\"golferId\":\"gP\",\"displayName\":\"Pat Applicant\",\"approvedBy\":\"${R}\"}" approvedAt
+allowed "PUB2 the claiming reviewer finishes (approving → approved)"         write_as "${TR}" "publicApplications/${APP}" "{\"status\":\"approved\",\"reviewedBy\":\"${R}\"}"
+refused "PUB2 an approved application cannot be claimed again"                ts_update "${TR}" "publicApplications/${APP}" "{\"status\":\"approving\",\"reviewedBy\":\"${R}\",\"golferId\":\"gX\",\"golferName\":\"X\"}" approvingAt
 read -r PA TPA0 <<<"$(user_with "${APP}")"   # what the reviewer's app creates (random password)
 [[ "$(token_claim "${TPA0}" email_verified)" != "True" ]] && ok "PUB2 the new account starts with an unconfirmed email" \
   || bad "PUB2 the new account starts with an unconfirmed email"

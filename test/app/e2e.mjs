@@ -127,6 +127,13 @@ await put(`associations/G1/members/${W.uid}`, { uid: W.uid, role: "owner", displ
 await put(`associations/G1/members/${A1.uid}`, { uid: A1.uid, role: "admin", displayName: "Ada Admin" });
 await put(`associations/G1/members/${R1.uid}`, { uid: R1.uid, role: "member", displayName: "Rex Regular", golferId: "gR" });
 await put(`userGroups/${A1.uid}/groups/G1`, { assocId: "G1", name: "Saturday Group" });
+/* Go-live fix 1: the named invitation for Ivy, as the owner's app writes it. */
+await put("associations/G1/invitations/gI", { golferId: "gI", name: "Ivy Invitee", handicapIndex: null, groupName: "Saturday Group", role: "member", sentBy: W.uid });
+/* Go-live fix 2: a second reviewer of the public group. */
+const R2 = { email: "reviewer2@example.com", password: "reviewer2-pass-1" };
+R2.uid = await signUp(R2.email, R2.password);
+await put(`associations/PUBLIC/members/${R2.uid}`, { uid: R2.uid, role: "admin", displayName: "Rita Reviewer" });
+await put(`userGroups/${R2.uid}/groups/PUBLIC`, { assocId: "PUBLIC", name: "PUBLIC" });
 /* For Tidy (E14): one person recorded twice in G1, and one unused golfer. */
 await put("golfers/gD1", { name: "Dup Person", nameKey: "dup-person", linkedUid: null, groups: ["G1"], roundCount: 0 });
 await put("golfers/gD2", { name: "Dup Person", nameKey: "dup-person", linkedUid: null, groups: ["G1"], roundCount: 0 });
@@ -231,6 +238,41 @@ await check("E4b", "a name already in use is refused and the owner is asked to c
   await owner.locator('[data-close="1"]').first().click().catch(() => {});
 });
 
+/* E4c–E4d: go-live fix 2 — retry, and two reviewers at once */
+await check("E4c", "an approval interrupted part-way is finished by the same reviewer, with the same golfer", async () => {
+  await put("publicApplications/retry@example.com", { fullName: "Ray Retry", email: "retry@example.com", status: "approving",
+    reviewedBy: W.uid, golferId: "gRetry", golferName: "Ray Retry" });
+  await waitForText(owner, /approval not finished/);
+  await owner.locator('[data-act="review-application"][data-id="retry@example.com"]').click();
+  await owner.locator('[data-pc="approve"]').click();
+  await waitForText(owner, /Ray Retry is approved/);
+  const app = await getDoc("publicApplications/retry@example.com");
+  if (app.status !== "approved" || app.golferId !== "gRetry") throw new Error(JSON.stringify(app));
+  if ((await getDoc("golfers/gRetry")).name !== "Ray Retry") throw new Error("the claimed golfer was not used");
+  if ((await getDoc("publicApprovals/retry@example.com")).golferId !== "gRetry") throw new Error("approval names another golfer");
+  if (!(await accountByEmail("retry@example.com"))) throw new Error("no account");
+});
+const rita = await newPage();
+await rita.goto(APP, { waitUntil: "load" });
+await check("E4d", "two reviewers approving the same application at once: exactly one approval, one golfer, one account", async () => {
+  await waitForText(rita, /Sign in/);
+  await signIn(rita, R2.email, R2.password);
+  await waitForText(rita, /Admin/);
+  await tab(rita, "admin");
+  await put("publicApplications/both@example.com", { fullName: "Bo Both", email: "both@example.com", status: "pending" });
+  await waitForText(owner, /both@example\.com/);
+  await waitForText(rita, /both@example\.com/);
+  for (const p of [owner, rita]) await p.locator('[data-act="review-application"][data-id="both@example.com"]').click();
+  await Promise.all([owner, rita].map((p) => p.locator('[data-pc="approve"]').click()));
+  await Promise.all([owner, rita].map((p) => waitForText(p, /Bo Both is approved|already approved|Another reviewer is approving/)));
+  const app = await getDoc("publicApplications/both@example.com");
+  if (app.status !== "approved") throw new Error(`application is ${app.status}`);
+  const golfers = (await list("golfers")).filter((g) => g.name === "Bo Both");
+  if (golfers.length !== 1 || golfers[0].id !== app.golferId) throw new Error(`${golfers.length} golfer record(s) for Bo Both`);
+  if ((await getDoc("publicApprovals/both@example.com")).golferId !== app.golferId) throw new Error("approval names another golfer");
+  if (owner.errors.length || rita.errors.length) throw new Error([...owner.errors, ...rita.errors].join(" | "));
+});
+
 /* E5: the applicant chooses a password from the email and signs in */
 await check("E5", "the applicant chooses a password from the email, signs in and is in the PUBLIC group", async () => {
   await usePasswordEmail(APPLICANT.email, APPLICANT.password);
@@ -318,6 +360,12 @@ await check("E11", "a named private invitation: create an account, then join as 
   await ivy.fill('[name="password-again"]', "ivy-pass-1");
   await ivy.locator('[data-act="create-account"]').click();
   await waitForText(ivy, /Ivy Invitee/);
+  if (!/Saturday Group/i.test(await text(ivy))) throw new Error("the group name is not shown on the invitation");
+  const blocked = await ivy.evaluate(async () => {
+    const db = await import("/store.js");
+    return db.invitationFor("G1", "gJ").then((x) => x === null);
+  });
+  if (!blocked) throw new Error("an invitation record exists for a golfer never invited");
   await ivy.locator('[data-act="accept-named"]').click();
   const end = Date.now() + 20000;
   while (Date.now() < end && (await ivy.evaluate(async () => (await import("/store.js")).currentAssociation())) !== "G1") await ivy.waitForTimeout(300);
@@ -340,7 +388,13 @@ await check("E12", "an admin invites regular members only: no Admin choice on th
   await ada.locator('[data-invite-golfer="gJ"]').first().click();
   await waitForText(ada, /Invite Jay Unjoined/);
   if (await ada.locator('[name="invite-role"][value="admin"]').count()) throw new Error("the admin choice is offered to an admin");
-  await ada.locator('[data-close="1"]').first().click();
+  await ada.locator('[data-invite="send"]').click();
+  /* Go-live fix 1: sending writes the invitation record the invitee is greeted from. */
+  const end = Date.now() + 15000;
+  let inv = null;
+  while (Date.now() < end && !(inv = await getDoc("associations/G1/invitations/gJ"))) await ada.waitForTimeout(400);
+  if (!inv || inv.name !== "Jay Unjoined" || inv.role !== "member" || inv.groupName !== "Saturday Group") throw new Error(`invitation record: ${JSON.stringify(inv)}`);
+  await ada.locator('[data-close="1"]').first().click().catch(() => {});
   if (/Start another group/.test(await switcherText(ada))) throw new Error("an admin is offered Start another group");
 });
 await check("E13", "an admin removes a regular member of their group, and has no button for the owner", async () => {

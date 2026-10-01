@@ -8,6 +8,14 @@
  *   node golive.mjs apply      makes the changes below, saving what it replaces first
  *   node golive.mjs verify     read only: checks every change is in place
  *   node golive.mjs rollback   puts back what "apply" replaced (the admin codes)
+ *   node golive.mjs status     read only: the migration marker (how far go-live got)
+ *   node golive.mjs mark STATE records a stage in the marker (used by go2.txt)
+ *
+ * The migration marker (go-live fix 3) is the document migrations/v2, which
+ * no app can read or write: its stage (data-started, data-failed, data-done,
+ * rules-published, verified, rolled-back), when, and a copy of every admin
+ * code before it moved — so a rollback works even if this computer's copy is
+ * lost. Every step can be run again: it only writes what is still missing.
  *
  * What "apply" does, every step safe to repeat:
  *   1. groupCreators/{owner uid}: the owner is the only account that may create groups.
@@ -19,6 +27,8 @@
  *   5. Each group's directory: name and handicap index of every rostered golfer.
  *   6. Each membership records its golfer (golferId) when the golfer is linked.
  *   7. Each game lists who played (participantGolferIds) and its result sheet.
+ *   8. Each invitation already sent to a golfer who has not joined gets its
+ *      invitation record (go-live fix 1), so the link still greets them.
  * Rounds, golfers' names and handicaps, and memberships are never deleted.
  *
  * Settings (environment):
@@ -49,7 +59,10 @@ const PUBLIC_NAME = "Public group";
 const die = (msg) => { console.error(`ERROR: ${msg}`); process.exit(1); };
 if (!TOKEN) die("ACCESS_TOKEN is missing.");
 if (!OWNER_EMAIL) die("OWNER_EMAIL is missing.");
-if (!["count", "plan", "apply", "verify", "rollback"].includes(MODE)) die(`unknown mode ${MODE}`);
+if (!["count", "plan", "apply", "verify", "rollback", "status", "mark"].includes(MODE)) die(`unknown mode ${MODE}`);
+/* Tests only: write in small batches and fail on purpose after N of them. */
+const BATCH = Number(process.env.BATCH_SIZE || 400);
+const FAIL_AFTER = process.env.FAIL_AFTER_COMMITS ? Number(process.env.FAIL_AFTER_COMMITS) : -1;
 const model = await import(pathToFileURL(MODEL).href);
 
 const headers = { Authorization: `Bearer ${TOKEN}`, "Content-Type": "application/json" };
@@ -101,8 +114,17 @@ async function getOne(p) {
   try { const d = await call("GET", `${FS}/${DB}/${p}`); return { id: d.name.split("/").pop(), ...fromFields(d.fields) }; }
   catch (e) { if (/HTTP 404/.test(e.message)) return null; throw e; }
 }
+let commits = 0;
 async function commit(writes) {
-  for (let i = 0; i < writes.length; i += 400) await call("POST", `${FS}/${DB}:commit`, { writes: writes.slice(i, i + 400) });
+  for (let i = 0; i < writes.length; i += BATCH) {
+    if (FAIL_AFTER >= 0 && commits >= FAIL_AFTER) throw new Error(`stopped on purpose after ${commits} batch(es) (test)`);
+    await call("POST", `${FS}/${DB}:commit`, { writes: writes.slice(i, i + BATCH) });
+    commits++;
+  }
+}
+const MARKER = "migrations/v2";
+async function mark(state, extra = {}) {
+  await call("POST", `${FS}/${DB}:commit`, { writes: [setFields(MARKER, { state, at: new Date().toISOString(), ...extra })] });
 }
 /* Merge the given fields into a document (it may or may not exist). */
 const setFields = (p, data) => ({ update: { name: docName(p), fields: toFields(data) }, updateMask: { fieldPaths: Object.keys(data) } });
@@ -152,6 +174,7 @@ async function readAll() {
     g.rounds = await listDocs(`associations/${g.id}/rounds`);
     g.directory = await listDocs(`associations/${g.id}/directory`);
     g.secret = await getOne(`associations/${g.id}/secrets/admin`);
+    g.invitations = (await listDocs(`associations/${g.id}/invitations`)).map((x) => x.id);
   }
   const golfers = new Map((await listDocs("golfers")).map((x) => [x.id, x]));
   const creator = await getOne(`groupCreators/${owner.localId}`);
@@ -162,7 +185,7 @@ async function readAll() {
 function makePlan({ owner, groups, golfers, creator }) {
   const writes = [];
   const notes = [];
-  const count = { creator: 0, public: 0, secrets: 0, golferGroups: 0, directory: 0, memberGolfer: 0, games: 0 };
+  const count = { creator: 0, public: 0, secrets: 0, golferGroups: 0, directory: 0, memberGolfer: 0, games: 0, invitations: 0 };
   const now = Date.now();
 
   if (!creator) { writes.push(setFields(`groupCreators/${owner.localId}`, { email: owner.email || OWNER_EMAIL, setAt: now })); count.creator = 1; }
@@ -238,6 +261,18 @@ function makePlan({ owner, groups, golfers, creator }) {
         participantGolferIds: [...new Set(played.map((r) => r.golferId).filter(Boolean))], results }));
       count.games++;
     }
+
+    /* Invitations already sent and not yet used: the greeting record. */
+    for (const golfer of rostered) {
+      if (golfer.linkedUid || !golfer.invitedAt || g.invitations.includes(golfer.id) || g.id === PUBLIC_ID) continue;
+      const index = model.effectiveIndex(golfer).index;
+      writes.push(create(`associations/${g.id}/invitations/${golfer.id}`, {
+        golferId: golfer.id, name: String(golfer.name || "").slice(0, 120), handicapIndex: index == null ? null : index,
+        groupName: String(g.name || "").slice(0, 120), role: golfer.invitedAs === "admin" ? "admin" : "member",
+        sentBy: g.ownerUid, sentAt: { __timestamp: new Date(Number(golfer.invitedAt) || now).toISOString() } }));
+      g.invitations.push(golfer.id);
+      count.invitations++;
+    }
   }
   return { writes, notes, count };
 }
@@ -251,10 +286,23 @@ function printPlan({ count, notes }) {
   console.log(`  directory entries written              : ${count.directory}`);
   console.log(`  memberships given their golfer         : ${count.memberGolfer}`);
   console.log(`  games given players and result sheet   : ${count.games}`);
+  console.log(`  invitation records for unused links    : ${count.invitations}`);
   for (const n of notes) console.log(`  NOTE: ${n}`);
 }
 
 /* ---- modes ---- */
+if (MODE === "status") {
+  const m = await getOne(MARKER);
+  console.log(m ? `Migration marker: ${m.state} (${m.at})${m.error ? ` — ${m.error}` : ""}` : "Migration marker: none (go-live has not started).");
+  process.exit(0);
+}
+if (MODE === "mark") {
+  const state = process.argv[3];
+  if (!["rules-published", "verified", "rolled-back", "failed"].includes(state)) die(`unknown stage ${state}`);
+  await mark(state, process.argv[4] ? { error: String(process.argv[4]).slice(0, 300) } : {});
+  console.log(`Marker: ${state}.`);
+  process.exit(0);
+}
 const data = await readAll();
 const { owner, groups } = data;
 console.log(`Owner: ${owner.email} — owns ${groups.filter((g) => g.ownerUid === owner.localId).length} of ${groups.length} group(s).`);
@@ -297,14 +345,29 @@ if (MODE === "plan" || MODE === "apply") {
      already exists, so a second run never overwrites the original. */
   fs.mkdirSync(STATE, { recursive: true });
   const before = path.join(STATE, "before.json");
+  const codes = groups.filter((g) => g.adminCode).map((g) => ({ id: g.id, adminCode: g.adminCode }));
   if (!fs.existsSync(before)) {
-    fs.writeFileSync(before, JSON.stringify({ at: new Date().toISOString(), owner: owner.localId,
-      adminCodes: groups.filter((g) => g.adminCode).map((g) => ({ id: g.id, adminCode: g.adminCode })) }, null, 1));
+    fs.writeFileSync(before, JSON.stringify({ at: new Date().toISOString(), owner: owner.localId, adminCodes: codes }, null, 1));
   }
-  await commit(plan.writes);
+  /* The marker, with the admin codes, BEFORE the first change. On a re-run
+     the codes already saved are kept and any still on a group are added. */
+  const old = await getOne(MARKER);
+  const saved = new Map(((old && old.adminCodes) || []).map((x) => [x.id, x]));
+  for (const c of codes) if (!saved.has(c.id)) saved.set(c.id, c);
+  await mark("data-started", { adminCodes: [...saved.values()], error: null });
+  try {
+    await commit(plan.writes);
+  } catch (e) {
+    try { await mark("data-failed", { error: String(e.message || e).slice(0, 300) }); } catch {}
+    die(`the data step stopped part-way: ${e.message || e}. Nothing is lost; run it again to continue, or roll back.`);
+  }
   console.log(`\nApplied ${plan.writes.length} change(s).`);
   const again = makePlan(await readAll());
-  if (again.writes.length) die(`${again.writes.length} change(s) did not take. Run it again, or send a screenshot to Claude.`);
+  if (again.writes.length) {
+    try { await mark("data-failed", { error: `${again.writes.length} change(s) did not take` }); } catch {}
+    die(`${again.writes.length} change(s) did not take. Run it again, or send a screenshot to Claude.`);
+  }
+  await mark("data-done");
   console.log("OK: everything is in place.");
   process.exit(0);
 }
@@ -317,10 +380,15 @@ if (MODE === "verify") {
 }
 
 if (MODE === "rollback") {
+  /* The admin codes from the marker (kept in the database), else this
+     computer's copy. */
+  const m = await getOne(MARKER);
   const before = path.join(STATE, "before.json");
-  if (!fs.existsSync(before)) die("no saved copy to go back to.");
-  const saved = JSON.parse(fs.readFileSync(before, "utf8"));
-  await commit(saved.adminCodes.map((x) => setFields(`associations/${x.id}`, { adminCode: x.adminCode })));
-  console.log(`OK: ${saved.adminCodes.length} admin code(s) put back on their groups. The other additions are harmless under the old rules and are left in place.`);
+  const codes = (m && Array.isArray(m.adminCodes) && m.adminCodes.length) ? m.adminCodes
+    : fs.existsSync(before) ? JSON.parse(fs.readFileSync(before, "utf8")).adminCodes : null;
+  if (!codes) die("no saved copy to go back to.");
+  await commit(codes.map((x) => setFields(`associations/${x.id}`, { adminCode: x.adminCode })));
+  await mark("rolled-back");
+  console.log(`OK: ${codes.length} admin code(s) put back on their groups. The other additions are harmless under the old rules and are left in place.`);
   process.exit(0);
 }

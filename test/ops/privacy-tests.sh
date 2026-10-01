@@ -116,7 +116,21 @@ allowed "PRIV4 A reads A's own golfer record"                                get
 refused "PRIV4 A cannot read B's golfer record"                              get_as "${TA}" "golfers/gB"
 allowed "PRIV4 the G1 admin reads B's golfer record (B plays in G1)"         get_as "${TAD}" "golfers/gB"
 refused "PRIV4 the G2 owner cannot read B's golfer record"                   get_as "${TX}" "golfers/gB"
-allowed "PRIV4 an unclaimed golfer can be read by id (invitation greeting)"  get_as "${TX}" "golfers/gU"
+refused "PRIV4 an unclaimed golfer cannot be read by an outsider (go-live fix 1)" get_as "${TX}" "golfers/gU"
+allowed "PRIV4 the G1 admin can still read the unclaimed golfer of G1"      get_as "${TAD}" "golfers/gU"
+
+echo "== PRIV10 invitation records (go-live fix 1): the greeting, nothing more"
+allowed "PRIV10 the G1 admin writes a member invitation record"             write_as "${TAD}" "associations/G1/invitations/gU" "{\"golferId\":\"gU\",\"name\":\"Una Unclaimed\",\"groupName\":\"Group one\",\"role\":\"member\",\"sentBy\":\"${AD}\"}"
+refused "PRIV10 an admin cannot write an admin invitation record"           write_as "${TAD}" "associations/G1/invitations/gU" "{\"golferId\":\"gU\",\"name\":\"Una Unclaimed\",\"role\":\"admin\",\"sentBy\":\"${AD}\"}"
+allowed "PRIV10 the owner writes an admin invitation record"                write_as "${TO}" "associations/G1/invitations/gU" "{\"golferId\":\"gU\",\"name\":\"Una Unclaimed\",\"role\":\"admin\",\"sentBy\":\"${O}\"}"
+refused "PRIV10 a regular member cannot write an invitation record"         write_as "${TA}" "associations/G1/invitations/gU" "{\"golferId\":\"gU\",\"name\":\"X\",\"role\":\"member\",\"sentBy\":\"${A}\"}"
+refused "PRIV10 no invitation record for a golfer not on the roster"        write_as "${TAD}" "associations/G1/invitations/gX" "{\"golferId\":\"gX\",\"name\":\"Xavier\",\"role\":\"member\",\"sentBy\":\"${AD}\"}"
+refused "PRIV10 no private fields on an invitation record"                  write_as "${TAD}" "associations/G1/invitations/gU" "{\"golferId\":\"gU\",\"name\":\"Una\",\"role\":\"member\",\"sentBy\":\"${AD}\",\"linkedUid\":\"x\"}"
+refused "PRIV10 an invitation record cannot be signed as somebody else"     write_as "${TAD}" "associations/G1/invitations/gU" "{\"golferId\":\"gU\",\"name\":\"Una\",\"role\":\"member\",\"sentBy\":\"${O}\"}"
+allowed "PRIV10 somebody holding the link reads the record by its id"       get_as "${TX}" "associations/G1/invitations/gU"
+refused "PRIV10 nobody outside the group can list invitation records"       query_as "${TX}" "associations/G1" invitations false
+refused "PRIV10 a regular member cannot list invitation records"            query_as "${TA}" "associations/G1" invitations false
+allowed "PRIV10 the G1 admin lists invitation records"                      query_as "${TAD}" "associations/G1" invitations false
 refused "PRIV4 nobody can list the golfers collection (member)"             query_as "${TA}" "" golfers false
 refused "PRIV4 nobody can list the golfers collection (admin)"              query_as "${TAD}" "" golfers false
 
