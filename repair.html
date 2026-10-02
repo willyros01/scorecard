@@ -7,6 +7,10 @@
 <link rel="stylesheet" href="./styles.css">
 <script src="./version.js"></script>
 <style>
+  /* beta.7: the shared app stylesheet locks the page (only the app's middle
+     scrolls); a tool page scrolls as an ordinary page. */
+  html, body { height: auto !important; }
+  body { display: block !important; overflow: auto !important; }
   body { padding: 24px 18px 60px; font-size: 20px; }
   .box { max-width: 640px; margin: 0 auto; }
   h1 { font-family: Georgia, serif; font-weight: 400; font-size: 32px; margin: 0 0 10px; }
@@ -20,6 +24,7 @@
 </head>
 <body>
 <div class="box">
+  <p class="hint" style="margin:0 0 14px"><a href="./" id="backTop" style="font-weight:700;text-decoration:none">&lsaquo; Back to the app</a></p>
   <h1>Repair your group list</h1>
   <p class="lead">Writes the groups you own onto your account, so every device signed in as you can find them. Nothing is created, changed or deleted.</p>
 
@@ -32,6 +37,8 @@
 </div>
 
 <script type="module">
+import { connectTool, fixBackLinks, NOT_SIGNED_IN } from "./tool-firebase.js";
+fixBackLinks();
 /* A standalone page, because the app itself only wrote this list when a group
    was created or joined — so a group made days ago never got recorded, and a
    second device could not find it. This fills the gap in one tap. */
@@ -48,31 +55,16 @@ const say = (text, bad) => {
   logEl.appendChild(line);
 };
 
-const SDK = "https://www.gstatic.com/firebasejs/10.12.0";
 let db, mod, uid, email = "", groups = [];
 
 async function connect() {
-  const config = await import("./firebase-config.js");
-  if (!config.isConfigured) { stateEl.textContent = "No Firebase settings found."; return false; }
-
-  const [app, auth, store] = await Promise.all([
-    import(`${SDK}/firebase-app.js`),
-    import(`${SDK}/firebase-auth.js`),
-    import(`${SDK}/firebase-firestore.js`),
-  ]);
-  const instance = app.initializeApp(config.firebaseConfig);
-  const authority = auth.getAuth(instance);
-  db = store.getFirestore(instance);
-  mod = store;
-
-  return new Promise((resolve) => {
-    auth.onAuthStateChanged(authority, async (user) => {
-      if (!user) { try { await auth.signInAnonymously(authority); } catch { resolve(false); } return; }
-      uid = user.uid;
-      email = user.email || "";
-      resolve(true);
-    });
-  });
+  const c = await connectTool();
+  db = c.db;
+  mod = c.store;
+  if (!c.user) return false;
+  uid = c.user.uid;
+  email = c.user.email || "";
+  return true;
 }
 
 async function findGroups() {
@@ -147,7 +139,7 @@ async function repair() {
 
 (async function run() {
   try {
-    if (!(await connect())) { stateEl.textContent = "Could not sign in to Firebase."; return; }
+    if (!(await connect())) { stateEl.textContent = NOT_SIGNED_IN; return; }
     groups = await findGroups();
     draw();
   } catch (e) {

@@ -7,6 +7,10 @@
 <link rel="stylesheet" href="./styles.css">
 <script src="./version.js"></script>
 <style>
+  /* beta.7: the shared app stylesheet locks the page (only the app's middle
+     scrolls); a tool page scrolls as an ordinary page. */
+  html, body { height: auto !important; }
+  body { display: block !important; overflow: auto !important; }
   body { padding: 24px 18px 60px; font-size: 20px; }
   .box { max-width: 700px; margin: 0 auto; }
   h1 { font-family: Georgia, serif; font-weight: 400; font-size: 32px; margin: 0 0 10px; }
@@ -46,17 +50,14 @@
 </div>
 
 <script type="module">
+import { connectTool, fixBackLinks, NOT_SIGNED_IN } from "./tool-firebase.js";
+fixBackLinks();
 /* A standalone page, run once, then ignored.
  *
  * Everything here is a one-time correction, which is exactly the kind of work
  * that should never become an app feature: it would add screens nobody needs
  * after the first run, and cost a release every time something else turns up.
  */
-
-/* Back to the app keeps the test-only ?emulators=1, so a test lands where it started. */
-for (const a of document.querySelectorAll('a[href="./"]')) {
-  if (new URLSearchParams(location.search).has("emulators")) a.href = "./?emulators=1";
-}
 
 const stateEl = document.getElementById("state");
 let signedOut = false;   /* set by connect() when nobody is signed in */
@@ -72,10 +73,6 @@ const say = (text, bad) => {
 };
 const clean = (s) => String(s == null ? "" : s).replace(/[<>&]/g, "");
 
-/* beta.5: the app's own copy of Firebase (vendor/), not one loaded from the
-   internet — so this page can be packaged inside the iPhone app, where Apple
-   does not allow downloaded code, and opens there already signed in. */
-const FIREBASE_BUNDLE = "./vendor/firebase/firebase-10.12.0.js";
 let db, mod, uid, email = "";
 let findings = [];
 let plan = null;
@@ -95,37 +92,13 @@ function indexFrom(window) {
 }
 
 async function connect() {
-  const config = await import("./firebase-config.js");
-  if (!config.isConfigured) { stateEl.textContent = "No Firebase settings found."; return false; }
-
-  const { app, auth, store } = await import(FIREBASE_BUNDLE);
-  /* Automated tests only: on this machine's own address with ?emulators=1,
-     the page talks to the Firebase emulators, exactly as the app does. */
-  const emulators = ["localhost", "127.0.0.1"].includes(location.hostname)
-    && new URLSearchParams(location.search).has("emulators");
-  const instance = app.initializeApp(emulators
-    ? { apiKey: "fake-api-key", projectId: "demo-scorecard", authDomain: "localhost", appId: "demo" }
-    : config.firebaseConfig);
-  /* The same sign-in store the app uses (IndexedDB), so whoever is signed in
-     to the app is signed in here. getAuth can hang inside the app. */
-  const authority = auth.initializeAuth(instance, { persistence: [auth.indexedDBLocalPersistence] });
-  db = store.getFirestore(instance);
-  if (emulators) {
-    auth.connectAuthEmulator(authority, "http://127.0.0.1:9099", { disableWarnings: true });
-    store.connectFirestoreEmulator(db, "127.0.0.1", 8080);
-  }
-  mod = store;
-
-  return new Promise((resolve) => {
-    auth.onAuthStateChanged(authority, async (user) => {
-      /* Version 2.0: no anonymous sign-in. This tool uses the sign-in the app
-         left in this browser; without one there is nothing it may read. */
-      if (!user || user.isAnonymous) { signedOut = true; resolve(false); return; }
-      uid = user.uid;
-      email = user.email || "";
-      resolve(true);
-    });
-  });
+  const c = await connectTool();
+  db = c.db;
+  mod = c.store;
+  if (!c.user) { signedOut = true; return false; }
+  uid = c.user.uid;
+  email = c.user.email || "";
+  return true;
 }
 
 /* Whether the name claim golferNames/{key} belongs to this golfer. */
@@ -583,7 +556,7 @@ async function repair() {
 
 (async function run() {
   try {
-    if (!(await connect())) { stateEl.textContent = signedOut ? "Not signed in. Open The Scorecard in this browser, sign in with your email and password, then open this page again." : "Could not sign in to Firebase."; return; }
+    if (!(await connect())) { stateEl.textContent = signedOut ? NOT_SIGNED_IN : "Could not sign in to Firebase."; return; }
     stateEl.textContent = "Checking your data…";
     findings = await inspect();
     draw();

@@ -6,6 +6,10 @@ version.js
 firebase-config.js
 quick-start.html
 tidy.html
+rebuild.html
+cleanup.html
+repair.html
+tool-firebase.js
 icon.svg
 app.js
 store.js
