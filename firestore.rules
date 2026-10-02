@@ -1,6 +1,14 @@
 rules_version = '2';
 
-/* LAST CHANGED FOR VERSION 2.0, PHASE D + GO-LIVE FIXES (Oct 1), PLUS PRIVATE GROUP REQUESTS (beta.3), PLUS COCKPIT AND AUTO APPLICATIONS (beta.4)
+/* LAST CHANGED FOR VERSION 2.0, PHASE D + GO-LIVE FIXES (Oct 1), PLUS PRIVATE GROUP REQUESTS (beta.3), PLUS COCKPIT AND AUTO APPLICATIONS (beta.4), PLUS THE DELETION LOCK (beta.9)
+ *
+ * beta.9 (Oct 2, approved by Willy): an account that has asked to be deleted
+ * (accountDeletions/{uid} exists) is LOCKED. It is no longer a member of any
+ * group in the eyes of these rules (no admin rights, no rounds, no games), and
+ * it cannot join, claim, add, rename or register anything. It can still do
+ * exactly what finishing its own deletion needs: read its own records, leave
+ * its groups, remove its claims, pointers, blocks and email entry, and unlink
+ * its golfer. It cannot withdraw the request once anything has been removed.
  *
  * beta.4 (Oct 1, approved by Willy): the cockpit and the applications switch.
  *   - The group creator may READ every group, its memberships and its rounds
@@ -154,8 +162,15 @@ service cloud.firestore {
       return /databases/$(database)/documents/associations/$(assocId)/members/$(request.auth.uid);
     }
 
+    /* beta.9: this account has asked to be deleted. */
+    function deleting() {
+      return request.auth != null
+        && exists(/databases/$(database)/documents/accountDeletions/$(request.auth.uid));
+    }
+
+    /* beta.9: a deleting account is a member of nothing (see deleting()). */
     function isMember(assocId) {
-      return signedIn() && exists(memberPath(assocId));
+      return signedIn() && exists(memberPath(assocId)) && !deleting();
     }
 
     function role(assocId) {
@@ -395,7 +410,7 @@ service cloud.firestore {
          * The owner case was missing before, which meant creating a group
          * always failed at this step and left the group behind with nobody in
          * it. */
-        allow create: if signedIn()
+        allow create: if signedIn() && !deleting()
           && memberUid == request.auth.uid
           && (
             (request.resource.data.role == 'owner'
@@ -430,11 +445,11 @@ service cloud.firestore {
            really linked to their account. Games use it to tell who played. */
         allow update: if (isOwner(assocId)
             && memberUid != association(assocId).ownerUid)
-          || (signedIn() && memberUid == request.auth.uid
+          || (signedIn() && !deleting() && memberUid == request.auth.uid
               && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['golferId'])
               && myGolfer(request.resource.data.golferId))
           /* beta.4: "last seen" on your own membership, the server's time. */
-          || (signedIn() && memberUid == request.auth.uid
+          || (signedIn() && !deleting() && memberUid == request.auth.uid
               && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastSeenAt'])
               && request.resource.data.lastSeenAt == request.time);
 
@@ -491,16 +506,19 @@ service cloud.firestore {
        * able to discover it is already taken before they try. */
       match /invites/{golferId} {
         allow get: if signedIn();
-        allow list: if isMember(assocId);
+        /* beta.9: also your OWN claims (a query where acceptedBy is you), which
+           Delete my account needs once the account is locked. */
+        allow list: if isMember(assocId)
+          || (signedIn() && resource.data.acceptedBy == request.auth.uid);
 
         /* Create only if nobody has claimed it, and only for yourself. */
-        allow create: if signedIn()
+        allow create: if signedIn() && !deleting()
           && request.resource.data.acceptedBy == request.auth.uid;
 
         /* Update only by the account that already holds it — this is what lets
            a guest re-use their own link on a second device, and what stops
            anybody else using it at all. */
-        allow update: if signedIn()
+        allow update: if signedIn() && !deleting()
           && resource.data.acceptedBy == request.auth.uid
           && request.resource.data.acceptedBy == request.auth.uid
           && request.resource.data.role != 'admin';
@@ -651,7 +669,7 @@ service cloud.firestore {
 
       /* Creating is an everyday act — adding a person to a roster. The name
          index below stops duplicates. */
-      allow create: if signedIn();
+      allow create: if signedIn() && !deleting();
 
       /* Updating WAS open to any signed-in account anywhere, which meant
          somebody in an unrelated group — or an anonymous session belonging to
@@ -661,7 +679,13 @@ service cloud.firestore {
            2. you are claiming an unlinked golfer as yourself, which is how
               accepting a named invitation works;
            3. you administer a group this golfer plays in, and you say which. */
-      allow update: if signedIn() && (
+      /* beta.9: a deleting account may only UNLINK its own golfer (the last
+         step of its deletion), changing nothing else. */
+      allow update: if signedIn() && deleting()
+        && resource.data.linkedUid == request.auth.uid
+        && request.resource.data.linkedUid == null
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['linkedUid']);
+      allow update: if signedIn() && !deleting() && (
         resource.data.linkedUid == request.auth.uid
         || (resource.data.linkedUid == null
             && request.resource.data.linkedUid == request.auth.uid)
@@ -704,8 +728,8 @@ service cloud.firestore {
          for that golfer's own account or an admin of a group it plays in. */
       allow get: if signedIn();
       allow list: if false;
-      allow create: if signedIn() && request.resource.data.golferId is string;
-      allow update, delete: if signedIn() && (
+      allow create: if signedIn() && !deleting() && request.resource.data.golferId is string;
+      allow update, delete: if signedIn() && !deleting() && (
         myGolfer(resource.data.golferId) || adminOfGolfer(resource.data.golferId));
     }
 
@@ -764,7 +788,7 @@ service cloud.firestore {
       /* Deleting your own entry is part of Delete my account. Adding one
          needs a real account. */
       allow delete: if authed() && userId == request.auth.uid;
-      allow create, update: if signedIn() && userId == request.auth.uid;
+      allow create, update: if signedIn() && !deleting() && userId == request.auth.uid;
     }
 
     /* ---------------- Phase C: the PUBLIC group ---------------- */
@@ -940,7 +964,7 @@ service cloud.firestore {
     match /accountEmails/{emailKey} {
       allow get: if true;
       allow list: if false;
-      allow create: if signedIn() && myEmailKey() == emailKey
+      allow create: if signedIn() && !deleting() && myEmailKey() == emailKey
         && request.resource.data.keys().hasOnly(['at'])
         && request.resource.data.at == request.time;
       allow delete: if signedIn() && myEmailKey() == emailKey;
@@ -969,7 +993,7 @@ service cloud.firestore {
        The app hides them; nobody else can see the list. */
     match /userBlocks/{userId}/golfers/{golferId} {
       allow read, delete: if signedIn() && userId == request.auth.uid;
-      allow create, update: if signedIn() && userId == request.auth.uid
+      allow create, update: if signedIn() && !deleting() && userId == request.auth.uid
         && request.resource.data.keys().hasOnly(['name', 'blockedAt'])
         && request.resource.data.get('name', '') is string
         && request.resource.data.get('name', '').size() <= 120;
@@ -986,7 +1010,19 @@ service cloud.firestore {
 
     /* The daily admin job treats the document contents as untrusted. */
     match /accountDeletions/{userId} {
-      allow read, write: if authed() && userId == request.auth.uid;
+      allow read: if authed() && userId == request.auth.uid;
+      /* beta.9: a request starts as "requested". It may be withdrawn (deleted)
+         only before anything has been removed — "requested" (a wrong
+         password) or "reauthenticated" (the person turned out to own a group)
+         — and never moved back to those stages afterwards. So once removal has
+         begun, the lock stays until the deletion is finished. */
+      allow create: if authed() && userId == request.auth.uid
+        && request.resource.data.stage == 'requested';
+      allow update: if authed() && userId == request.auth.uid
+        && (!(request.resource.data.get('stage', '') in ['requested', 'reauthenticated'])
+            || resource.data.get('stage', '') in ['requested', 'reauthenticated']);
+      allow delete: if authed() && userId == request.auth.uid
+        && resource.data.get('stage', '') in ['requested', 'reauthenticated'];
     }
 
     /* ---------------- join codes ---------------- */
@@ -1027,14 +1063,14 @@ service cloud.firestore {
          one entry for Royal Ontario, read by every group, entered once. */
       allow read: if signedIn();
 
-      allow create: if signedIn()
+      allow create: if signedIn() && !deleting()
         && request.resource.data.createdBy == request.auth.uid;
 
       /* Only whoever added a course may change it. A shared library invites
          well-meaning edits that break other groups' data, so version 3 should
          replace this with a curated review step. Until then, ratings that are
          wrong get a new course entry rather than an edit war. */
-      allow update: if signedIn() && resource.data.createdBy == request.auth.uid;
+      allow update: if signedIn() && !deleting() && resource.data.createdBy == request.auth.uid;
 
       allow delete: if false;   /* rounds reference courses; never orphan them */
     }

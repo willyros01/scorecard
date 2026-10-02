@@ -161,6 +161,11 @@ NAME="$(curl -g -sS --fail "${ADMIN[@]}" "${FS}/${DB}/golfers/gA" | jq -r '.fiel
 
 echo "== DEL1 part 3: another account still cannot touch A's record; A can withdraw it (wrong-password path)"
 refused "DEL1 a fellow member cannot delete A's deletion record"               "${TB}" "$(w_delete "accountDeletions/${A}")"
+# beta.9: once anything has been removed the request cannot be withdrawn (the
+# account stays locked until the job finishes); only a request that has just
+# been recorded (the wrong-password path) can be.
+refused "DEL1 beta.9: once removal has begun, A cannot withdraw its request"  "${TA}" "$(w_delete "accountDeletions/${A}")"
+put "accountDeletions/${A}" '{"stage":"requested"}'
 allowed "DEL1 A can delete its own record (D4, the wrong-password withdrawal)" "${TA}" "$(w_delete "accountDeletions/${A}")"
 
 echo

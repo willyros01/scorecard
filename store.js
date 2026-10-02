@@ -2167,6 +2167,18 @@ export async function acceptNamedInvite({ associationId, code, golferId, role })
     };
   }
 
+  /* beta.9 (Willy, Oct 2): ALREADY A MEMBER of this group? Then the
+     membership is left exactly as it is (role included) and only the rest is
+     written. Writing it again was refused by the rules — a membership is
+     created once, never overwritten — and that refusal was reported as "the
+     rules are older than this version". It happens whenever somebody comes
+     back through an invitation: a second device, a deletion that never
+     finished, an admin who sends the link again. */
+  const existing = await loadMembership(associationId);
+  if (existing && existing.golferId && existing.golferId !== golferId) {
+    return { ok: false, reason: "OTHER_GOLFER" };
+  }
+
   const member = model.buildMember({
     uid,
     displayName: (await invitationFor(associationId, golferId) || {}).name || "",
@@ -2187,19 +2199,33 @@ export async function acceptNamedInvite({ associationId, code, golferId, role })
      it. So the membership is written first and allowed to land, and only then
      does everything that depends on it go together. */
   const { setDoc } = fb.mod.store;
+  /* Each refusal names its step, so the screen can say what to do. */
+  const refused = (e, step) => {
+    const raw = String((e && (e.code || e.message)) || "");
+    if (!raw.includes("permission")) return e;
+    const err = new Error(`join/${step}-refused`);
+    err.code = `join/${step}-refused`;
+    return err;
+  };
 
-  await setDoc(ref("associations", associationId, "members", uid), {
-    ...member,
-    golferId,
-    joinedAt: serverTimestampValue(),
-  });
+  if (!existing) {
+    try {
+      await setDoc(ref("associations", associationId, "members", uid), {
+        ...member,
+        golferId,
+        joinedAt: serverTimestampValue(),
+      });
+    } catch (e) { throw refused(e, "membership"); }
+  }
 
   try {
     await commitTogether([
     {
       op: "set",
       path: ["associations", associationId, "invites", golferId],
-      data: { acceptedBy: uid, role, at: Date.now() },
+      /* An admin claim is spent; somebody already in the group keeps the role
+         they have, so their claim is an ordinary one. */
+      data: { acceptedBy: uid, role: existing ? "member" : role, at: Date.now() },
     },
     {
       op: "set",
@@ -2215,16 +2241,14 @@ export async function acceptNamedInvite({ associationId, code, golferId, role })
     },
     ], "accept invitation");
   } catch (e) {
-    setError("Joining did not finish",
-      "Your membership was created, but the rest could not be written — usually because the rules in the console are older than this version. Tap the link again once they are published.");
-    throw e;
+    throw refused(e, "link");
   }
 
   assocId = associationId;
   rememberAssociation(associationId);
   rememberGroup(associationId, name);
   clearError();
-  return { ok: true, role };
+  return { ok: true, role: existing ? existing.role : role, already: !!existing };
 }
 
 /* Called only AFTER the join has succeeded — it strips the whole query string,
@@ -2933,10 +2957,14 @@ export async function resetInvitation(golferId) {
  * does today.
  *
  * Order, and why: nothing is deleted before the sign-in has been re-confirmed
- * (step 5) and the request is recorded on the server (step 4). The app never
- * signs anyone out while their account still exists. If anything stops the
- * process, the record on the server lets it resume here, or lets the daily
- * completion job finish it, even if this device is gone.
+ * (step 5) and the request is recorded on the server (step 4).
+ *
+ * beta.9 (Willy, Oct 2): once the request is recorded, the person is ALWAYS
+ * signed out at the end — finished or not. A deletion that stopped part-way
+ * used to leave them signed in, with "Later", still an admin; that was wrong.
+ * Now whatever is left is finished by the completion job (every 15 minutes),
+ * the rules lock the account meanwhile (firestore.rules, deleting()), and
+ * signing in to it is refused with a plain message (checkPendingDeletion).
  */
 
 const DELETING_KEY = "golf:v2:deleting";
@@ -3055,17 +3083,38 @@ export async function deleteMyAccount({ password = "", onStep = () => {} } = {})
   const { deleteUser } = fb.mod.auth;
   const recordRef = ref("accountDeletions", uid);
   let recordWritten = false;
+  /* beta.9: every step is named, so a stop says exactly where. The test hook
+     works only against the emulators (E31 stops it on purpose). */
+  let lastStep = "";
+  const step = (name) => {
+    lastStep = name;
+    onStep(name);
+    if (EMULATORS && typeof globalThis !== "undefined" && globalThis.__scorecardStopDeletionAt === name) {
+      throw new Error(`stopped on purpose at "${name}" (test)`);
+    }
+  };
+  /* Once the request is recorded: note where it stopped on the request,
+     sign out, and say so. The rest is finished by the completion job. */
+  const stopAndSignOut = async (why) => {
+    try {
+      await withTimeout(setDoc(recordRef, { stage: "app-stopped", appStep: lastStep || "?", appError: String(why || "").slice(0, 300) }, { merge: true }),
+        8000, "Recording where it stopped");
+    } catch { /* the job finishes it either way */ }
+    await signOutHere();
+    return { ok: false, reason: "PENDING", step: lastStep,
+      message: `The deletion stopped at "${lastStep || "?"}". You have been signed out, and the rest finishes by itself within 20 minutes.` };
+  };
 
   try {
     /* 1. Ownership and group links, from the server. */
-    onStep("Checking your groups");
+    step("Checking your groups");
     let owned, groups;
     try { owned = await ownedGroupIds(); groups = await myGroupIdsFromServer(); }
     catch (e) { return { ok: false, reason: "OFFLINE", message: "Your groups couldn't be checked. Connect to the internet and try again. Nothing was changed." }; }
     if (owned.length) return { ok: false, reason: "OWNER", message: "You own a group. Delete the group first (Admin → Delete this group), then delete your account." };
 
     /* 2. Anything waiting to upload goes first. */
-    onStep("Sending anything waiting");
+    step("Sending anything waiting");
     await flush();
     if (!outbox.isEmpty()) return { ok: false, reason: "WAITING", message: `${outbox.count()} change${outbox.count() === 1 ? " is" : "s are"} still waiting to upload. Stay online until the status says Synced, then try again. Nothing was changed.` };
     if (outbox.abandoned().length) return { ok: false, reason: "ABANDONED", message: "Some earlier changes could not be saved. Review and dismiss them first. Nothing was changed." };
@@ -3077,7 +3126,7 @@ export async function deleteMyAccount({ password = "", onStep = () => {} } = {})
     if (hasPw && !resumingThrowaway && !password) return { ok: false, reason: "PASSWORD", message: "Type your Scorecard password to confirm." };
 
     /* 4. The request is recorded on the server before anything is deleted. */
-    onStep("Recording your request");
+    step("Recording your request");
     const golferSnap = await getDocsFromServer(query(collection(fb.db, "golfers"), where("linkedUid", "==", uid)));
     const golferIds = golferSnap.docs.map((d) => d.id);
     saveDeletionNote({ ...(note0 && note0.uid === uid ? note0 : {}), uid, at: Date.now() });
@@ -3093,7 +3142,7 @@ export async function deleteMyAccount({ password = "", onStep = () => {} } = {})
     deletionPendingFlag = true;
 
     /* 5. Re-confirm the sign-in (every account, anonymous included). */
-    onStep("Confirming it's you");
+    step("Confirming it's you");
     try { await reconfirmSignIn(password); }
     catch (e) {
       const code = String((e && (e.code || e.message)) || "");
@@ -3103,20 +3152,28 @@ export async function deleteMyAccount({ password = "", onStep = () => {} } = {})
         clearDeletionNote(); deletionPendingFlag = false;
         return { ok: false, reason: "WRONG_PASSWORD", message: "That password isn't right. Nothing was changed." };
       }
-      return { ok: false, reason: "AUTH", message: `Your sign-in couldn't be confirmed (${code}). Your account is NOT deleted yet — tap Try again.` };
+      return await stopAndSignOut(`Your sign-in couldn't be confirmed (${code})`);
     }
     await setDoc(recordRef, { stage: "reauthenticated" }, { merge: true });
 
-    /* 6. Ownership again, now that the sign-in is fresh. */
-    try { if ((await ownedGroupIds()).length) return { ok: false, reason: "OWNER", message: "You own a group. Delete the group first, then delete your account." }; }
-    catch { return { ok: false, reason: "OFFLINE", message: "Your groups couldn't be checked. Your account is NOT deleted yet — tap Try again when online." }; }
+    /* 6. Ownership again, now that the sign-in is fresh. Nothing has been
+       removed yet, so an owner's request is withdrawn (the rules allow that
+       only at this stage) and they stay signed in. */
+    let ownsNow;
+    try { ownsNow = (await ownedGroupIds()).length > 0; }
+    catch (e) { return await stopAndSignOut("Your groups couldn't be checked"); }
+    if (ownsNow) {
+      try { await deleteDoc(recordRef); } catch {}
+      clearDeletionNote(); deletionPendingFlag = false;
+      return { ok: false, reason: "OWNER", message: "You own a group. Delete the group first, then delete your account. Nothing was changed." };
+    }
 
     /* beta.4: the email is free again once the account goes. */
     await removeAccountEmail();
 
     /* 7. Clean-up: one all-or-nothing batch per group, progress recorded in
        the same batch. Each batch has at most 4 writes. */
-    onStep("Leaving your groups");
+    step("Leaving your groups");
     groups = await myGroupIdsFromServer();
     for (const gid of groups) {
       const claims = await getDocsFromServer(query(collection(fb.db, "associations", gid, "invites"), where("acceptedBy", "==", uid)));
@@ -3140,7 +3197,7 @@ export async function deleteMyAccount({ password = "", onStep = () => {} } = {})
     ], "unlink golfer for account deletion");
 
     /* 8. The sign-in itself. Success only when Firebase says so. */
-    onStep("Deleting your sign-in");
+    step("Deleting your sign-in");
     try {
       await deleteUser(fb.auth.currentUser);
     } catch (e) {
@@ -3160,14 +3217,27 @@ export async function deleteMyAccount({ password = "", onStep = () => {} } = {})
   } catch (e) {
     report(e);
     const message = (e && (e.message || e.code)) || String(e);
-    return {
-      ok: false,
-      reason: recordWritten ? "AUTH" : "CLEANUP",
-      message: recordWritten
-        ? `Your account isn't deleted yet: ${message}. You are still signed in. Tap Try again — if it keeps failing, it finishes automatically within a day.`
-        : `Nothing was changed: ${message}.`,
-    };
+    if (recordWritten) return await stopAndSignOut(message);
+    return { ok: false, reason: "CLEANUP", message: `Nothing was changed: ${message}.` };
   }
+}
+
+/* beta.9: signs this device out without reloading (the screen then says why).
+   Listeners first, as in signOutEverywhere. The device's deletion note stays,
+   so this device keeps refusing the account even offline. */
+export async function signOutHere() {
+  stopWatching();
+  try { if (fb) await fb.mod.auth.signOut(fb.auth); } catch {}
+  try {
+    localStorage.removeItem(ASSOC_KEY);
+    localStorage.removeItem(GROUPS_KEY);
+  } catch {}
+  assocId = null;
+  myMember = null;
+  uid = null;
+  deletionPendingFlag = false;
+  setStatus("Signed out");
+  emit();
 }
 
 export async function removeMemberships(uids) {

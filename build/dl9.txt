@@ -1,0 +1,143 @@
+#!/usr/bin/env bash
+# The Scorecard — THE DELETION LOCK (2.30.0-beta.9), prepared by Claude, Oct 2, 2026
+#
+# Apply:    bash dl9.txt
+# Verify:   bash dl9.txt verify
+# Rollback: bash dl9.txt rollback
+#
+# What it does (it shows what changes and waits for you to type yes):
+#   1. checks the published rules are exactly the ones ap4.txt published
+#      (beta.4, Oct 1);
+#   2. publishes the same rules plus one addition: an account that has asked
+#      to be deleted is locked (no admin rights, no rounds, no joining) and
+#      can only finish its own deletion;
+#   3. checks the new rules are the ones live.
+# No data is changed. If publishing or the check fails, the earlier rules are
+# put back by themselves. Rollback puts the earlier rules back at any time.
+#
+# Run it in Google Cloud Shell, signed in with the Google account that owns
+# the Firebase project scorecard-f41b8.
+
+# ---------------------------------------------------------------------------
+# THE GOOGLE PROJECT — defined first, before any command runs.
+# ---------------------------------------------------------------------------
+PROJECT_ID="scorecard-f41b8"
+unset CLOUDSDK_CORE_PROJECT GOOGLE_CLOUD_PROJECT
+
+set -Eeuo pipefail
+
+echo "Switching Cloud Shell to project ${PROJECT_ID} ..."
+gcloud config set project "${PROJECT_ID}" --quiet >/dev/null 2>&1 || { echo "ERROR: could not switch to project ${PROJECT_ID}. Nothing changed." >&2; exit 1; }
+CURRENT_PROJECT="$(gcloud config get-value project 2>/dev/null)"
+[[ "${CURRENT_PROJECT}" == "${PROJECT_ID}" ]] || { echo "ERROR: Cloud Shell is on '${CURRENT_PROJECT}', not ${PROJECT_ID}. Nothing changed." >&2; exit 1; }
+echo "OK: Cloud Shell is now on project ${CURRENT_PROJECT}."
+export CLOUDSDK_CORE_PROJECT="${PROJECT_ID}"
+export GOOGLE_CLOUD_PROJECT="${PROJECT_ID}"
+
+MODE="${1:-apply}"
+COMMIT="PINNED_AFTER_TESTS"                                  # v2 branch, tested: the new rules
+LIVE_COMMIT="0cb05b53757a6ac8fbbaa874b267da6f7bc74c56"      # the rules ap4.txt published (Oct 1)
+RAW="https://raw.githubusercontent.com/willyros01/scorecard"
+STATE="$(pwd)/scorecard-dl9-backup"
+RULES_API="https://firebaserules.googleapis.com/v1"
+
+die(){ echo "ERROR: $*" >&2; exit 1; }
+for c in gcloud curl jq python3; do command -v "$c" >/dev/null || die "$c is unavailable. Run this in Google Cloud Shell."; done
+
+ACCOUNT="$(gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -n1)"
+[[ -n "${ACCOUNT}" ]] || die "No active Google account. Sign in to Cloud Shell first."
+FOUND_ID="$(gcloud projects describe "${PROJECT_ID}" --project="${PROJECT_ID}" --format='value(projectId)' 2>/dev/null || true)"
+[[ "${FOUND_ID}" == "${PROJECT_ID}" ]] || die "Project ${PROJECT_ID} was not found, or ${ACCOUNT} cannot see it. Nothing changed."
+echo
+echo "  Google account : ${ACCOUNT}"
+echo "  Project        : ${PROJECT_ID}"
+echo
+
+token(){ gcloud auth print-access-token; }
+HDR_PROJECT="x-goog-user-project: ${PROJECT_ID}"
+get(){ curl --fail-with-body --silent --show-error -H "Authorization: Bearer $(token)" -H "${HDR_PROJECT}" "$1"; }
+send(){ curl --fail-with-body --silent --show-error -X "$1" -H "Authorization: Bearer $(token)" -H "${HDR_PROJECT}" -H 'Content-Type: application/json' --data-binary "@$3" "$2"; }
+release_ruleset(){ get "${RULES_API}/projects/${PROJECT_ID}/releases/cloud.firestore" | jq -er .rulesetName; }
+save_rules(){ get "${RULES_API}/$1" | jq -er '.source.files[]|select(.name=="firestore.rules")|.content' > "$2"; [[ -s "$2" ]] || die "Empty Firestore rules."; }
+same_rules(){ python3 - "$1" "$2" <<'PYC'
+import sys
+a=open(sys.argv[1]).read().rstrip("\n"); b=open(sys.argv[2]).read().rstrip("\n")
+sys.exit(0 if a==b else 1)
+PYC
+}
+publish_file(){
+  local body="${STATE}/ruleset.json" patch="${STATE}/release.json" ruleset
+  jq -n --rawfile rules "$1" '{source:{files:[{name:"firestore.rules",content:$rules}]}}' > "${body}" || return 1
+  # Creating the ruleset compiles it; a rules error stops here, before anything is published.
+  ruleset="$(send POST "${RULES_API}/projects/${PROJECT_ID}/rulesets" "${body}" | jq -er .name)" || return 1
+  [[ -n "${ruleset}" ]] || return 1
+  jq -n --arg name "projects/${PROJECT_ID}/releases/cloud.firestore" --arg ruleset "${ruleset}" '{release:{name:$name,rulesetName:$ruleset},updateMask:"rulesetName"}' > "${patch}" || return 1
+  send PATCH "${RULES_API}/projects/${PROJECT_ID}/releases/cloud.firestore" "${patch}" >/dev/null || return 1
+}
+# The live rules equal this file? (no exit on failure)
+live_is(){
+  local current
+  current="$(release_ruleset 2>/dev/null)" || return 1
+  get "${RULES_API}/${current}" 2>/dev/null | jq -er '.source.files[]|select(.name=="firestore.rules")|.content' > "${STATE}/rules-live-now.txt" 2>/dev/null || return 1
+  same_rules "$1" "${STATE}/rules-live-now.txt"
+}
+# The earlier rules back (tried 3 times) and a plain message. Always ends the script.
+recover(){
+  local what="$1" tries=0 back=no
+  echo
+  echo "Something failed during ${what}. Putting the earlier rules back automatically ..."
+  while (( tries < 3 )); do
+    tries=$((tries + 1))
+    if live_is "${STATE}/rules-before.txt"; then back=yes; break; fi
+    publish_file "${STATE}/rules-before.txt" || true
+    sleep 3
+  done
+  if [[ "${back}" == yes ]]; then
+    echo "DONE: the earlier rules are live again. The app works as before; only the lock waits."
+    echo "Send a screenshot to Claude. When it is fixed, bash dl9.txt can simply be run again."
+  else
+    echo "WARNING: the earlier rules could not be confirmed. Run:  bash dl9.txt rollback  and send a screenshot to Claude."
+  fi
+  exit 1
+}
+
+mkdir -p "${STATE}"
+curl --fail --silent --show-error "${RAW}/${COMMIT}/firestore.rules" -o "${STATE}/rules-new.txt" || die "Cannot read the new rules from GitHub. Nothing changed."
+grep -Fq "function deleting()" "${STATE}/rules-new.txt" || die "The downloaded rules are not the ones with the deletion lock. Nothing changed."
+
+if [[ "${MODE}" == apply ]]; then
+  if live_is "${STATE}/rules-new.txt"; then
+    echo "OK: the rules with the deletion lock are already live. Nothing else to do."; exit 0
+  fi
+  # 1. The published rules must be exactly the ones ap4.txt published.
+  save_rules "$(release_ruleset)" "${STATE}/rules-before.txt"
+  curl --fail --silent --show-error "${RAW}/${LIVE_COMMIT}/firestore.rules" -o "${STATE}/rules-expected.txt" || die "Cannot read the current rules from GitHub. Nothing changed."
+  same_rules "${STATE}/rules-before.txt" "${STATE}/rules-expected.txt" || die "The published rules are not the ones ap4.txt published. Nothing changed. Send a screenshot to Claude."
+  echo "OK: the published rules are the beta.4 rules (saved for rollback)."
+  echo
+  echo "The change: an account that has asked to be deleted is locked. It cannot"
+  echo "act as an admin, post, join or add anything; it can only finish its own"
+  echo "deletion. Nothing else changes and no data is touched."
+  echo
+  read -r -p "Type yes to publish: " ANSWER
+  [[ "${ANSWER}" == "yes" ]] || die "Stopped. Nothing was changed."
+  # 2. Publish.
+  publish_file "${STATE}/rules-new.txt" || recover "publishing the rules"
+  sleep 3
+  # 3. Check (twice, as Google can take a moment).
+  live_is "${STATE}/rules-new.txt" || { sleep 10; live_is "${STATE}/rules-new.txt"; } || recover "checking the published rules"
+  echo "OK: the published rules are the ones with the deletion lock."
+  echo
+  echo "DONE. The deletion lock is live. Tell Claude."
+elif [[ "${MODE}" == verify ]]; then
+  live_is "${STATE}/rules-new.txt" || die "The published rules are not the ones with the deletion lock."
+  echo "OK: the published rules are the ones with the deletion lock."
+elif [[ "${MODE}" == rollback ]]; then
+  [[ -s "${STATE}/rules-before.txt" ]] || die "No saved rules to go back to."
+  publish_file "${STATE}/rules-before.txt" || die "The earlier rules could not be published. Send a screenshot to Claude."
+  sleep 3
+  live_is "${STATE}/rules-before.txt" || { sleep 10; live_is "${STATE}/rules-before.txt"; } || die "Rollback of the rules did not take. Send a screenshot to Claude."
+  echo "OK: the earlier rules are published again. Tell Claude."
+else
+  die "Unknown mode ${MODE}. Use: bash dl9.txt   or   bash dl9.txt verify   or   bash dl9.txt rollback"
+fi

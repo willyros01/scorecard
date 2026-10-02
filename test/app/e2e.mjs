@@ -939,6 +939,7 @@ async function joinedPerson(key, name, email, password) {
   return uid;
 }
 async function openDelete(page, password) {
+  await tab(page, "summary");   // its footer carries "Delete my account"
   await page.locator('[data-act="delete-account"]').first().click();
   await page.fill('[name="delete-password"]', password);
   await page.locator('[data-del="go"]').click();

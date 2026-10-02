@@ -1,8 +1,12 @@
 name: Finish account deletions
 
-# The daily completion job for "Delete my account" (spec: Change 7, D5).
-# Runs by itself every day, and once whenever this file or its script changes
-# on main. Nobody runs it by hand.
+# The completion job for "Delete my account" (spec: Change 7, D5).
+# beta.9 (Willy, Oct 2): every 15 minutes, not once a day. The app now signs
+# the person out as soon as their request is recorded, so whatever it could
+# not finish is finished here, for requests older than 5 minutes. Also runs
+# once whenever this file or its script changes on main. Nobody runs it by hand.
+# Its log is saved only when it had something to do or failed, plus the runs
+# in the 07:00 UTC hour (the daily repository activity that keeps it on).
 #
 # Keep-alive (spec: Change 7, "The schedule stays switched on"): GitHub switches
 # off scheduled workflows in a public repo after 60 days without repository
@@ -12,7 +16,7 @@ name: Finish account deletions
 # scheduled task) reports any day without a successful run.
 on:
   schedule:
-    - cron: "17 7 * * *"   # 07:17 UTC daily
+    - cron: "7,22,37,52 * * * *"   # every 15 minutes (off the hour, when GitHub is busiest)
   push:
     branches: [main]
     paths:
@@ -46,6 +50,7 @@ jobs:
         env:
           ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
           PROJECT: scorecard-f41b8
+          MIN_AGE_SECONDS: "300"   # 5 minutes: the app has finished or stopped by then
         run: |
           set -o pipefail
           bash .github/scripts/finish-deletions.sh 2>&1 | tee "$RUNNER_TEMP/finish-deletions.log"
@@ -58,6 +63,13 @@ jobs:
           set -Eeuo pipefail
           gh api -X PUT "repos/${GITHUB_REPOSITORY}/actions/workflows/finish-deletions.yml/enable"
           echo "Schedule confirmed switched on."
+          # beta.9: 96 runs a day — keep only the ones worth reading.
+          LOG="$RUNNER_TEMP/finish-deletions.log"
+          if [[ "$RESULT" == success && "$GITHUB_EVENT_NAME" == schedule && "$(date -u +%H)" != 07 ]] \
+             && grep -q "Requests found: 0" "$LOG" 2>/dev/null; then
+            echo "Nothing to do and nothing failed: log not saved."
+            exit 0
+          fi
           # The job's log shows only the first 4 characters of any account ID.
           TMP="$(mktemp -d)"
           git clone -q --depth 1 --branch ci-logs "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$TMP"

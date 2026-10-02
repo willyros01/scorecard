@@ -3864,8 +3864,13 @@ sheetEl.addEventListener("click", async (e) => {
   busy("Deleting your account");
   let result;
   try {
-    result = await db.deleteMyAccount({ password, onStep: (step) => { busyWhat = step; paintBusy(); } });
+    result = await db.deleteMyAccount({ password, onStep: (step) => { note(`deleting: ${step}`); busyWhat = step; paintBusy(); } });
   } finally { idleAll(); }
+  /* beta.9: recorded but not finished — they are already signed out. */
+  if (result && result.reason === "PENDING") {
+    note(`deletion stopped at: ${result.step || "?"}`);
+    return showBeingDeleted(result.message);
+  }
   if (result && result.ok) {
     sheetEl.hidden = false;
     sheetEl.innerHTML = `<div class="sheet-body"><h2>Your account has been deleted</h2>
@@ -3878,6 +3883,26 @@ sheetEl.addEventListener("click", async (e) => {
 sheetEl.addEventListener("click", (e) => {
   if (e.target.closest('[data-del="restart"]')) location.reload();
 });
+
+/* beta.9: an account whose deletion has started is never used again. The
+   person is signed out and told; the completion job finishes the rest. */
+function showBeingDeleted(detail) {
+  sheetEl.hidden = false;
+  sheetEl.dataset.report = "";
+  sheetEl.innerHTML = `<div class="sheet-body centred">
+    <h2>This account is being deleted</h2>
+    <p class="lead">${esc(detail || "You have been signed out. The deletion finishes by itself within 20 minutes.")}</p>
+    <p class="hint">Nothing more is needed from you. After that, this email can be used again for a new account.</p>
+    <div class="inline-actions stacked"><button class="btn" data-del="restart">Done</button></div>
+  </div>`;
+  render();
+}
+async function refuseDeletingAccount() {
+  note("sign-in refused: this account is being deleted");
+  await db.signOutHere();
+  accountMode = null;
+  showBeingDeleted("You have been signed out. Its deletion finishes by itself within 20 minutes; it cannot be used meanwhile.");
+}
 
 function openNotice({ title, detail, advice, action }) {
   sheetEl.hidden = false;
@@ -4903,14 +4928,21 @@ view.addEventListener("click", async (e) => {
         joining = false;
         if (!result.ok) {
           idleAll();
+          note(`join refused: ${result.reason}`);
           openProblem({
             title: result.reason === "USED"
               ? "This invitation has already been used"
-              : "This invitation belongs to somebody else",
+              : result.reason === "OTHER_GOLFER"
+                ? "You are already in this group as another golfer"
+                : "This invitation belongs to somebody else",
             detail: result.reason === "USED"
               ? "An admin invitation works once only. Ask for a fresh one."
-              : "Somebody has already joined with this link. Ask whoever runs the group to send you your own.",
-            advice: "Nothing was changed.",
+              : result.reason === "OTHER_GOLFER"
+                ? "This sign-in already plays in this group under another name, so it cannot become this golfer as well."
+                : "Somebody has already joined with this link. Ask whoever runs the group to send you your own.",
+            advice: result.reason === "OTHER_GOLFER"
+              ? "Nothing was changed. If this invitation is for you, ask whoever runs the group to sort out the two names."
+              : "Nothing was changed.",
           });
           return render();
         }
@@ -4934,15 +4966,23 @@ view.addEventListener("click", async (e) => {
         idleAll();
         /* Say what actually went wrong. Swallowing it left the screen exactly
            as it was, which reads as the button doing nothing at all. */
+        /* beta.9: each refusal names its step and says what to do. */
         const code = String((err && (err.code || err.message)) || "");
+        note(`join refused: ${code}`);
         openProblem({
-          title: "Could not join the group",
-          detail: code.includes("permission")
-            ? "Firebase refused the write, usually because the rules in the console are older than this version."
-            : code || "No detail was given.",
-          advice: code.includes("permission")
-            ? "Ask whoever runs the group to publish the latest firestore.rules, then tap the link again. Nothing was changed."
-            : "Nothing was changed. Try the link again, or send this report.",
+          title: code.includes("join/membership-refused") ? "This invitation link no longer works"
+            : code.includes("join/link-refused") ? "You are in the group, but your golfer could not be linked"
+            : "Could not join the group",
+          detail: code.includes("join/membership-refused")
+            ? "The group's code has changed since it was sent, so the link is out of date."
+            : code.includes("join/link-refused")
+              ? "This golfer is still linked to another sign-in."
+              : code || "No detail was given.",
+          advice: code.includes("join/membership-refused")
+            ? "Ask whoever runs the group to tap Send again for you, then use the new link. Nothing was changed."
+            : code.includes("join/link-refused")
+              ? "Ask whoever runs the group to tap Send again for you (that releases the old link), then tap the new link."
+              : "Nothing was changed. Try the link again, or send this report.",
         });
       }
       return render();
@@ -6022,6 +6062,8 @@ async function signIn() {
    Create account when the email already had an account. */
 async function finishSignIn(result, email, message) {
   accountMode = null;
+  /* beta.9: an account whose deletion has started opens nothing. */
+  if (await db.checkPendingDeletion()) { await refuseDeletingAccount(); return; }
   if (db.readJoinLink()) {
     /* Signed in from an invitation: show the invitation next. */
     await loadInvitedDetails();
@@ -6597,7 +6639,9 @@ addEventListener("pageshow", (e) => { if (e.persisted) location.reload(); });
   await platform.initLinks();   /* iPhone app: the link that opened it, if any */
   platform.onLink(async () => { await loadInvitedDetails(); render(); });
   await db.init();
-  await db.checkPendingDeletion();
+  /* beta.9: a device still signed in to an account whose deletion has started
+     is signed out at once, before anything of it is opened. */
+  if (await db.checkPendingDeletion()) await refuseDeletingAccount();
   markBoot("group");
 
   const remembered = db.recallAssociation();
@@ -6619,7 +6663,6 @@ addEventListener("pageshow", (e) => { if (e.persisted) location.reload(); });
   ready = true;
   render();
   if (db.offlineCopyUnavailable()) flashMsg("Offline data unavailable on this device — the app needs a connection to show your group.");
-  if (db.deletionPending()) openDeleteAccount({ resume: true });
 
   /* Coming back online on the first screen: look for the groups again. */
   addEventListener("online", async () => {
