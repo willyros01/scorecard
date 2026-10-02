@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# The Scorecard — COMPLETE BACKUP, READ ONLY (prepared by Claude, Oct 1, 2026)
+#
+# Run:  bash bk1.txt
+#
+# Saves every group (with its members, roster, rounds, games, invitations),
+# every golfer, every course, the applications and the list of sign-in accounts
+# (emails and last sign-in, never passwords) to ONE file in your Cloud Shell
+# home folder: scorecard-backup-<date>-<time>.json. Changes nothing.
+# Keep a copy: in Cloud Shell tap the three dots (More), then Download, and
+# type the file name it prints at the end.
+
+# ---------------------------------------------------------------------------
+# THE GOOGLE PROJECT — defined first, before any command runs.
+# ---------------------------------------------------------------------------
+PROJECT_ID="scorecard-f41b8"
+unset CLOUDSDK_CORE_PROJECT GOOGLE_CLOUD_PROJECT
+
+set -Eeuo pipefail
+
+echo "Switching Cloud Shell to project ${PROJECT_ID} ..."
+gcloud config set project "${PROJECT_ID}" --quiet >/dev/null 2>&1 || { echo "ERROR: could not switch to project ${PROJECT_ID}. Nothing changed." >&2; exit 1; }
+CURRENT_PROJECT="$(gcloud config get-value project 2>/dev/null)"
+[[ "${CURRENT_PROJECT}" == "${PROJECT_ID}" ]] || { echo "ERROR: Cloud Shell is on '${CURRENT_PROJECT}', not ${PROJECT_ID}. Nothing changed." >&2; exit 1; }
+echo "OK: Cloud Shell is now on project ${CURRENT_PROJECT}."
+export CLOUDSDK_CORE_PROJECT="${PROJECT_ID}"
+export GOOGLE_CLOUD_PROJECT="${PROJECT_ID}"
+
+COMMIT="9e69664414e2315d8333d51e47bb7212ae16abd3"     # v2 branch, tested (ops run green)
+RAW="https://raw.githubusercontent.com/willyros01/scorecard"
+WORK="$(pwd)/scorecard-bk-tools"
+
+die(){ echo "ERROR: $*" >&2; exit 1; }
+for c in gcloud curl node; do command -v "$c" >/dev/null || die "$c is unavailable. Run this in Google Cloud Shell."; done
+[[ "$(node -p 'process.versions.node.split(".")[0]')" -ge 18 ]] || die "Node 18 or newer is needed."
+ACCOUNT="$(gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -n1)"
+[[ -n "${ACCOUNT}" ]] || die "No active Google account. Sign in to Cloud Shell first."
+echo
+echo "  Google account : ${ACCOUNT}"
+echo "  Project        : ${PROJECT_ID}"
+echo
+mkdir -p "${WORK}"
+curl --fail --silent --show-error "${RAW}/${COMMIT}/build/bk1.mjs" -o "${WORK}/bk1.mjs" || die "Cannot read bk1.mjs from GitHub. Nothing changed."
+FILE="$(pwd)/scorecard-backup-$(date +%Y-%m-%d-%H%M).json"
+ACCESS_TOKEN="$(gcloud auth print-access-token)" PROJECT="${PROJECT_ID}" node "${WORK}/bk1.mjs" "${FILE}"
+echo
+echo "DONE. Your backup is ${FILE##*/}"

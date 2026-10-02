@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# The Scorecard — ONE-TIME GROUP CLEAN-UP (prepared by Claude, Oct 1, 2026)
+#
+# Run:     bash cl5.txt
+# Check:   bash cl5.txt verify
+#
+# What it does:
+#   1. takes a complete backup first (the same as bk1.txt), kept in your home
+#      folder as scorecard-backup-before-cleanup-<date>-<time>.json;
+#   2. shows the plan — the same plan the Groups check page showed you — and
+#      waits for you to type yes;
+#   3. moves golfers found only in orphan groups to Philippine Golfers, with
+#      their rounds, so their handicaps stay the same; accounts found only in
+#      orphan groups join Philippine Golfers;
+#   4. removes the orphan groups with everything in them;
+#   5. takes a second backup and checks nothing is left to do.
+# Your four groups are never removed or changed; Philippine Golfers only
+# receives. If anything stops it, run it again: it carries on safely.
+
+# ---------------------------------------------------------------------------
+# THE GOOGLE PROJECT — defined first, before any command runs.
+# ---------------------------------------------------------------------------
+PROJECT_ID="scorecard-f41b8"
+unset CLOUDSDK_CORE_PROJECT GOOGLE_CLOUD_PROJECT
+
+set -Eeuo pipefail
+
+echo "Switching Cloud Shell to project ${PROJECT_ID} ..."
+gcloud config set project "${PROJECT_ID}" --quiet >/dev/null 2>&1 || { echo "ERROR: could not switch to project ${PROJECT_ID}. Nothing changed." >&2; exit 1; }
+CURRENT_PROJECT="$(gcloud config get-value project 2>/dev/null)"
+[[ "${CURRENT_PROJECT}" == "${PROJECT_ID}" ]] || { echo "ERROR: Cloud Shell is on '${CURRENT_PROJECT}', not ${PROJECT_ID}. Nothing changed." >&2; exit 1; }
+echo "OK: Cloud Shell is now on project ${CURRENT_PROJECT}."
+export CLOUDSDK_CORE_PROJECT="${PROJECT_ID}"
+export GOOGLE_CLOUD_PROJECT="${PROJECT_ID}"
+
+COMMIT="b935bed84728b130c589a49b936c14c5ce3f9419"     # v2 branch, tested (CL1-CL9 green)
+RAW="https://raw.githubusercontent.com/willyros01/scorecard"
+WORK="$(pwd)/scorecard-cl-tools"
+MODE="${1:-apply}"
+
+die(){ echo "ERROR: $*" >&2; exit 1; }
+for c in gcloud curl node; do command -v "$c" >/dev/null || die "$c is unavailable. Run this in Google Cloud Shell."; done
+[[ "$(node -p 'process.versions.node.split(".")[0]')" -ge 18 ]] || die "Node 18 or newer is needed."
+[[ "${MODE}" == apply || "${MODE}" == verify ]] || die "Use: bash cl5.txt   or   bash cl5.txt verify"
+ACCOUNT="$(gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -n1)"
+[[ -n "${ACCOUNT}" ]] || die "No active Google account. Sign in to Cloud Shell first."
+echo
+echo "  Google account : ${ACCOUNT}"
+echo "  Project        : ${PROJECT_ID}"
+echo
+mkdir -p "${WORK}/build"
+echo '{"type":"module"}' > "${WORK}/package.json"
+for f in build/bk1.mjs build/cl5.mjs build/cl5-plan.mjs model.js; do
+  curl --fail --silent --show-error "${RAW}/${COMMIT}/${f}" -o "${WORK}/${f}" || die "Cannot read ${f} from GitHub. Nothing changed."
+done
+backup(){ ACCESS_TOKEN="$(gcloud auth print-access-token)" PROJECT="${PROJECT_ID}" node "${WORK}/build/bk1.mjs" "$1" || die "The backup did not finish. Nothing changed."; }
+STAMP="$(date +%Y-%m-%d-%H%M)"
+
+if [[ "${MODE}" == verify ]]; then
+  backup "${WORK}/check-${STAMP}.json"
+  PROJECT="${PROJECT_ID}" node "${WORK}/build/cl5.mjs" verify "${WORK}/check-${STAMP}.json"
+  exit $?
+fi
+
+echo "1. A complete backup first ..."
+BEFORE="$(pwd)/scorecard-backup-before-cleanup-${STAMP}.json"
+backup "${BEFORE}"
+echo
+echo "2. The plan:"
+ACCESS_TOKEN="$(gcloud auth print-access-token)" PROJECT="${PROJECT_ID}" node "${WORK}/build/cl5.mjs" apply "${BEFORE}" || exit 1
+echo
+echo "3. Checking ..."
+backup "${WORK}/check-${STAMP}.json"
+PROJECT="${PROJECT_ID}" node "${WORK}/build/cl5.mjs" verify "${WORK}/check-${STAMP}.json" || exit 1
+echo
+echo "DONE. Your backup from before the clean-up is ${BEFORE##*/}"
+echo "Keep a copy: More, then Download, and type that name."
