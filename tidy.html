@@ -25,6 +25,7 @@
 </head>
 <body>
 <div class="box">
+  <p class="hint" style="margin:0 0 14px"><a href="./" id="backTop" style="font-weight:700;text-decoration:none">&lsaquo; Back to the app</a></p>
   <h1>Tidy up</h1>
   <p class="lead">Looks for data left behind by earlier versions — wrong round counts, handicaps
   calculated from rounds that no longer exist, duplicate golfers, groups nobody can reach. It shows
@@ -52,6 +53,11 @@
  * after the first run, and cost a release every time something else turns up.
  */
 
+/* Back to the app keeps the test-only ?emulators=1, so a test lands where it started. */
+for (const a of document.querySelectorAll('a[href="./"]')) {
+  if (new URLSearchParams(location.search).has("emulators")) a.href = "./?emulators=1";
+}
+
 const stateEl = document.getElementById("state");
 let signedOut = false;   /* set by connect() when nobody is signed in */
 const findingsEl = document.getElementById("findings");
@@ -66,7 +72,10 @@ const say = (text, bad) => {
 };
 const clean = (s) => String(s == null ? "" : s).replace(/[<>&]/g, "");
 
-const SDK = "https://www.gstatic.com/firebasejs/10.12.0";
+/* beta.5: the app's own copy of Firebase (vendor/), not one loaded from the
+   internet — so this page can be packaged inside the iPhone app, where Apple
+   does not allow downloaded code, and opens there already signed in. */
+const FIREBASE_BUNDLE = "./vendor/firebase/firebase-10.12.0.js";
 let db, mod, uid, email = "";
 let findings = [];
 let plan = null;
@@ -89,11 +98,7 @@ async function connect() {
   const config = await import("./firebase-config.js");
   if (!config.isConfigured) { stateEl.textContent = "No Firebase settings found."; return false; }
 
-  const [app, auth, store] = await Promise.all([
-    import(`${SDK}/firebase-app.js`),
-    import(`${SDK}/firebase-auth.js`),
-    import(`${SDK}/firebase-firestore.js`),
-  ]);
+  const { app, auth, store } = await import(FIREBASE_BUNDLE);
   /* Automated tests only: on this machine's own address with ?emulators=1,
      the page talks to the Firebase emulators, exactly as the app does. */
   const emulators = ["localhost", "127.0.0.1"].includes(location.hostname)
@@ -101,7 +106,9 @@ async function connect() {
   const instance = app.initializeApp(emulators
     ? { apiKey: "fake-api-key", projectId: "demo-scorecard", authDomain: "localhost", appId: "demo" }
     : config.firebaseConfig);
-  const authority = auth.getAuth(instance);
+  /* The same sign-in store the app uses (IndexedDB), so whoever is signed in
+     to the app is signed in here. getAuth can hang inside the app. */
+  const authority = auth.initializeAuth(instance, { persistence: [auth.indexedDBLocalPersistence] });
   db = store.getFirestore(instance);
   if (emulators) {
     auth.connectAuthEmulator(authority, "http://127.0.0.1:9099", { disableWarnings: true });

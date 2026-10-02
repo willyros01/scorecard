@@ -5,6 +5,7 @@ styles.css
 version.js
 firebase-config.js
 quick-start.html
+tidy.html
 icon.svg
 app.js
 store.js

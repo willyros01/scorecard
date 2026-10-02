@@ -1,12 +1,10 @@
-The Scorecard Version 2.0 (2.30.0-beta.4): the cockpit and the applications switch.
+The Scorecard Version 2.0 (2.30.0-beta.5): Terms of Use and small fixes.
 
-1. Admin now has tabs at the top: Cockpit, Applications, Members, Settings. Members is People, exactly as before. Settings holds Group, Backup, Course lookup and Account.
-2. Cockpit (owner): members and sign-ins across all groups, what is waiting for you, every group (tap one to see it), rounds per month, housekeeping. Last seen starts counting from this version.
-3. A group admin sees the Cockpit of their own group and the Members tab.
-4. Summary: a "My season" card with your rounds this year and your index.
-5. Applications (public group open): the Manual / Auto switch, applications with the name already numbered when taken, reports, and the block list.
-6. Become a member with an email that already has an account: the form says so at once and nothing is sent.
-7. With the switch on Auto, apply from a second device with a test email: a link arrives; tap it, choose a password, and the test account is in the public group. Turn the switch back to Manual afterwards.
-8. The header stays the same size whatever the A / A+ / A++ setting; a long press on a tab name no longer selects it.
+1. Terms of Use: the first time the app opens, the Terms of Use come first. Accept works only after ticking "I have read and agree". Decline keeps the app locked; Read the terms again brings them back. After Accept they are not shown again on this device.
+2. The terms can be read any time from the Terms link at the foot of the screen.
+3. Invitation: the screen after tapping an invitation link is shorter: You're invited, Email, New password, Password again, Create account.
+4. Bottom tabs: at the largest text size (A++) the tab names (Admin and the rest) are no longer cut off.
+5. Zoom: pinch to zoom in, and pinch to zoom back out.
+6. Admin, Cockpit, Open Tidy: Tidy opens inside the app, already signed in. "Back to the app" returns to the Admin screen.
 
 Report problems with Send a report in the app.

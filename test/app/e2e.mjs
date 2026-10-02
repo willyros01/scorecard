@@ -160,6 +160,16 @@ await new Promise((r) => setTimeout(r, 1500));
 setTimeout(() => { console.log("FAIL  WATCHDOG  the app tests took longer than 10 minutes"); server.kill(); process.exit(1); }, 10 * 60 * 1000).unref();
 
 const browser = await chromium.launch();
+/* beta.5: every test device has accepted the Terms of Use, except where a test
+   sets globalThis.__termsFresh to see the first-open screen itself (E24). */
+{
+  const _newContext = browser.newContext.bind(browser);
+  browser.newContext = async (...a) => {
+    const c = await _newContext(...a);
+    if (!globalThis.__termsFresh) await c.addInitScript(() => { try { if (!localStorage.getItem("golf:terms")) localStorage.setItem("golf:terms", JSON.stringify({ version: 1, at: 1 })); } catch {} });
+    return c;
+  };
+}
 const newPage = async () => {
   const context = await browser.newContext();
   context.setDefaultTimeout(20000);
@@ -397,7 +407,7 @@ await check("E10", "only the group creator is offered Start another group", asyn
 const ivy = await newPage();
 await ivy.goto(`${APP}&join=G1.PRIV01.gI`, { waitUntil: "load" });
 await check("E11", "a named private invitation: create an account, then join as the invited golfer", async () => {
-  await waitForText(ivy, /You have been invited to a group/);
+  await waitForText(ivy, /You.re invited/);
   await ivy.fill('[name="email"]', "ivy@example.com");
   await ivy.fill('[name="password"]', "ivy-pass-1");
   await ivy.fill('[name="password-again"]', "ivy-pass-1");
@@ -703,6 +713,62 @@ await check("E14", "Tidy finds and fixes duplicates and unused golfers across Wi
         updateMask: { fieldPaths: ["archived", "archivedAt", "nameKey", "editedIn"] } }] }) });
     throw new Error(`${problems.join("; ")}. Tidy's log: ${log.slice(0, 400)} | the same write by Willy: HTTP ${probe.status} ${(await probe.text()).slice(0, 400)}`);
   }
+});
+
+/* E24 (beta.5): Tidy opens in the same window, already signed in, and Back
+   returns to the Admin screen it was opened from. */
+await check("E24", "Tidy opens from Admin already signed in; Back returns to the Admin cockpit", async () => {
+  await owner.goto(APP, { waitUntil: "load" });
+  await tab(owner, "admin");
+  await subtab(owner, "cockpit");
+  await owner.locator('[data-act="open-tool"][data-tool="tidy"]').first().click();
+  await owner.waitForURL(/tidy\.html\?emulators=1/, { timeout: 15000 });
+  await waitForText(owner, /Checked \d+ golfers|recorded twice|Nothing needs fixing|need fixing|golfer/, 30000);
+  if (/Not signed in/.test(await text(owner))) throw new Error("Tidy asked to sign in");
+  await owner.locator("#backTop").click();
+  await owner.waitForURL(/\/\?emulators=1$/, { timeout: 15000 });
+  const end = Date.now() + 25000;
+  while (Date.now() < end) {
+    const on = await owner.evaluate(() => { const b = document.querySelector('button[data-tab="admin"]'); return !!(b && b.classList.contains("on")); });
+    if (on) return;
+    await owner.waitForTimeout(400);
+  }
+  throw new Error(`not back on Admin; the screen says: ${(await text(owner)).replace(/\s+/g, " ").slice(0, 200)}`);
+});
+
+/* E25 (beta.5): a device that has never accepted the Terms of Use sees them
+   first; Accept needs the tick; Decline locks; accepting is remembered and
+   recorded on the account after sign-in. */
+await check("E25", "first open shows the Terms of Use; decline locks; accept is remembered and recorded on the account", async () => {
+  const T = { email: "terms.tester@example.com", password: "terms-pass-1" };
+  T.uid = await signUp(T.email, T.password);
+  globalThis.__termsFresh = true;
+  const fresh = await newPage();
+  globalThis.__termsFresh = false;
+  await fresh.goto(APP, { waitUntil: "load" });
+  await waitForText(fresh, /Terms of Use/);
+  await waitForText(fresh, /Handicaps are estimates/);
+  if (await fresh.locator('[data-act="sign-in"]').count()) throw new Error("sign-in is reachable before accepting");
+  if (!(await fresh.locator("#termsAccept").isDisabled())) throw new Error("Accept works without the tick");
+  await fresh.locator('[data-act="terms-decline"]').click();
+  await waitForText(fresh, /The Scorecard is locked/);
+  await fresh.locator('[data-act="terms-again"]').click();
+  await fresh.locator("#termsTick").check();
+  if (await fresh.locator("#termsAccept").isDisabled()) throw new Error("Accept stays off after the tick");
+  await fresh.locator("#termsAccept").click();
+  await fresh.waitForSelector('[data-act="sign-in"]', { timeout: 20000 });
+  await fresh.reload({ waitUntil: "load" });
+  await fresh.waitForSelector('[data-act="sign-in"]', { timeout: 20000 });
+  if (/I have read and agree/.test(await text(fresh))) throw new Error("asked again after a reload");
+  await signIn(fresh, T.email, T.password);
+  const end = Date.now() + 25000;
+  let rec = null;
+  while (Date.now() < end && !(rec = await getDocQuick(`users/${T.uid}/terms/accepted`))) await fresh.waitForTimeout(500);
+  if (!rec) throw new Error("the acceptance was not recorded on the account");
+  if (Number(rec.version) !== 1) throw new Error(`recorded version ${rec.version}`);
+  await fresh.locator('[data-act="terms-view"]').first().click();
+  await waitForText(fresh, /Effective October 2, 2026/);
+  await fresh.locator('[data-act="terms-close"]').click();
 });
 
 await browser.close();

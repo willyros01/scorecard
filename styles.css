@@ -843,3 +843,19 @@ body { font-size: 1rem; }
 .seg-b.on { background: var(--pine); color: #fff; }
 .note.in-use { margin-top: 0.6rem; }
 .my-season .ck-tiles { margin-top: 0.2rem; }
+
+/* beta.5: Terms of Use — large text, full screen on first use */
+.terms-gate .terms-text { font-size: 1.05rem; line-height: 1.55; }
+.terms-gate .terms-text .terms-h { font-size: 1.1rem; margin: 1.1rem 0 0.35rem; }
+.terms-gate .terms-text p { margin: 0 0 0.6rem; }
+.terms-gate .terms-agree { display: flex; align-items: flex-start; gap: 0.8rem; font-size: 1.1rem; font-weight: 600; line-height: 1.4; margin: 1.2rem 0 0.4rem; cursor: pointer; -webkit-user-select: none; user-select: none; }
+.terms-gate .terms-agree input { width: 28px; height: 28px; flex: 0 0 auto; margin: 2px 0 0; accent-color: var(--pine); }
+.terms-gate .terms-buttons { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem; margin-top: 0.6rem; }
+.terms-gate .terms-buttons .btn { width: 100%; }
+.terms-gate .btn[disabled] { opacity: 0.4; }
+
+/* beta.5: the bottom tab bar keeps ONE fixed size, like the header (Willy:
+   at large text "Admin" was cut off). Only the screen above it follows the
+   text-size setting. */
+.tabs button { font-size: 12.5px; padding: 10px 1px; letter-spacing: 0; white-space: nowrap; min-width: 0; }
+.tabs .ico { font-size: 21px; }
