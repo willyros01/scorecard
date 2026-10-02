@@ -31,13 +31,32 @@ if (!OUT) die("Say where to save the backup.");
 
 const headers = { Authorization: `Bearer ${TOKEN}`, "Content-Type": "application/json" };
 if (TOKEN !== "owner") headers["x-goog-user-project"] = PROJECT;
-async function call(method, url, body, tries = 3) {
+/* Document ids may hold spaces and other characters a web address cannot,
+   so every part of a path is encoded. */
+const at = (name) => name.split("/").map(encodeURIComponent).join("/");
+/* At most a few requests at once, and a dropped connection is tried again:
+   Oct 1, Willy's first run stopped with "fetch failed" — too many at once. */
+let active = 0; const waiting = [];
+const slot = () => (active < 6 ? (active++, Promise.resolve()) : new Promise((r) => waiting.push(r)));
+const free = () => { const next = waiting.shift(); if (next) next(); else active--; };
+async function call(method, url, body, tries = 5) {
   for (let i = 1; ; i++) {
-    const r = await fetch(url, { method, headers, body: body ? JSON.stringify(body) : undefined });
-    const text = await r.text();
+    await slot();
+    let r, text;
+    try {
+      r = await fetch(url, { method, headers, body: body ? JSON.stringify(body) : undefined });
+      text = await r.text();
+    } catch (e) {
+      free();
+      const why = (e && e.cause && (e.cause.code || e.cause.message)) || (e && e.message) || e;
+      if (i >= tries) throw new Error(`${method} ${url} → ${why}`);
+      await new Promise((res) => setTimeout(res, 1500 * i));
+      continue;
+    }
+    free();
     if (r.ok) return text ? JSON.parse(text) : {};
-    if (i >= tries || r.status < 500) throw new Error(`${method} ${url} → HTTP ${r.status}: ${text.slice(0, 200)}`);
-    await new Promise((res) => setTimeout(res, 1000 * i));
+    if (i >= tries || (r.status < 500 && r.status !== 429)) throw new Error(`${method} ${url} → HTTP ${r.status}: ${text.slice(0, 200)}`);
+    await new Promise((res) => setTimeout(res, 1500 * i));
   }
 }
 
@@ -45,7 +64,7 @@ async function collectionIds(parent) {
   const out = [];
   let pageToken = "";
   do {
-    const r = await call("POST", `${FS}/${parent}:listCollectionIds`, { pageSize: 300, ...(pageToken ? { pageToken } : {}) });
+    const r = await call("POST", `${FS}/${at(parent)}:listCollectionIds`, { pageSize: 300, ...(pageToken ? { pageToken } : {}) });
     out.push(...(r.collectionIds || []));
     pageToken = r.nextPageToken || "";
   } while (pageToken);
@@ -56,17 +75,17 @@ async function documents(parent, collection) {
   const out = [];
   let pageToken = "";
   do {
-    const r = await call("GET", `${FS}/${parent}/${collection}?pageSize=300&showMissing=true${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ""}`);
+    const r = await call("GET", `${FS}/${at(parent)}/${encodeURIComponent(collection)}?pageSize=300&showMissing=true${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ""}`);
     out.push(...(r.documents || []));
     pageToken = r.nextPageToken || "";
   } while (pageToken);
   return out;
 }
 
-/* Walk the whole tree, a few requests at a time. */
+/* Walk the whole tree: one list of places still to read, a few readers. */
 const docs = [];
 const counts = {};
-async function walk(parent, depth) {
+async function readOne(parent, depth, queue) {
   for (const c of await collectionIds(parent)) {
     const list = await documents(parent, c);
     const label = depth === 0 ? c : `…/${c}`;
@@ -74,17 +93,28 @@ async function walk(parent, depth) {
     for (const d of list) {
       const rel = d.name.slice(ROOT.length + 1);
       docs.push({ path: rel, fields: d.fields || null, missing: !d.fields && !d.createTime, createTime: d.createTime || null, updateTime: d.updateTime || null });
+      queue.push([d.name, depth + 1]);
     }
-    const queue = list.map((d) => d.name);
-    const workers = Array.from({ length: 6 }, async () => {
-      while (queue.length) { const name = queue.shift(); await walk(name, depth + 1); }
-    });
-    await Promise.all(workers);
   }
+}
+async function walk(root) {
+  const queue = [[root, 0]];
+  let busy = 0;
+  await new Promise((resolve, reject) => {
+    const pump = () => {
+      if (!queue.length && !busy) return resolve();
+      while (queue.length && busy < 6) {
+        const [parent, depth] = queue.shift();
+        busy++;
+        readOne(parent, depth, queue).then(() => { busy--; pump(); }, reject);
+      }
+    };
+    pump();
+  });
 }
 
 console.log("Reading the whole database (read only) ...");
-await walk(ROOT, 0);
+await walk(ROOT);
 
 let accounts = [];
 let accountsNote = "";
