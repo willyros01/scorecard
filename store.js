@@ -118,7 +118,11 @@ export async function init() {
     if (platform.isApp()) {
       try {
         database = store.initializeFirestore(instance, {
-          localCache: store.persistentLocalCache({ tabManager: store.persistentSingleTabManager() }),
+          /* beta.7: the app has only ever one window, so it takes the saved
+             copy over at once (forceOwnership) instead of waiting for the
+             previous page's hold to run out — that wait is what left
+             "Checking your access" on screen after returning from Tidy. */
+          localCache: store.persistentLocalCache({ tabManager: store.persistentSingleTabManager({ forceOwnership: true }) }),
         });
       } catch {
         persistentCacheOff = true;
@@ -2953,7 +2957,8 @@ export async function checkPendingDeletion() {
   if (note && note.uid && note.uid !== uid) clearDeletionNote();   /* a different account now */
   try {
     const { getDocFromServer } = fb.mod.store;
-    const snap = await getDocFromServer(ref("accountDeletions", uid));
+    /* beta.7: never let start-up wait long on this check. */
+    const snap = await withTimeout(getDocFromServer(ref("accountDeletions", uid)), 6000, "The deletion check");
     deletionPendingFlag = snap.exists();
   } catch {
     deletionPendingFlag = !!(deletionNote() && deletionNote().uid === uid);

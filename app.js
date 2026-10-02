@@ -142,8 +142,12 @@ const bootSteps = [
 ];
 let bootAt = 0;
 
+/* beta.7: how long each start-up step took, kept in the report trail so a
+   slow start shows exactly where the time went. */
+const bootT0 = (typeof performance !== "undefined" ? performance.now() : Date.now());
 function markBoot(key) {
   const i = bootSteps.findIndex((s) => s.key === key);
+  try { note(`start-up: ${key} reached after ${Math.round((typeof performance !== "undefined" ? performance.now() : Date.now()) - bootT0)} ms`); } catch {}
   if (i >= 0 && i > bootAt) { bootAt = i; paintBoot(); }
 }
 
@@ -1127,13 +1131,12 @@ function signInCard({ heading, lead = "", backAct = "", backLabel = "" }) {
     ${lead}
     <label class="lbl">Email</label>
     <input class="field" name="email" type="email" value="${esc(authForm.email || "")}" placeholder="you@example.com" autocomplete="username" autocapitalize="none">
-    <label class="lbl">Password for this app</label>
+    <label class="lbl">Password</label>
     <input class="field" name="password" type="password" placeholder="Your Scorecard password" autocomplete="current-password">
     <div class="inline-actions stacked">
       <button class="btn" data-act="sign-in" ${joining ? "disabled" : ""}>${joining ? "Signing in…" : "Sign in"}</button>
       <button class="btn ghost" data-act="reset-password">Forgot the password</button>
     </div>
-    <p class="hint"><b>Not your email password.</b> The Scorecard password, for this app only.</p>
     ${backAct ? `<p class="hint"><button class="linkbtn" data-act="${backAct}">${backLabel}</button></p>` : ""}
   </div>`;
 }
@@ -1199,8 +1202,8 @@ function screenSignedOut(invite) {
     })}
     ${joiningSomething ? (showCodeEntry && !invite ? `<div class="inline-actions stacked"><button class="btn ghost" data-act="hide-code">Back</button></div>` : "") : `
       <div class="inline-actions stacked first-choices">
-        <button class="btn ghost" data-act="enter-code">I have a code</button>
         <button class="btn ghost" data-act="show-choose">Become a member or start a group</button>
+        <button class="btn ghost" data-act="enter-code">I have a code</button>
       </div>`}
     ${versionBlock()}
   </div>`;
@@ -1290,9 +1293,9 @@ function screenUpgrade() {
       ${offlineAccountNote()}
       ${signInCard({
         heading: "Sign in",
-        lead: `<p class="hint">Only if you already made an account with an email and a password. This device's guest place is not carried over — for that, go back and set an email and password instead.</p>`,
+        lead: `<p class="lead">Sign in with your email and password.</p>`,
         backAct: "account-mode-create",
-        backLabel: "Back — keep my place on this device",
+        backLabel: "Back",
       })}
       ${versionBlock()}
     </div>`;
@@ -1302,14 +1305,12 @@ function screenUpgrade() {
       ${offlineAccountNote()}
     <div class="card padded">
       <h2 class="panel-title">Set your email and password</h2>
-      <p class="lead">The Scorecard now signs everybody in with an email and a password.</p>
-      <p class="hint">Set yours once. You stay the same person: your groups, your role, your rounds and your handicap all stay with you, here and on any device where you sign in.</p>
+      <p class="lead">One step to keep your groups and handicap.</p>
       ${newAccountFields()}
       <div class="inline-actions stacked">
         <button class="btn" data-act="upgrade-account" ${joining ? "disabled" : ""}>${joining ? "Saving…" : "Keep my place"}</button>
       </div>
-      <p class="hint"><button class="linkbtn" data-act="account-mode-signin">I already have an account with an email — sign in</button></p>
-      <p class="hint">Would rather leave? <b>Delete my account</b> is at the foot of this screen.</p>
+      <p class="hint"><button class="linkbtn" data-act="account-mode-signin">Have an account? Sign in</button></p>
     </div>
     ${versionBlock()}
   </div>`;
@@ -4104,7 +4105,7 @@ function renderNow() {
     } else if (db.isAnonymousSession()) {
       tabsEl.innerHTML = "";
       view.innerHTML = screenUpgrade();
-      document.getElementById("brandSub").textContent = "One step to keep your place";
+      document.getElementById("brandSub").textContent = "Handicap tracking";
     } else if (!db.currentAssociation()) {
       tabsEl.innerHTML = "";
       view.innerHTML = screenJoin();
@@ -4836,10 +4837,10 @@ view.addEventListener("click", async (e) => {
       if (!tool) return;
       /* beta.5: coming back from a tool lands on the screen it was opened from. */
       try { sessionStorage.setItem(RETURN_KEY, JSON.stringify({ tab, adminTab, at: Date.now() })); } catch {}
-      /* beta.5: Tidy is packaged inside the app (on the app's own Firebase copy),
-         so it opens here, already signed in. The other tools still open in Safari. */
-      if (platform.isApp() && tool !== "tidy") platform.openExternal(`${platform.webBase()}${tool}.html`);
-      else location.href = `./${tool}.html${EMULATED_QS}`;
+      /* beta.7: every tool is packaged inside the app (on the app's own
+         Firebase copy), so each opens here, already signed in — never in
+         Safari, whose sign-in is separate (Willy, Oct 2). */
+      location.href = `./${tool}.html${EMULATED_QS}`;
       return;
     }
     case "reset-password": {

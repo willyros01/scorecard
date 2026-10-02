@@ -736,6 +736,39 @@ await check("E24", "Tidy opens from Admin already signed in; Back returns to the
   throw new Error(`not back on Admin; the screen says: ${(await text(owner)).replace(/\s+/g, " ").slice(0, 200)}`);
 });
 
+/* E26 (beta.7): every tool opens in the same window from Admin, already
+   signed in, and the page itself scrolls (the shared stylesheet used to lock it). */
+await check("E26", "Rebuild, Clean up, Repair and Tidy open in place, signed in, and scroll", async () => {
+  const problems = [];
+  await owner.setViewportSize({ width: 390, height: 480 });
+  for (const tool of ["rebuild", "cleanup", "repair", "tidy"]) {
+    if (tool === "repair") {
+      await owner.goto(`http://localhost:${PORT}/repair.html?emulators=1`, { waitUntil: "load" });
+    } else {
+      await owner.goto(APP, { waitUntil: "load" });
+      await tab(owner, "admin");
+      await subtab(owner, tool === "tidy" ? "cockpit" : "settings");
+      await owner.locator(`[data-act="open-tool"][data-tool="${tool}"]`).first().click();
+    }
+    try { await owner.waitForURL(new RegExp(`${tool}\\.html\\?emulators=1`), { timeout: 15000 }); }
+    catch { problems.push(`${tool}: did not open in the same window (${owner.url()})`); continue; }
+    await owner.waitForTimeout(4000);
+    const t = await text(owner);
+    if (/Not signed in/.test(t)) problems.push(`${tool}: asked to sign in`);
+    const scrolled = await owner.evaluate(() => {
+      const el = document.scrollingElement || document.documentElement;
+      if (el.scrollHeight <= window.innerHeight + 4) return "short";
+      window.scrollTo(0, 150);
+      return window.scrollY > 0 ? "ok" : "locked";
+    });
+    if (scrolled === "locked") problems.push(`${tool}: the page does not scroll`);
+    if (!(await owner.locator("#backTop").count())) problems.push(`${tool}: no Back to the app at the top`);
+  }
+  await owner.setViewportSize({ width: 1280, height: 720 });
+  await owner.goto(APP, { waitUntil: "load" });
+  if (problems.length) throw new Error(problems.join("; "));
+});
+
 /* E25 (beta.5): a device that has never accepted the Terms of Use sees them
    first; Accept needs the tick; Decline locks; accepting is remembered and
    recorded on the account after sign-in. */
@@ -757,6 +790,10 @@ await check("E25", "first open shows the Terms of Use; decline locks; accept is 
   if (await fresh.locator("#termsAccept").isDisabled()) throw new Error("Accept stays off after the tick");
   await fresh.locator("#termsAccept").click();
   await fresh.waitForSelector('[data-act="sign-in"]', { timeout: 20000 });
+  /* beta.7: Become a member or start a group comes before I have a code. */
+  const member = await fresh.locator('[data-act="show-choose"]').boundingBox();
+  const code = await fresh.locator('[data-act="enter-code"]').boundingBox();
+  if (!member || !code || member.y > code.y) throw new Error("Become a member is not above I have a code");
   await fresh.reload({ waitUntil: "load" });
   await fresh.waitForSelector('[data-act="sign-in"]', { timeout: 20000 });
   if (/I have read and agree/.test(await text(fresh))) throw new Error("asked again after a reload");
