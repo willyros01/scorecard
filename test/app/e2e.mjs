@@ -808,6 +808,84 @@ await check("E25", "first open shows the Terms of Use; decline locks; accept is 
   await fresh.locator('[data-act="terms-close"]').click();
 });
 
+/* E27 (beta.8): inside the iPhone app (Firestore's saved copy on), opening a
+   tool closes the app's Firestore first — the saved copy's hold is given back
+   before the tool page loads — and Back from the tool opens the app again at
+   once. beta.7 left the hold behind, and on the iPhone the app then waited on
+   "Loading your group" until the frozen page was thrown away. */
+await check("E27", "app mode: Tidy opens only after the app's saved copy is released, and Back opens the app at once", async () => {
+  const context = await browser.newContext();
+  context.setDefaultTimeout(20000);
+  await context.addInitScript(() => { window.Capacitor = { isNativePlatform: () => true, Plugins: {} }; });
+  const app = await context.newPage();
+  app.errors = [];
+  app.on("pageerror", (e) => { const l = String(e.message || e); if (!app.errors.includes(l)) app.errors.push(l); });
+  await app.goto(APP, { waitUntil: "load" });
+  await waitForText(app, /Sign in/);
+  await signIn(app, W.email, W.password);
+  await app.waitForSelector('button[data-tab="admin"]', { timeout: 30000 });
+  if (await app.evaluate(async () => (await import("/store.js")).offlineCopyUnavailable())) throw new Error("the saved copy is not on in app mode, so this test proves nothing");
+  await tab(app, "admin");
+  await subtab(app, "cockpit");
+  await app.locator('[data-act="open-tool"][data-tool="tidy"]').first().click();
+  await app.waitForURL(/tidy\.html\?emulators=1/, { timeout: 15000 });
+  const hold = await app.evaluate(async () => {
+    const names = (await indexedDB.databases()).map((d) => d.name).filter((n) => /^firestore\/.*main$/.test(n || ""));
+    if (!names.length) return "no saved copy found";
+    return new Promise((resolve) => {
+      const req = indexedDB.open(names[0]);
+      req.onerror = () => resolve(`could not open ${names[0]}`);
+      req.onsuccess = () => {
+        const idb = req.result;
+        if (!idb.objectStoreNames.contains("owner")) { idb.close(); return resolve("released"); }
+        const get = idb.transaction("owner", "readonly").objectStore("owner").get("owner");
+        get.onsuccess = () => { idb.close(); resolve(get.result ? `still held by ${get.result.ownerId}` : "released"); };
+        get.onerror = () => { idb.close(); resolve("unreadable"); };
+      };
+    });
+  });
+  if (hold !== "released") throw new Error(`the app left for Tidy with its saved copy ${hold}`);
+  await app.waitForTimeout(3000);
+  const t0 = Date.now();
+  await app.locator("#backTop").click();
+  await app.waitForURL((u) => !/tidy\.html/.test(String(u)), { timeout: 15000 });
+  await app.waitForSelector('button[data-tab="enter"]', { timeout: 10000 });
+  const took = Date.now() - t0;
+  if (took > 8000) throw new Error(`the app took ${took} ms to open after Back`);
+  if (app.errors.length) throw new Error(app.errors.join(" | "));
+  await context.close();
+});
+
+/* E28 (beta.8): an invitation opened by somebody who already has an account.
+   Create account with that email signs them in with what they typed and goes
+   straight to the invitation — no second screen asking for the same things. A
+   password that is not the account's stops on the same screen and says so. */
+await check("E28", "invitation, email already has an account: Create account signs in and shows the invitation; a wrong password says so", async () => {
+  const J = { email: "jay@example.com", password: "jay-pass-1" };
+  const jayUid = await signUp(J.email, J.password);
+  const jay = await newPage();
+  await jay.goto(`${APP}&join=G1.PRIV01.gJ`, { waitUntil: "load" });
+  await waitForText(jay, /You.re invited/);
+  const fill = async (pw) => {
+    await jay.fill('[name="email"]', J.email);
+    await jay.fill('[name="password"]', pw);
+    await jay.fill('[name="password-again"]', pw);
+    await jay.locator('[data-act="create-account"]').click();
+  };
+  await fill("not-jays-pass-1");
+  await waitForText(jay, /That email already has an account/);
+  if (!/not its password/.test(await text(jay))) throw new Error("the wrong password is not explained");
+  if (await jay.evaluate(async () => (await import("/store.js")).hasUser())) throw new Error("signed in with a wrong password");
+  await jay.locator('[data-close="1"]').first().click();
+  await fill(J.password);
+  await waitForText(jay, /Jay Unjoined/);
+  if (!(await jay.locator('[data-act="accept-named"]').count())) throw new Error("the invitation's join button is not shown");
+  if (await jay.locator('[data-act="sign-in"]').count()) throw new Error("a sign-in screen was shown");
+  const acct = await accountByEmail(J.email);
+  if (!acct || acct.localId !== jayUid) throw new Error("a different account was made");
+  if (jay.errors.length) throw new Error(jay.errors.join(" | "));
+});
+
 await browser.close();
 server.kill();
 console.log(`\nRESULT: ${passed} passed, ${failed} failed`);
