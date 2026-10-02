@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# A stand-in for gcloud, for test/ops/bdg-tests.sh only. State in $FAKE_DIR.
+log(){ echo "$*" >> "${FAKE_DIR}/calls.txt"; }
+log "$*"
+case "$*" in
+  "config set project"*) exit 0 ;;
+  "config get-value project"*) echo "scorecard-f41b8" ;;
+  "auth list"*) echo "willyros01@gmail.com" ;;
+  "services enable billingbudgets.googleapis.com"*) [[ -f "${FAKE_DIR}/fail-enable" ]] && exit 1; exit 0 ;;
+  "billing accounts list"*) cat "${FAKE_DIR}/accounts.txt" ;;
+  "billing accounts describe"*) echo "CAD" ;;
+  "billing budgets list"*) cat "${FAKE_DIR}/budgets.txt" 2>/dev/null; exit 0 ;;
+  "billing budgets create"*)
+    [[ "$*" == *"--budget-amount=1.00CAD"* && "$*" == *"percent=0.5"* && "$*" == *"percent=0.9"* && "$*" == *"percent=1.0"* ]] || exit 1
+    name="$(sed -n 's/.*--display-name=\(.*\) --budget-amount.*/\1/p' <<<"$*")"
+    echo "${name}" >> "${FAKE_DIR}/budgets.txt" ;;
+  *) echo "fake gcloud: unexpected: $*" >&2; exit 1 ;;
+esac
