@@ -1,4 +1,4 @@
-The Scorecard Version 2.0 (2.30.0-beta.5): Terms of Use and small fixes.
+The Scorecard Version 2.0 (2.30.0-beta.6): Terms of Use and small fixes.
 
 1. Terms of Use: the first time the app opens, the Terms of Use come first. Accept works only after ticking "I have read and agree". Decline keeps the app locked; Read the terms again brings them back. After Accept they are not shown again on this device.
 2. The terms can be read any time from the Terms link at the foot of the screen.
@@ -6,5 +6,6 @@ The Scorecard Version 2.0 (2.30.0-beta.5): Terms of Use and small fixes.
 4. Bottom tabs: at the largest text size (A++) the tab names (Admin and the rest) are no longer cut off.
 5. Zoom: pinch to zoom in, and pinch to zoom back out.
 6. Admin, Cockpit, Open Tidy: Tidy opens inside the app, already signed in. "Back to the app" returns to the Admin screen.
+7. Version 1 import removed: an empty group (such as the Public group) no longer offers to "Bring in your existing data". Admin no longer shows "Your version 1 data".
 
 Report problems with Send a report in the app.

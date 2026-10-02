@@ -520,7 +520,6 @@ function screenJoin() {
         <h2 class="panel-title">Not in a group yet</h2>
         <p class="hint">New groups are created by The Scorecard's owner. Ask your group for an invitation link or its code.</p>
       </div>`}
-      ${migrationCard()}
     ` : ""}
     ${versionBlock()}
   </div>`;
@@ -1379,65 +1378,10 @@ async function upgradeAccount() {
   }
 }
 
-let legacy = null;          /* { v1, preview } once found */
-let importing = false;
 let editingKey = false;
 let showCodeEntry = false;
 let joining = false;
 
-function migrationCard() {
-  if (!legacy || !db.canCreateGroups()) return "";
-  const p = legacy.preview;
-  return `<div class="card padded">
-    <h2 class="panel-title">Bring your existing rounds across</h2>
-    <p class="hint">A version 1 scorecard was found on this account: <b>${p.rounds} round${p.rounds === 1 ? "" : "s"}</b>, ${p.golfers} golfer${p.golfers === 1 ? "" : "s"}, ${p.courses} course${p.courses === 1 ? "" : "s"}${p.earliest ? `, from ${p.earliest} to ${p.latest}` : ""}.</p>
-    <p class="hint"><b>Nothing is deleted.</b> The original is left exactly where it is, and version 1 keeps working. This copies everything into a new group with you as owner. Running it twice does not duplicate anything.</p>
-    <label class="lbl">Name for the group</label>
-    <input class="field" name="import-group" value="${esc(joinForm.groupName)}" placeholder="Saturday Group">
-    <label class="lbl">Your name</label>
-    <input class="field" name="import-name" value="${esc(joinForm.name)}" placeholder="e.g. Willy">
-    <div class="inline-actions stacked">
-      <button class="btn" data-act="import-v1" ${importing ? "disabled" : ""}>${importing ? "Importing…" : "Import my rounds"}</button>
-    </div>
-  </div>`;
-}
-
-async function importV1() {
-  const groupName = ((view.querySelector('[name="import-group"]') || {}).value || joinForm.groupName).trim();
-  const name = ((view.querySelector('[name="import-name"]') || {}).value || joinForm.name).trim();
-  if (!groupName) { flashMsg("Give the group a name first"); return; }
-  if (!name) { flashMsg("Type the name you play under"); return; }
-
-  importing = true;
-  busy("Importing your version 1 rounds");
-  render();
-  try {
-    const result = await db.importLegacyV1({ v1: legacy.v1, assocName: groupName, displayName: name });
-    importing = false;
-    /* Counted afterwards from Firestore rather than assumed, so a partial
-       import is visible instead of silent. */
-    const ok = result.check.rounds.ok && result.check.golfers.ok;
-    await start(result.assocId);
-    flashMsg(ok
-      ? `Imported and verified: ${result.check.rounds.found} rounds, ${result.check.golfers.found} golfers. Your version 1 scorecard is untouched.`
-      : `Imported ${result.check.rounds.found} of ${result.check.rounds.expected} rounds. Nothing was deleted — your version 1 scorecard still has everything. Tap Import again to finish.`);
-  } catch (e) {
-    importing = false;
-    /* Say what actually went wrong. A silent failure here is what makes people
-       think their data has gone, when it is sitting untouched where it was. */
-    const code = String((e && (e.code || e.message)) || "");
-    const cause = code.includes("permission")
-      ? "Firebase refused the write, which means the rules in the console are older than this version. Publish the latest firestore.rules and tap Import again."
-      : code || "No detail was given.";
-    flashMsg(`The import did not finish. ${cause}`);
-    setTimeout(() => { flash = `Nothing was lost — your version 1 scorecard is untouched and version 1 still opens it.`; render(); }, 3400);
-    render();
-  } finally {
-    /* Without this the veil stayed up for ever on both paths — success and
-       failure — leaving the app apparently frozen behind it. */
-    idleAll();
-  }
-}
 
 /* ================= enter ================= */
 
@@ -1619,23 +1563,6 @@ function screenEnter() {
   }
 
   if (!golfers.length || !courses.length) {
-    /* An empty group with a version 1 scorecard waiting is the commonest state
-       to be stuck in, so the way out is offered here rather than three taps
-       away in Admin. */
-    if (legacy && db.canManage()) {
-      const p = legacy.preview;
-      return `${flashBar()}
-        <div class="card padded">
-          <h2 class="panel-title">Bring in your existing data</h2>
-          <p class="hint">You have <b>${p.golfers} golfer${p.golfers === 1 ? "" : "s"}</b> and <b>${p.courses} course${p.courses === 1 ? "" : "s"}</b> from version 1. Copy them into this group — nothing is deleted, and running it twice changes nothing.</p>
-          <div class="inline-actions stacked">
-            <button class="btn" data-act="import-here" ${importing ? "disabled" : ""}>${importing ? "Importing…" : "Bring them in"}</button>
-            <button class="btn ghost" data-go="manage">I'll add them by hand instead</button>
-          </div>
-        </div>
-        ${versionBlock()}`;
-    }
-
     return `${flashBar()}` + empty("Almost ready", db.canManage()
       ? "Add a golfer and a course under Manage, then you can post rounds."
       : "Whoever runs your group still needs to add the roster and a course.")
@@ -3084,7 +3011,6 @@ function blockListSection() {
 
 function settingsTab() {
   return `${safe("Group", groupSection)}
-  ${safe("Import", importSection)}
   ${safe("Backup", backupSection)}
   ${safe("Course lookup", lookupSection)}
   ${safe("Account", accountSection)}`;
@@ -3153,25 +3079,6 @@ function screenAdmin() {
   ${adminTabBar(tabs, adminTab)}
   ${body}
   ${versionBlock()}`;
-}
-
-/* Only appears while there is a version 1 scorecard that has not been brought
-   across. Once its golfers are here it disappears by itself. */
-function importSection() {
-  if (!legacy) return "";
-  const arrived = (legacy.preview.golfers || 0) > 0 && golfers.length >= legacy.preview.golfers;
-  if (arrived) return "";
-  const p = legacy.preview;
-  return `<section class="panel">
-    <div class="panel-head"><h2 class="panel-title">Your version 1 data</h2></div>
-    <div class="card padded">
-      <p class="hint" style="margin:0 0 0.6rem">Still sitting where it always was: <b>${p.golfers} golfer${p.golfers === 1 ? "" : "s"}</b>, <b>${p.courses} course${p.courses === 1 ? "" : "s"}</b>, ${p.rounds} round${p.rounds === 1 ? "" : "s"}${p.earliest ? `, ${p.earliest} to ${p.latest}` : ""}.</p>
-      <p class="hint">This copies it into <b>${esc(association ? association.name : "this group")}</b>. Nothing is deleted, and running it twice does not duplicate anything.</p>
-      <div class="inline-actions stacked">
-        <button class="btn" data-act="import-here" ${importing ? "disabled" : ""}>${importing ? "Importing…" : "Bring it into this group"}</button>
-      </div>
-    </div>
-  </section>`;
 }
 
 /* Shown to an admin or owner who has no account yet.
@@ -5169,7 +5076,6 @@ view.addEventListener("click", async (e) => {
       if (!db.isSignedIn()) signedOutStep = "code";
       return render();
     case "create-group": return createGroup();
-    case "import-v1": return importV1();
 
     case "save-index": {
       const field = view.querySelector('[name="manual-index"]');
@@ -5549,7 +5455,6 @@ view.addEventListener("click", async (e) => {
         return render();
       }
     }
-    case "import-here": return importHere();
     case "rename-group": {
       const field = view.querySelector('[name="assoc-name"]');
       const name = (field ? field.value : "").trim();
@@ -6268,29 +6173,6 @@ async function createGroup(name, groupName) {
   }
 }
 
-async function importHere() {
-  if (!legacy) return;
-  importing = true;
-  busy("Bringing your rounds across");
-  render();
-  try {
-    const result = await db.importLegacyIntoCurrentGroup({ v1: legacy.v1 });
-    importing = false;
-    idleAll();
-    const ok = result.check.rounds.ok && result.check.golfers.ok;
-    flashMsg(ok
-      ? `Brought across and checked: ${result.check.golfers.found} golfers, ${result.check.rounds.found} rounds. Your version 1 scorecard is untouched.`
-      : `Brought across ${result.check.golfers.found} of ${result.check.golfers.expected} golfers. Nothing was lost — tap again to finish.`);
-  } catch (e) {
-    importing = false;
-    idleAll();
-    const code = String((e && (e.code || e.message)) || "");
-    flashMsg(code.includes("permission")
-      ? "Firebase refused it — the rules in the console are older than this version. Publish firestore.rules and try again."
-      : `The import did not finish. ${code || "No detail was given."} Your version 1 data is untouched.`);
-  }
-  render();
-}
 
 /* Everyone on your other groups' rosters, with tick boxes.
  *
@@ -6681,9 +6563,8 @@ async function loadInvitedDetails() {
   if (account) await settleGroup(remembered);
   markBoot("data");
 
-  /* Look for a version 1 scorecard whether or not there is already a group.
-     Somebody who created one first still needs a way to bring their data in. */
-  if (account) legacy = await db.readLegacyV1();
+  /* beta.6 (Willy, Oct 2): the version 1 import is gone for good — no check,
+     no screen. Version 1 was retired; its leftovers are never offered again. */
 
   /* If the link names somebody, fetch them so the screen can greet them. */
   if (account) await loadInvitedDetails();
