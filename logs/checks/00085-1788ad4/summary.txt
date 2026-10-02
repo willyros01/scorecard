@@ -1,9 +1,9 @@
 kind:    checks
 result:  bootstrap=success verify=success web=success
 branch:  v2
-commit:  747678bf321754269dd962343ec0a2ed4a312a66
-run:     55 (id 36885090612)
-time:    2026-10-01T15:44:38Z
+commit:  1788ad4d4767a251625bcc3e7dd161aa103b5624
+run:     85 (id 37026695235)
+time:    2026-10-02T15:26:00Z
 
 --- last lines of bootstrap.log ---
 
@@ -11,9 +11,9 @@ time:    2026-10-01T15:44:38Z
 OK    V1 npm ci succeeded from the committed lockfile
 OK    V2 every package is exactly the approved version
 
-  vendor/firebase/firebase-10.12.0.js  383.4kb
+  vendor/firebase/firebase-10.12.0.js  384.1kb
 
-⚡ Done in 67ms
+⚡ Done in 43ms
 OK    V3 the committed bundle is identical to a fresh build
 OK    V4 no remote code in the 15 packaged files
 OK    V5 Capacitor core, cli and ios are 8.5.2
