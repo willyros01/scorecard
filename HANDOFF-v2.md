@@ -120,3 +120,11 @@ Decisions kept from before: free app; Version 1 was to be unlisted; one GolfCour
 ## 2.30.0-beta.6 (Oct 2) — version 1 import removed for good
 
 Willy: "V1 was a mistake ... make it irrelevant forever." The app no longer reads version 1 data (readLegacyV1, importLegacyV1, importLegacyIntoCurrentGroup removed), shows no import card on Enter (empty group), Join or Admin, and migrate.js is gone from the repo, the app package and the service worker list. model.migrateFromV1 remains as an unused pure function. The old version 1 documents under users/{uid} are still in the database (untouched); users/{uid}/terms/accepted now lives beside them.
+
+## 2.30.0-beta.7 (Oct 2) — tools inside the app
+
+- `tool-firebase.js`: the one connection for every tool page (vendor Firebase, initializeAuth + IndexedDB, emulator mode, no anonymous sign-in, back links keep ?emulators=1). Tidy, Rebuild, Clean up and Repair use it, are packaged (www-files.txt) and open in the same window in the app and on the web. reset.html stays web-only (service-worker escape hatch; not linked from the app).
+- Tool pages scroll: each overrides the shared stylesheet's locked body.
+- Start-up: persistentSingleTabManager({ forceOwnership: true }) in the app; checkPendingDeletion has a 6 s limit; each start-up step's time is written to the report trail ("start-up: ... after N ms").
+- Shorter old-guest screen (screenUpgrade) and sign-in card; "Become a member or start a group" above "I have a code" (fits without scrolling except on the smallest iPhone at A++).
+- Tests: E26 (all tools in place, signed in, scrolling, top back link), E25 checks the first-screen order.
