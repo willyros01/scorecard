@@ -31,8 +31,9 @@ has(){ jq -e --arg p "$2" '.documents | map(select(.missing | not) | .path) | in
 f(){ jq -c --arg p "$2" ".documents[] | select(.path == \$p) | .fields$3" "$1"; }
 # Everything in Willy's four groups except what Philippine Golfers receives, plus the golfers not involved.
 eq(){ [ "$1" = "$2" ]; }
+jqok(){ jq -e "$1" "$2" >/dev/null; }
 absent(){ ! has "$1" "$2"; }
-kept(){ jq -S '[.documents[] | select(.path | test("^associations/(PUBLIC|RR1|GB1)(/|$)|^associations/PG1$|^associations/PG1/members/W$|^golfers/(gP1|gN|gZ)$|^joinCodes/GGGGGG$|^userGroups/W/")) | {path, fields}] | sort_by(.path)' "$1"; }
+kept(){ jq -S '[.documents[] | select(.path | test("^associations/(PUBLIC|RR1|GB1)(/|$)|^associations/PG1$|^associations/PG1/members/W$|^golfers/(gP1|gN|gZ|gBc)$|^joinCodes/GGGGGG$|^userGroups/W/")) | {path, fields}] | sort_by(.path)' "$1"; }
 
 echo "== CL1 two groups could be the real Golfing Buddies: it stops, nothing changes"
 reset ambiguous; snap "${RUN}/b0.json"
@@ -65,7 +66,7 @@ check "CL4 everything kept is exactly as before"                             dif
 for g in PUBLIC RR1 PG1 GB1; do check "CL4 ${g} still exists"              has "${A}" "associations/${g}"; done
 
 echo "== CL5 the orphans are gone, with everything in them"
-check "CL5 no other group remains"                                           jq -e '[.documents[] | select(.missing|not) | .path | select(test("^associations/")) | split("/")[1]] | unique == ["GB1","PG1","PUBLIC","RR1"]' "${A}" >/dev/null
+check "CL5 no other group remains"                                           jqok '[.documents[] | select(.missing|not) | .path | select(test("^associations/")) | split("/")[1]] | unique == ["GB1","PG1","PUBLIC","RR1"]' "${A}"
 check "CL5 the orphan's join code is gone"                                  absent "${A}" "joinCodes/ABC123"
 check "CL5 the real join code is kept"                                       has "${A}" "joinCodes/GGGGGG"
 check "CL5 the link to the orphan group is gone"                             absent "${A}" "userGroups/UA/groups/OLD1"
@@ -73,7 +74,7 @@ check "CL5 the link to the orphan group is gone"                             abs
 echo "== CL6 the golfer found only in orphans moved, with her rounds"
 check "CL6 on the Philippine Golfers roster"                                 has "${A}" "associations/PG1/roster/gA"
 check "CL6 in its directory"                                                 has "${A}" "associations/PG1/directory/gA"
-check "CL6 her own rounds moved (3), the copy did not"                       jq -e '[.documents[] | select(.path|test("^associations/PG1/rounds/"))|.path] | sort == ["associations/PG1/rounds/rA1","associations/PG1/rounds/rA3","associations/PG1/rounds/rG"]' "${A}" >/dev/null
+check "CL6 her own rounds moved (3), the copy did not"                       jqok '[.documents[] | select(.path|test("^associations/PG1/rounds/"))|.path] | sort == ["associations/PG1/rounds/rA1","associations/PG1/rounds/rA3","associations/PG1/rounds/rG"]' "${A}"
 check "CL6 a moved round belongs to Philippine Golfers, no game"             eq "$(f "${A}" associations/PG1/rounds/rA3 '|[.assocId.stringValue, (.gameId|has("nullValue")), .movedFrom.stringValue, .gross.integerValue]')" '["PG1",true,"OLD1","87"]'
 check "CL6 her groups are Philippine Golfers only"                           eq "$(f "${A}" golfers/gA '.groups')" '{"arrayValue":{"values":[{"stringValue":"PG1"}]}}'
 check "CL6 her handicap window points at Philippine Golfers, once each"     eq "$(f "${A}" golfers/gA '.recentWindow.arrayValue.values|map(.mapValue.fields|.roundId.stringValue+"@"+.assocId.stringValue)|join(",")')" '"rG@PG1,rA3@PG1,rA1@PG1"'
@@ -85,6 +86,12 @@ check "CL7 the account found only in an orphan joined Philippine Golfers"    has
 check "CL7 the golfer who stays keeps his real group"                        eq "$(f "${A}" golfers/gB '.groups')" '{"arrayValue":{"values":[{"stringValue":"GB1"}]}}'
 check "CL7 his handicap points at the real copy of a copied round"           eq "$(f "${A}" golfers/gB '.recentWindow.arrayValue.values|map(.mapValue.fields|.roundId.stringValue+"@"+.assocId.stringValue)|join(",")')" '"rB3@GB2,rB2@GB1,v1-round-1@GB1"'
 check "CL7 his handicap number is unchanged"                                 eq "$(f "${A}" golfers/gB '.handicapIndex.doubleValue')" '15.2'
+
+echo "== CL10 Willy's answer A: a leftover copy stays as it is; an old sign-in is not added"
+check "CL10 the copy (no rounds, same name) is not put on Philippine Golfers" absent "${A}" "associations/PG1/roster/gBc"
+check "CL10 its record is unchanged (part of CL4's kept list)"              eq "$(f "${A}" golfers/gBc '.groups')" '{"arrayValue":{"values":[{"stringValue":"GB2"}]}}'
+check "CL10 the account with no email is not added"                         absent "${A}" "associations/PG1/members/UX"
+check "CL10 a golfer of their own with no rounds still moves"               has "${A}" "associations/PG1/roster/gQ"
 
 echo "== CL8 running it again does nothing; verify agrees"
 code="$(cl5)"; show 2

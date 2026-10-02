@@ -13,10 +13,10 @@ const docs = [];
 const put = (path, data) => docs.push({ update: { name: `${DB}/${path}`, fields: enc(data).mapValue.fields } });
 const extra = process.argv[2] || "";
 const DUMP = process.env.CL5_DUMP || "";   /* write a backup file instead (page test) */
-const ACCOUNTS = [["W", "willy@example.com"], ["UA", "ana@example.com"], ["UE", "eve@example.com"]];
+const ACCOUNTS = [["W", "willy@example.com"], ["UA", "ana@example.com"], ["UE", "eve@example.com"], ["UX", null]];
 
 if (!DUMP) for (const [uid, email] of ACCOUNTS) {
-  await fetch(`${AUTH}/projects/${P}/accounts`, { method: "POST", headers: H, body: JSON.stringify({ localId: uid, email, password: `pass-${uid}-123` }) });
+  await fetch(`${AUTH}/projects/${P}/accounts`, { method: "POST", headers: H, body: JSON.stringify(email ? { localId: uid, email, password: `pass-${uid}-123` } : { localId: uid }) });
 }
 const round = (id, assocId, golferId, date, gross, extraFields = {}) => ({ id, assocId, golferId, gameId: null, date, courseName: "Glen Abbey", teeName: "Blue",
   rating: 72.1, slope: 131, par: 72, gross, adjusted: gross, differential: Math.round(((gross - 72.1) * 113 / 131) * 10) / 10, enteredBy: "W", ...extraFields });
@@ -65,6 +65,14 @@ put("golfers/gB", { name: "Ben Buddy", linkedUid: null, groups: ["GB1", "GB2"], 
 put("golfers/gZ", { name: "Zed Merged", archived: true, mergedInto: "gB", groups: ["OLD1"] });
 put("golfers/gP1", { name: "Pat Public", linkedUid: "W", groups: ["PUBLIC"] });
 put("golfers/gN", { name: "Nobody Anywhere", groups: [] });
+/* Willy's answer A: a leftover copy (no rounds, same name as a golfer in a
+   real group) stays as it is; an old sign-in with no email is not added. */
+put("golfers/gBc", { name: "Ben  buddy", linkedUid: "UX", groups: ["GB2"] });
+put("associations/GB2/roster/gBc", { golferId: "gBc" });
+put("associations/OLD1/members/UX", { uid: "UX", role: "member", displayName: "Ben", golferId: "gBc" });
+/* an orphan-only golfer with no rounds and a name of their own still moves */
+put("golfers/gQ", { name: "Quinn Quiet", groups: ["OLD1"] });
+put("associations/OLD1/roster/gQ", { golferId: "gQ" });
 if (extra === "ambiguous") {
   put("associations/GB3", { name: "Golfing  buddies", ownerUid: "W" });
   put("associations/GB3/members/W", { uid: "W", role: "owner", displayName: "Willy" });

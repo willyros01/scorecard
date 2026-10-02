@@ -47,6 +47,8 @@ function summary() {
   console.log(`GOLFERS MOVING TO ${plan.philippine ? plan.philippine.name.toUpperCase() : "PHILIPPINE GOLFERS"}: ${plan.movedGolfers.length}`);
   for (const g of plan.movedGolfers) console.log(`  ${g.name}  (${g.rounds} rounds move with them)`);
   console.log(`ACCOUNTS JOINING PHILIPPINE GOLFERS: ${plan.newMembers.length}`);
+  console.log(`LEFT AS THEY ARE: ${plan.copies.length} leftover golfer copies with no rounds, ${plan.skippedAccounts.length} old sign-ins with no email.`);
+  for (const g of plan.copies) console.log(`  ${g.name}  (copy, no rounds)`);
   console.log("");
   console.log(`ROUNDS: ${plan.rounds.move} move, ${plan.rounds.copy} removed as copies of rounds already in your groups,`);
   console.log(`        ${plan.rounds.staying} removed belonging to golfers who stay in your groups (${plan.rounds.stayingInHandicap} of them count in a handicap now),`);
