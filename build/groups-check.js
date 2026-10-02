@@ -36,6 +36,11 @@ function show(plan, fileName, savedAt) {
   if (!plan.newMembers.length) h.push(card("None."));
   for (const m of plan.newMembers) h.push(card(`<b>${esc(m.displayName || m.email || m.uid)}</b><br>${esc(m.email)}<br><span class="small">${esc(m.why)}</span>`));
 
+  h.push(`<h2>Left as they are: <span class="num">${(plan.copies || []).length + (plan.skippedAccounts || []).length}</span></h2>`);
+  for (const g of plan.copies || []) h.push(card(`<b>${esc(g.name)}</b><br>a leftover copy with no rounds, found in ${esc(g.from.join(", "))}<br><span class="small">your real ${esc(g.name)} is in your groups; this copy is kept as it is and goes into no group</span>`));
+  for (const a of plan.skippedAccounts || []) h.push(card(`<b>${esc(a.displayName || a.uid)}</b><br><span class="small">an old sign-in with no email; not added to Philippine Golfers</span>`));
+  if (!(plan.copies || []).length && !(plan.skippedAccounts || []).length) h.push(card("None."));
+
   const r = plan.rounds;
   h.push("<h2>Rounds in the orphan groups</h2>");
   h.push(card(`<b>${r.move}</b> move to Philippine Golfers with their golfer`));

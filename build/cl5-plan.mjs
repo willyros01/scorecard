@@ -125,7 +125,18 @@ export function makePlan(backup, { now = Date.now(), moveStayingRounds = false }
   }
   for (const [gid, g] of golfers) for (const x of g.data.groups || []) if (O.has(x)) link(oLink, gid, x);
   const isActive = (gid) => golfers.has(gid) && !golfers.get(gid).data.archived;
-  const moved = new Set([...oLink.keys()].filter((gid) => isActive(gid) && !(pLink.get(gid) || new Set()).size));
+  const orphanOnly = [...oLink.keys()].filter((gid) => isActive(gid) && !(pLink.get(gid) || new Set()).size);
+  /* Willy, Oct 1 (answer A): a leftover COPY of a golfer — no rounds anywhere,
+     and the same name as a golfer already in a real group — is left exactly
+     as it is, in no group, so a group never shows the same person twice. */
+  const roundCount = new Map();
+  for (const g of groupIds) for (const r of items(g, "rounds")) roundCount.set(r.data.golferId, (roundCount.get(r.data.golferId) || 0) + 1);
+  const realNames = new Set([...pLink.keys()].filter((gid) => isActive(gid) && pLink.get(gid).size).map((gid) => norm(golfers.get(gid).data.name)));
+  const copies = new Set(orphanOnly.filter((gid) => !roundCount.get(gid) && realNames.has(norm(golfers.get(gid).data.name))));
+  const moved = new Set(orphanOnly.filter((gid) => !copies.has(gid)));
+  /* Willy, Oct 1 (answer A): accounts with no email (old version 1 sign-ins)
+     are not added to Philippine Golfers. */
+  const hasEmail = (u) => !!emailOf.get(u);
 
   /* ---- rounds ---- */
   const keyOf = (r) => [r.golferId, r.date, r.gross, r.adjusted, norm(r.courseName), norm(r.teeName)].join("|");
@@ -161,7 +172,7 @@ export function makePlan(backup, { now = Date.now(), moveStayingRounds = false }
   /* ---- golfer records: their groups and their handicap window ---- */
   const golferUpdates = new Map();   /* gid -> {mask, fields, groupsAfter, windowAfter, indexBefore, indexAfter, unresolved} */
   for (const [gid, g] of golfers) {
-    if (g.data.archived) continue;
+    if (g.data.archived || copies.has(gid)) continue;
     const before = g.data.groups || [];
     let groupsAfter = before.filter((x) => !O.has(x));
     if (moved.has(gid) && PG && !groupsAfter.includes(PG)) groupsAfter = [...groupsAfter, PG];
@@ -256,7 +267,7 @@ export function makePlan(backup, { now = Date.now(), moveStayingRounds = false }
     if (!byPath.has(`associations/${PG}/roster/${gid}`)) last.push({ op: "set", path: `associations/${PG}/roster/${gid}`, fields: encodeFields({ golferId: gid, addedAt: now, movedFrom: "clean-up" }) });
     last.push({ op: "set", path: `associations/${PG}/directory/${gid}`, fields: encodeFields({ golferId: gid, displayName: String(g.data.name || ""), handicapIndex: model.effectiveIndex(after).index, updatedAt: now }) });
     const u = g.data.linkedUid;
-    if (u && !pgMembers.has(u) && !newMembers.has(u)) {
+    if (u && hasEmail(u) && !pgMembers.has(u) && !newMembers.has(u)) {
       newMembers.set(u, { uid: u, displayName: String(g.data.name || ""), golferId: gid, why: "their golfer moves" });
     }
     if (up && !up.none) last.push({ op: "update", path: `golfers/${gid}`, fields: up.fields, mask: up.mask, updateTime: g.doc.updateTime });
@@ -266,7 +277,7 @@ export function makePlan(backup, { now = Date.now(), moveStayingRounds = false }
   }
   /* accounts left in no real group */
   for (const [u, a] of accountGroups) {
-    if (a.p.size || !a.o.length || newMembers.has(u) || pgMembers.has(u)) continue;
+    if (a.p.size || !a.o.length || newMembers.has(u) || pgMembers.has(u) || !hasEmail(u)) continue;
     const gid = a.o.map((x) => x.member.data.golferId).find((x) => x && isActive(x)) || null;
     newMembers.set(u, { uid: u, displayName: String(a.o[0].member.data.displayName || ""), golferId: gid, why: "belongs only to orphan groups" });
   }
@@ -320,12 +331,12 @@ export function makePlan(backup, { now = Date.now(), moveStayingRounds = false }
   /* No golfer and no account may end up with no group. */
   const pgRosterAfter = new Set([...items(PG || "", "roster").map((r) => r.id), ...moved]);
   for (const gid of new Set([...oLink.keys(), ...pLink.keys()])) {
-    if (!isActive(gid)) continue;
+    if (!isActive(gid) || copies.has(gid)) continue;
     const inReal = (pLink.get(gid) || new Set()).size || pgRosterAfter.has(gid);
     if (!inReal) stops.push(`Golfer ${golfers.get(gid).data.name || gid} would be left with no group.`);
   }
   for (const [u, a] of accountGroups) {
-    if (!a.p.size && !newMembers.has(u) && !pgMembers.has(u)) stops.push(`Account ${emailOf.get(u) || u} would be left with no group.`);
+    if (!a.p.size && hasEmail(u) && !newMembers.has(u) && !pgMembers.has(u)) stops.push(`Account ${emailOf.get(u) || u} would be left with no group.`);
   }
 
   const count = (k) => roundPlan.filter((r) => r.kind === k).length;
@@ -348,6 +359,9 @@ export function makePlan(backup, { now = Date.now(), moveStayingRounds = false }
     stops: [...new Set(stops)],
     protected: protectedList, philippine: PG ? { id: PG, name: groupName(PG) } : null,
     orphans, movedGolfers,
+    copies: [...copies].map((gid) => ({ id: gid, name: String(golfers.get(gid).data.name || gid), from: [...oLink.get(gid)].map((x) => groupName(x) || x) })),
+    skippedAccounts: [...accountGroups.entries()].filter(([u, a]) => !a.p.size && !hasEmail(u) && !pgMembers.has(u))
+      .map(([u, a]) => ({ uid: u, displayName: String((a.o[0] && a.o[0].member.data.displayName) || "") })),
     newMembers: [...newMembers.values()].map((m) => ({ ...m, email: emailOf.get(m.uid) || "" })),
     rounds: {
       move: count("move"), copy: count("copy"), noGolfer: count("noGolfer"), staying: stayingRounds.length,

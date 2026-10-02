@@ -35,6 +35,8 @@ try {
   check("the golfer who moves is named, with her rounds", /Ana Orphan[\s\S]*3 rounds move with them/.test(text));
   check("two accounts join Philippine Golfers", /Accounts joining Philippine Golfers:\s*2/.test(text));
   check("the staying golfer's round is flagged", /Ben Buddy: 1 round, 1 in the handicap now/.test(text));
+  check("the leftover copy is listed as left as it is", /Left as they are:\s*2[\s\S]*Ben  ?buddy[\s\S]*leftover copy with no rounds/.test(text));
+  check("the golfer of her own with no rounds moves", /Golfers moving to Philippine Golfers:\s*2/.test(text) && text.includes("Quinn Quiet"));
   check("no page errors", errors.length === 0);
   check("nothing is sent anywhere", requests.every((u) => u.startsWith(`http://127.0.0.1:${port}/`)));
   if (errors.length) console.log(errors.join("\n"));

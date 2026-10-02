@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# BK1–BK2: build/bk1.mjs (the complete backup) reads EVERYTHING, every
+# BK1–BK3: build/bk1.mjs (the complete backup) reads EVERYTHING, every
 # subcollection included, even under a parent document that has no fields,
 # and writes nothing. Against the emulators. Nothing touches the live project.
 set -uo pipefail
@@ -23,6 +23,8 @@ put "associations/G1/rounds/r1" "round"
 put "associations/G1/members/m1" "member"
 put "associations/GHOST/rounds/r9" "orphan round under a group document that does not exist"
 put "golfers/g1" "golfer"
+put "associations/odd id 3/rounds/r 1" "ids with spaces"
+for i in $(seq 1 30); do put "associations/W${i}" "group"; put "associations/W${i}/rounds/r1" "round"; put "associations/W${i}/members/m1" "member"; done
 OUT="$(mktemp -d)/backup.json"
 ACCESS_TOKEN=owner PROJECT="${P}" FS_BASE="${FS}" AUTH_BASE="${AUTH}" node "${REPO}/build/bk1.mjs" "${OUT}" > "${OUT}.log" 2>&1
 code=$?; sed 's/^/      | /' "${OUT}.log"
@@ -35,6 +37,8 @@ check "BK1 a golfer is saved"                                               has 
 check "BK2 a round under a group document that no longer exists is saved"   has "associations/GHOST/rounds/r9"
 check "BK2 the accounts are listed, without passwords"                      jq -e '(.accounts | length == 1) and (.accounts[0].email == "one@example.com") and ((tostring | test("passwordHash")) | not)' "${OUT}"
 check "BK2 the round's value is saved exactly"                              jq -e '.documents[] | select(.path == "associations/G1/rounds/r1") | .fields.v.stringValue == "round"' "${OUT}"
+check "BK3 ids with spaces are read"                                        has "associations/odd id 3/rounds/r 1"
+check "BK3 a wide tree is read in full (31 groups)"                         jq -e '[.documents[] | select((.missing | not) and (.path | test("^associations/[^/]+$")))] | length == 31' "${OUT}"
 echo
 echo "RESULT: ${pass} passed, ${fail} failed"
 [[ "${fail}" -eq 0 ]]
