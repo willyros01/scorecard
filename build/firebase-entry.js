@@ -62,6 +62,7 @@ import {
   arrayUnion,
   arrayRemove,
   connectFirestoreEmulator,
+  terminate,
 } from "firebase/firestore";
 
 export const app = { initializeApp, deleteApp };
@@ -114,4 +115,5 @@ export const store = {
   arrayUnion,
   arrayRemove,
   connectFirestoreEmulator,
+  terminate,   /* beta.8: close Firestore before a page change (store.js shutDown) */
 };

@@ -722,11 +722,13 @@ await check("E24", "Tidy opens from Admin already signed in; Back returns to the
   await tab(owner, "admin");
   await subtab(owner, "cockpit");
   await owner.locator('[data-act="open-tool"][data-tool="tidy"]').first().click();
-  await owner.waitForURL(/tidy\.html\?emulators=1/, { timeout: 15000 });
+  try { await owner.waitForURL(/tidy\.html\?emulators=1/, { timeout: 15000 }); }
+  catch { throw new Error("the app did not leave for Tidy (closing its Firestore did not finish)"); }
   await waitForText(owner, /Checked \d+ golfers|recorded twice|Nothing needs fixing|need fixing|golfer/, 30000);
   if (/Not signed in/.test(await text(owner))) throw new Error("Tidy asked to sign in");
   await owner.locator("#backTop").click();
-  await owner.waitForURL(/\/\?emulators=1$/, { timeout: 15000 });
+  try { await owner.waitForURL(/\/\?emulators=1$/, { timeout: 15000 }); }
+  catch { throw new Error(`Back did not leave Tidy; the link says "${await owner.locator("#backTop").innerText().catch(() => "?")}"`); }
   const end = Date.now() + 25000;
   while (Date.now() < end) {
     const on = await owner.evaluate(() => { const b = document.querySelector('button[data-tab="admin"]'); return !!(b && b.classList.contains("on")); });
@@ -884,6 +886,21 @@ await check("E28", "invitation, email already has an account: Create account sig
   const acct = await accountByEmail(J.email);
   if (!acct || acct.localId !== jayUid) throw new Error("a different account was made");
   if (jay.errors.length) throw new Error(jay.errors.join(" | "));
+});
+
+/* E29 (beta.8): Back from a tool always works, even when nobody is signed in
+   there and its Firestore was never used. Deleting the Firebase app in one go
+   hung in exactly that case; the page now closes Firestore first. */
+await check("E29", "signed out: Back from Tidy returns to the app at once", async () => {
+  const nobody = await newPage();
+  await nobody.goto(`http://localhost:${PORT}/tidy.html?emulators=1`, { waitUntil: "load" });
+  await waitForText(nobody, /Not signed in/);
+  const t0 = Date.now();
+  await nobody.locator("#backTop").click();
+  await nobody.waitForURL((u) => !/tidy\.html/.test(String(u)), { timeout: 8000 });
+  await waitForText(nobody, /Sign in/, 10000);
+  if (Date.now() - t0 > 8000) throw new Error(`took ${Date.now() - t0} ms`);
+  if (nobody.errors.length) throw new Error(nobody.errors.join(" | "));
 });
 
 await browser.close();

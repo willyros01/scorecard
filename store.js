@@ -950,7 +950,14 @@ export async function shutDown() {
   if (!fb) return;
   const instance = fb.db && fb.db.app;
   const mod = fb.mod;
+  const database = fb.db;
   fb = null;   // nothing may reach a closed Firestore (the outbox timer checks fb)
+  /* Firestore FIRST, while the sign-in is still alive: deleting the app
+     closes both at once, and Firestore then waits for the sign-in it was
+     just deprived of — for ever (proved in Chromium; it is what stuck
+     Tidy's "Back to the app"). Then the app, which ends the sign-in's
+     polling of IndexedDB. */
+  if (database) await mod.store.terminate(database);
   if (instance) await mod.app.deleteApp(instance);
 }
 

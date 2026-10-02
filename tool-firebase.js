@@ -27,7 +27,11 @@ export const emulated = (() => {
 let opened = null;
 async function leave() {
   const mod = opened; opened = null;
-  if (mod) await mod.app.deleteApp(mod.instance);
+  if (!mod) return;
+  /* Firestore first, while the sign-in is alive (see store.js shutDown):
+     deleting the app alone hangs when Firestore is still unused. */
+  await mod.store.terminate(mod.db);
+  await mod.app.deleteApp(mod.instance);
 }
 
 /* A page brought back from the iPhone's page cache has closed its Firebase:
@@ -65,7 +69,7 @@ export async function connectTool() {
     auth.connectAuthEmulator(authority, "http://127.0.0.1:9099", { disableWarnings: true });
     store.connectFirestoreEmulator(db, "127.0.0.1", 8080);
   }
-  opened = { app, instance };
+  opened = { app, store, instance, db };
   const user = await new Promise((resolve) => {
     const stop = auth.onAuthStateChanged(authority, (u) => { stop(); resolve(u && !u.isAnonymous ? u : null); });
   });
