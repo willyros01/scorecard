@@ -722,11 +722,13 @@ await check("E24", "Tidy opens from Admin already signed in; Back returns to the
   await tab(owner, "admin");
   await subtab(owner, "cockpit");
   await owner.locator('[data-act="open-tool"][data-tool="tidy"]').first().click();
-  await owner.waitForURL(/tidy\.html\?emulators=1/, { timeout: 15000 });
+  try { await owner.waitForURL(/tidy\.html\?emulators=1/, { timeout: 15000 }); }
+  catch { throw new Error("the app did not leave for Tidy (closing its Firestore did not finish)"); }
   await waitForText(owner, /Checked \d+ golfers|recorded twice|Nothing needs fixing|need fixing|golfer/, 30000);
   if (/Not signed in/.test(await text(owner))) throw new Error("Tidy asked to sign in");
   await owner.locator("#backTop").click();
-  await owner.waitForURL(/\/\?emulators=1$/, { timeout: 15000 });
+  try { await owner.waitForURL(/\/\?emulators=1$/, { timeout: 15000 }); }
+  catch { throw new Error(`Back did not leave Tidy; the link says "${await owner.locator("#backTop").innerText().catch(() => "?")}"`); }
   const end = Date.now() + 25000;
   while (Date.now() < end) {
     const on = await owner.evaluate(() => { const b = document.querySelector('button[data-tab="admin"]'); return !!(b && b.classList.contains("on")); });
@@ -806,6 +808,99 @@ await check("E25", "first open shows the Terms of Use; decline locks; accept is 
   await fresh.locator('[data-act="terms-view"]').first().click();
   await waitForText(fresh, /Effective October 2, 2026/);
   await fresh.locator('[data-act="terms-close"]').click();
+});
+
+/* E27 (beta.8): inside the iPhone app (Firestore's saved copy on), opening a
+   tool closes the app's Firestore first — the saved copy's hold is given back
+   before the tool page loads — and Back from the tool opens the app again at
+   once. beta.7 left the hold behind, and on the iPhone the app then waited on
+   "Loading your group" until the frozen page was thrown away. */
+await check("E27", "app mode: Tidy opens only after the app's saved copy is released, and Back opens the app at once", async () => {
+  const context = await browser.newContext();
+  context.setDefaultTimeout(20000);
+  await context.addInitScript(() => { window.Capacitor = { isNativePlatform: () => true, Plugins: {} }; });
+  const app = await context.newPage();
+  app.errors = [];
+  app.on("pageerror", (e) => { const l = String(e.message || e); if (!app.errors.includes(l)) app.errors.push(l); });
+  await app.goto(APP, { waitUntil: "load" });
+  await waitForText(app, /Sign in/);
+  await signIn(app, W.email, W.password);
+  await app.waitForSelector('button[data-tab="admin"]', { timeout: 30000 });
+  if (await app.evaluate(async () => (await import("/store.js")).offlineCopyUnavailable())) throw new Error("the saved copy is not on in app mode, so this test proves nothing");
+  await tab(app, "admin");
+  await subtab(app, "cockpit");
+  await app.locator('[data-act="open-tool"][data-tool="tidy"]').first().click();
+  await app.waitForURL(/tidy\.html\?emulators=1/, { timeout: 15000 });
+  const hold = await app.evaluate(async () => {
+    const names = (await indexedDB.databases()).map((d) => d.name).filter((n) => /^firestore\/.*main$/.test(n || ""));
+    if (!names.length) return "no saved copy found";
+    return new Promise((resolve) => {
+      const req = indexedDB.open(names[0]);
+      req.onerror = () => resolve(`could not open ${names[0]}`);
+      req.onsuccess = () => {
+        const idb = req.result;
+        if (!idb.objectStoreNames.contains("owner")) { idb.close(); return resolve("released"); }
+        const get = idb.transaction("owner", "readonly").objectStore("owner").get("owner");
+        get.onsuccess = () => { idb.close(); resolve(get.result ? `still held by ${get.result.ownerId}` : "released"); };
+        get.onerror = () => { idb.close(); resolve("unreadable"); };
+      };
+    });
+  });
+  if (hold !== "released") throw new Error(`the app left for Tidy with its saved copy ${hold}`);
+  await app.waitForTimeout(3000);
+  const t0 = Date.now();
+  await app.locator("#backTop").click();
+  await app.waitForURL((u) => !/tidy\.html/.test(String(u)), { timeout: 15000 });
+  await app.waitForSelector('button[data-tab="enter"]', { timeout: 10000 });
+  const took = Date.now() - t0;
+  if (took > 8000) throw new Error(`the app took ${took} ms to open after Back`);
+  if (app.errors.length) throw new Error(app.errors.join(" | "));
+  await context.close();
+});
+
+/* E28 (beta.8): an invitation opened by somebody who already has an account.
+   Create account with that email signs them in with what they typed and goes
+   straight to the invitation — no second screen asking for the same things. A
+   password that is not the account's stops on the same screen and says so. */
+await check("E28", "invitation, email already has an account: Create account signs in and shows the invitation; a wrong password says so", async () => {
+  const J = { email: "jay@example.com", password: "jay-pass-1" };
+  const jayUid = await signUp(J.email, J.password);
+  const jay = await newPage();
+  await jay.goto(`${APP}&join=G1.PRIV01.gJ`, { waitUntil: "load" });
+  await waitForText(jay, /You.re invited/);
+  const fill = async (pw) => {
+    await jay.fill('[name="email"]', J.email);
+    await jay.fill('[name="password"]', pw);
+    await jay.fill('[name="password-again"]', pw);
+    await jay.locator('[data-act="create-account"]').click();
+  };
+  await fill("not-jays-pass-1");
+  await waitForText(jay, /That email already has an account/);
+  if (!/not its password/.test(await text(jay))) throw new Error("the wrong password is not explained");
+  if (await jay.evaluate(async () => (await import("/store.js")).hasUser())) throw new Error("signed in with a wrong password");
+  await jay.locator('[data-close="1"]').first().click();
+  await fill(J.password);
+  await waitForText(jay, /Jay Unjoined/);
+  if (!(await jay.locator('[data-act="accept-named"]').count())) throw new Error("the invitation's join button is not shown");
+  if (await jay.locator('[data-act="sign-in"]').count()) throw new Error("a sign-in screen was shown");
+  const acct = await accountByEmail(J.email);
+  if (!acct || acct.localId !== jayUid) throw new Error("a different account was made");
+  if (jay.errors.length) throw new Error(jay.errors.join(" | "));
+});
+
+/* E29 (beta.8): Back from a tool always works, even when nobody is signed in
+   there and its Firestore was never used. Deleting the Firebase app in one go
+   hung in exactly that case; the page now closes Firestore first. */
+await check("E29", "signed out: Back from Tidy returns to the app at once", async () => {
+  const nobody = await newPage();
+  await nobody.goto(`http://localhost:${PORT}/tidy.html?emulators=1`, { waitUntil: "load" });
+  await waitForText(nobody, /Not signed in/);
+  const t0 = Date.now();
+  await nobody.locator("#backTop").click();
+  await nobody.waitForURL((u) => !/tidy\.html/.test(String(u)), { timeout: 8000 });
+  await waitForText(nobody, /Sign in/, 10000);
+  if (Date.now() - t0 > 8000) throw new Error(`took ${Date.now() - t0} ms`);
+  if (nobody.errors.length) throw new Error(nobody.errors.join(" | "));
 });
 
 await browser.close();

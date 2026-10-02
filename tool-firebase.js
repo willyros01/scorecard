@@ -20,10 +20,37 @@ export const emulated = (() => {
   } catch { return false; }
 })();
 
-/* Every "Back to the app" link (href="./") keeps the test flag. */
+/* beta.8: the Firebase app this page opened, so it can be closed before the
+   page is left. The iPhone keeps a page it navigates away from frozen in
+   memory; one frozen with Firestore or the sign-in store open makes the app
+   that comes back wait (see store.js shutDown). */
+let opened = null;
+async function leave() {
+  const mod = opened; opened = null;
+  if (!mod) return;
+  /* Firestore first, while the sign-in is alive (see store.js shutDown):
+     deleting the app alone hangs when Firestore is still unused. */
+  await mod.store.terminate(mod.db);
+  await mod.app.deleteApp(mod.instance);
+}
+
+/* A page brought back from the iPhone's page cache has closed its Firebase:
+   start it afresh. */
+addEventListener("pageshow", (e) => { if (e.persisted) location.reload(); });
+
+/* Every "Back to the app" link (href="./") keeps the test flag, and closes this
+   page's Firebase — waiting until it is closed — before going back. */
 export function fixBackLinks() {
-  if (!emulated) return;
-  for (const a of document.querySelectorAll('a[href="./"]')) a.href = "./?emulators=1";
+  for (const a of document.querySelectorAll('a[href="./"]')) {
+    if (emulated) a.href = "./?emulators=1";
+    a.addEventListener("click", async (e) => {
+      e.preventDefault();
+      const to = a.href;
+      a.textContent = "Going back…";
+      try { await leave(); } catch { /* go back regardless; the app's start-up timings (Send a report) would show a slow start */ }
+      location.href = to;
+    });
+  }
 }
 
 /* Resolves { db, store, auth, authority, user } — user is null when nobody is
@@ -42,6 +69,7 @@ export async function connectTool() {
     auth.connectAuthEmulator(authority, "http://127.0.0.1:9099", { disableWarnings: true });
     store.connectFirestoreEmulator(db, "127.0.0.1", 8080);
   }
+  opened = { app, store, instance, db };
   const user = await new Promise((resolve) => {
     const stop = auth.onAuthStateChanged(authority, (u) => { stop(); resolve(u && !u.isAnonymous ? u : null); });
   });
