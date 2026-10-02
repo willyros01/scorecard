@@ -903,6 +903,162 @@ await check("E29", "signed out: Back from Tidy returns to the app at once", asyn
   if (nobody.errors.length) throw new Error(nobody.errors.join(" | "));
 });
 
+/* ---- beta.9: Delete my account, forced out, locked, finished, and joining again ---- */
+async function idToken(email, password) {
+  const r = await fetch(`${AUTH}/accounts:signInWithPassword?key=fake-api-key`, { method: "POST",
+    headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, password, returnSecureToken: true }) });
+  const j = await r.json();
+  if (!j.idToken) throw new Error(`sign-in ${email}: ${JSON.stringify(j).slice(0, 200)}`);
+  return j.idToken;
+}
+/* A write made AS that account (the rules apply). Returns the HTTP status. */
+async function writeAs(token, docPath, data) {
+  const r = await fetch(`${FS}:commit`, { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ writes: [{ update: { name: `projects/${P}/databases/(default)/documents/${docPath}`, fields: fields(data) } }] }) });
+  return r.status;
+}
+async function deleteAs(token, docPath) {
+  const r = await fetch(`${FS}:commit`, { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ writes: [{ delete: `projects/${P}/databases/(default)/documents/${docPath}` }] }) });
+  return r.status;
+}
+/* Somebody who joined G1 by a named invitation, exactly as the app leaves them. */
+async function joinedPerson(key, name, email, password) {
+  const uid = await signUp(email, password);
+  const nk = name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  await put(`golfers/${key}`, { name, nameKey: nk, linkedUid: uid, groups: ["G1"] });
+  await put(`golferNames/${nk}`, { golferId: key, name });
+  await put(`associations/G1/roster/${key}`, { golferId: key });
+  await put(`associations/G1/directory/${key}`, { golferId: key, displayName: name, handicapIndex: null });
+  await put(`associations/G1/members/${uid}`, { uid, role: "member", displayName: name, golferId: key });
+  await put(`associations/G1/invites/${key}`, { acceptedBy: uid, role: "member" });
+  await put(`associations/G1/invitations/${key}`, { golferId: key, name, handicapIndex: null, groupName: "Saturday Group", role: "member", sentBy: W.uid });
+  await put(`userGroups/${uid}/groups/G1`, { assocId: "G1", name: "Saturday Group" });
+  await put(`accountEmails/${email}`, { at: "seeded" });
+  await put(`associations/G1/rounds/r-${key}`, { id: `r-${key}`, golferId: key, assocId: "G1", date: "2026-09-05", differential: 14.0, gross: 90 });
+  return uid;
+}
+async function openDelete(page, password) {
+  await tab(page, "summary");   // its footer carries "Delete my account"
+  await page.locator('[data-act="delete-account"]').first().click();
+  await page.fill('[name="delete-password"]', password);
+  await page.locator('[data-del="go"]').click();
+}
+const signedInNow = (page) => page.evaluate(async () => (await import("/store.js")).hasUser());
+
+/* E30 (Willy's test, Oct 2): a member deletes their own account. They are
+   signed out, the sign-in and the email are gone, the golfer stays in the
+   group with its rounds, unlinked. Invited again with the SAME email, they
+   join as a new account and get the same golfer back. */
+await check("E30", "Delete my account: signed out, gone, golfer and rounds kept; invited again with the same email they rejoin as the same golfer", async () => {
+  const Z = { email: "zed@example.com", password: "zed-pass-1" };
+  const zUid = await joinedPerson("gZ", "Zed Leaver", Z.email, Z.password);
+  const zed = await newPage();
+  await zed.goto(APP, { waitUntil: "load" });
+  await waitForText(zed, /Sign in/);
+  await signIn(zed, Z.email, Z.password);
+  await waitForText(zed, /Saturday Group/i);
+  await openDelete(zed, Z.password);
+  await waitForText(zed, /Your account has been deleted/, 30000);
+  if (await signedInNow(zed)) throw new Error("still signed in after the deletion");
+  const problems = [];
+  if (await accountByEmail(Z.email)) problems.push("the sign-in still exists");
+  if (await getDoc(`associations/G1/members/${zUid}`)) problems.push("the membership is still there");
+  if (await getDoc(`accountEmails/${Z.email}`)) problems.push("the email is still registered");
+  const g = await getDoc("golfers/gZ");
+  if (!g || g.linkedUid !== null) problems.push(`golfer: ${JSON.stringify(g)}`);
+  if (!(await getDoc("associations/G1/roster/gZ"))) problems.push("the golfer left the roster");
+  if (!(await getDoc("associations/G1/rounds/r-gZ"))) problems.push("the round was deleted");
+  if (problems.length) throw new Error(problems.join("; "));
+  /* Invited again, same email: a brand-new account joins as the same golfer. */
+  const back = await newPage();
+  await back.goto(`${APP}&join=G1.PRIV01.gZ`, { waitUntil: "load" });
+  await waitForText(back, /You.re invited/);
+  await back.fill('[name="email"]', Z.email);
+  await back.fill('[name="password"]', "zed-new-pass-1");
+  await back.fill('[name="password-again"]', "zed-new-pass-1");
+  await back.locator('[data-act="create-account"]').click();
+  await waitForText(back, /Zed Leaver/);
+  await back.locator('[data-act="accept-named"]').click();
+  const end = Date.now() + 20000;
+  while (Date.now() < end && (await back.evaluate(async () => (await import("/store.js")).currentAssociation())) !== "G1") await back.waitForTimeout(300);
+  const nUid = (await accountByEmail(Z.email) || {}).localId;
+  if (!nUid || nUid === zUid) throw new Error("no new account");
+  if ((await getDoc("golfers/gZ")).linkedUid !== nUid) throw new Error("the golfer is not linked to the new account");
+  if (!(await getDoc(`associations/G1/members/${nUid}`))) throw new Error("not a member again");
+  if (back.errors.length || zed.errors.length) throw new Error([...back.errors, ...zed.errors].join(" | "));
+});
+
+/* E31 (Willy, Oct 2): a deletion that stops part-way. The person is signed
+   out at once and told; signing in again is refused; the database refuses
+   their writes (rules: a deleting account is locked) and they cannot withdraw
+   the request; the completion job then finishes it, email included. */
+await check("E31", "a deletion that stops part-way: signed out at once, cannot sign back in, locked by the rules, finished by the job", async () => {
+  const K = { email: "kit@example.com", password: "kit-pass-1" };
+  const kUid = await joinedPerson("gK", "Kit Halfway", K.email, K.password);
+  const kit = await newPage();
+  await kit.goto(APP, { waitUntil: "load" });
+  await waitForText(kit, /Sign in/);
+  await signIn(kit, K.email, K.password);
+  await waitForText(kit, /Saturday Group/i);
+  await kit.evaluate(() => { globalThis.__scorecardStopDeletionAt = "Leaving your groups"; });
+  await openDelete(kit, K.password);
+  await waitForText(kit, /being deleted/, 30000);
+  if (await signedInNow(kit)) throw new Error("still signed in after the deletion stopped");
+  const rec = await getDoc(`accountDeletions/${kUid}`);
+  if (!rec) throw new Error("no deletion request on the server");
+  if (!/Leaving your groups/.test(String(rec.appStep || ""))) throw new Error(`the stopped step is not recorded: ${JSON.stringify(rec)}`);
+  /* Signing in again is refused. */
+  await kit.locator('[data-close="1"]').first().click().catch(() => {});
+  await kit.reload({ waitUntil: "load" });
+  await waitForText(kit, /Sign in/);
+  await signIn(kit, K.email, K.password);
+  await waitForText(kit, /being deleted/, 20000);
+  await kit.waitForTimeout(1500);
+  if (await signedInNow(kit)) throw new Error("signed in to an account that is being deleted");
+  /* The rules lock it. */
+  const token = await idToken(K.email, K.password);
+  const locks = [];
+  if (await writeAs(token, `userGroups/${kUid}/groups/G9`, { assocId: "G9", name: "x" }) === 200) locks.push("it could add a group to its list");
+  if (await writeAs(token, "courses/cK", { name: "Kit Course", createdBy: kUid }) === 200) locks.push("it could add a course");
+  if (await deleteAs(token, `accountDeletions/${kUid}`) === 200) locks.push("it could withdraw its deletion request");
+  if (locks.length) throw new Error(locks.join("; "));
+  /* The completion job finishes it. */
+  const { spawnSync } = await import("node:child_process");
+  const job = spawnSync("bash", [path.resolve(SITE, ".github/scripts/finish-deletions.sh")], { encoding: "utf8", env: { ...process.env,
+    ACCESS_TOKEN: "owner", PROJECT: P, FS_BASE: "http://127.0.0.1:8080/v1", AUTH_BASE: AUTH, MIN_AGE_SECONDS: "0" } });
+  if (job.status !== 0) throw new Error(`the job failed: ${(job.stdout + job.stderr).slice(-300)}`);
+  const problems = [];
+  if (await accountByEmail(K.email)) problems.push("the sign-in still exists");
+  if (await getDoc(`associations/G1/members/${kUid}`)) problems.push("the membership is still there");
+  if (await getDoc(`accountEmails/${K.email}`)) problems.push("the email is still registered");
+  if ((await getDoc("golfers/gK")).linkedUid !== null) problems.push("the golfer is still linked");
+  if (!(await getDoc("associations/G1/rounds/r-gK"))) problems.push("the round was deleted");
+  if (await getDoc(`accountDeletions/${kUid}`)) problems.push("the request is still there");
+  if (problems.length) throw new Error(problems.join("; "));
+});
+
+/* E32 (Willy, Oct 2): an invitation opened by somebody who is ALREADY in that
+   group as that golfer (a deletion that never finished, or a second device).
+   Joining must simply open the group, not be refused. */
+await check("E32", "an invitation for a golfer you already are, in a group you are already in: joining opens the group", async () => {
+  const L = { email: "lou@example.com", password: "lou-pass-1" };
+  await joinedPerson("gL", "Lou Already", L.email, L.password);
+  const lou = await newPage();
+  await lou.goto(`${APP}&join=G1.PRIV01.gL`, { waitUntil: "load" });
+  await waitForText(lou, /You.re invited/);
+  await lou.fill('[name="email"]', L.email);
+  await lou.fill('[name="password"]', L.password);
+  await lou.fill('[name="password-again"]', L.password);
+  await lou.locator('[data-act="create-account"]').click();
+  await waitForText(lou, /Lou Already/);
+  await lou.locator('[data-act="accept-named"]').click();
+  const end = Date.now() + 20000;
+  while (Date.now() < end && (await lou.evaluate(async () => (await import("/store.js")).currentAssociation())) !== "G1") await lou.waitForTimeout(300);
+  if (/Could not join|did not work/i.test(await text(lou))) throw new Error(`refused: ${(await text(lou)).replace(/\s+/g, " ").slice(0, 200)}`);
+  if ((await lou.evaluate(async () => (await import("/store.js")).currentAssociation())) !== "G1") throw new Error("the group did not open");
+});
+
 await browser.close();
 server.kill();
 console.log(`\nRESULT: ${passed} passed, ${failed} failed`);

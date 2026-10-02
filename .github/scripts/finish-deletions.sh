@@ -93,6 +93,15 @@ auth_exists(){ # uid  -> 0 exists, 1 gone
   [[ "$(jq '(.users // []) | length' <<<"${out}")" -gt 0 ]]
 }
 
+# beta.9: the account's email, while the account still exists ("" if none).
+auth_email(){ # uid
+  jq -n --arg u "$1" '{localId:[$u]}' > "${WORK}/lookup.json"
+  local out
+  out="$(call POST "${AUTH_BASE}/projects/${PROJECT}/accounts:lookup" "${WORK}/lookup.json")" \
+    || { log "ERROR: Firebase Authentication lookup failed."; exit 4; }
+  jq -r '(.users // [])[0].email // ""' <<<"${out}"
+}
+
 auth_delete(){ # uid
   jq -n --arg u "$1" '{localId:$u}' > "${WORK}/delete.json"
   call POST "${AUTH_BASE}/projects/${PROJECT}/accounts:delete" "${WORK}/delete.json" >/dev/null
@@ -166,6 +175,16 @@ process(){ # uid   (runs in a subshell; exit codes: 0 done, 10 blocked, 11 not c
     commit "$(jq -sc '[ .[] | {delete:.name} ]' "${WORK}/v1docs.jsonl")"
   done < <(jq -r '.collectionIds[]?' "${WORK}/v1.json")
   commit "$(jq -nc --arg n "${DB}/users/${uid}" '[{delete:$n}]')"
+
+  # beta.9: the account's entry in the email list goes with it, so the same
+  # email can be used again (an application, or a new invitation). The email
+  # comes from Firebase Authentication, never from the request.
+  local email key
+  email="$(auth_email "${uid}")"
+  if [[ -n "${email}" ]]; then
+    key="$(tr '[:upper:]' '[:lower:]' <<<"${email}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+    commit "$(jq -nc --arg n "${DB}/accountEmails/${key}" '[{delete:$n}]')"
+  fi
 
   # 6. The sign-in, then independent confirmation, then (only then) the request.
   if auth_exists "${uid}"; then auth_delete "${uid}" || { log "ERROR: delete refused."; exit 5; }; fi

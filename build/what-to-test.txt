@@ -1,8 +1,11 @@
-The Scorecard Version 2.0 (2.30.0-beta.8): no more waiting after Tidy, and one less invitation screen.
+The Scorecard Version 2.0 (2.30.0-beta.9): Delete my account done properly, and joining again.
 
-1. Open Tidy (Admin, Cockpit), then tap "Back to the app". The app should open within a few seconds, with no stop on "Loading your group" and no need to switch apps. The same for Rebuild the roster and Clean up unused groups.
-2. Invitation with an email that already has an account: type that email and its password twice on the invitation screen and tap Create account. You go straight to the invitation, with no second sign-in screen. A wrong password is explained on the same screen.
-3. If anything is ever slow, tap Send a report: it lists how long each start-up step took, and how long closing took when you left for a tool.
-4. Still in this version: tools inside the app, Terms of Use on first open, fixed-size bottom tabs, pinch zoom.
+1. Delete my account (Summary tab, at the bottom): after you confirm with your password you are always signed out, and the screen says either "Your account has been deleted" or "This account is being deleted" (then the rest finishes by itself within 20 minutes).
+2. Signing in to an account that is being deleted is refused with that message. Nothing of it opens.
+3. The golfer stays in the group with all rounds and handicap; an admin can still post for them.
+4. Invite the same person again with the same email: they join as a new account and get the same golfer back.
+5. Opening an invitation for a group you are already in now simply opens the group.
+6. A refused invitation now says exactly why and what to do.
+7. Still in this version: no wait after Tidy, one invitation screen less.
 
 Report problems with Send a report in the app.
