@@ -128,3 +128,22 @@ Willy: "V1 was a mistake ... make it irrelevant forever." The app no longer read
 - Start-up: persistentSingleTabManager({ forceOwnership: true }) in the app; checkPendingDeletion has a 6 s limit; each start-up step's time is written to the report trail ("start-up: ... after N ms").
 - Shorter old-guest screen (screenUpgrade) and sign-in card; "Become a member or start a group" above "I have a code" (fits without scrolling except on the smallest iPhone at A++).
 - Tests: E26 (all tools in place, signed in, scrolling, top back link), E25 checks the first-screen order.
+
+## OPEN — beta.7 hang on "Loading your group" after returning from a tool (Oct 2, analysed, NOT built)
+
+**Symptom (Willy, iPhone app):** after opening Tidy (or any tool) and tapping Back, the boot card stays on "Opening your scorecard / Checking your access ✓ / Loading your group" until the app is backgrounded or the phone sleeps; on return everything is normal.
+
+**Cause (code analysis):** beta.7 opens tools with `location.href = ./tool.html` in the SAME WKWebView, and Back is a fresh navigation to `./`. WKWebView keeps the old app page frozen (back-forward cache) with its Firestore client and IndexedDB persistence still open. The new app page's Firestore (persistentLocalCache in IndexedDB) cannot proceed while the frozen page holds it; backgrounding evicts the frozen page, which frees it, and the waiting reads complete. `settleGroup()` → `db.loadMyGroups()` / `amMemberOf()` / `start()` reads then wait indefinitely. The beta.7 6 s limit on `checkPendingDeletion` only HID the same stall one step earlier (it fails quietly and moves on). Desktop Chromium tests never reproduced it because Chromium does not keep that page alive the same way.
+
+**Willy's rules for the fix:**
+- Fix the CAUSE. No time-out counters to cover it up ("it just hides the problem").
+- Offline use must keep working: the app must still open the group from the saved copy with no signal (store and forward). Scores already queue in our own outbox (localStorage `golf:v2:outbox`), independent of Firestore's cache. Plan B (drop the saved copy) was rejected for this reason.
+- Firebase web SDK can only use IndexedDB or memory; SQLite would need the native Firebase iOS SDK (a full rewrite) — not chosen.
+
+**Agreed plan (Plan A) — build only after Willy says go:**
+1. Before navigating to any tool, the app shuts its Firestore down cleanly: export `terminate` from the vendor bundle wrapper, stop all watchers, flush or leave the outbox untouched, `await terminate(fb.db)`, then navigate. Also terminate on `pagehide` (covers any other way the page is left) and, on `pageshow` with `persisted`, reload so a restored frozen page never reuses a terminated client.
+2. Remove the beta.7 `forceOwnership: true` (not needed once the old client is closed).
+3. Propose to Willy removing the beta.7 6 s limit on the deletion check, since it masked this (his rule: no time-outs that hide problems). Do not remove without his go.
+4. Review EVERY start-up read path for the same class of stall before building (not just the reported one).
+5. New e2e test that reproduces the frozen page: keep the old page's Firestore + IndexedDB open (e.g. a second page/iframe holding the persistent client), open Tidy, come back, and require boot to reach "ready" within a few seconds — online and offline (from the saved copy). It must FAIL on beta.7 code first.
+6. Confirm on device with Send a report (start-up timings "start-up: ... reached after N ms").
