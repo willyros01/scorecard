@@ -26,7 +26,7 @@ echo "OK: Cloud Shell is now on project ${CURRENT_PROJECT}."
 export CLOUDSDK_CORE_PROJECT="${PROJECT_ID}"
 export GOOGLE_CLOUD_PROJECT="${PROJECT_ID}"
 
-COMMIT="PIN_ME"     # v2 branch, tested
+COMMIT="9e69664414e2315d8333d51e47bb7212ae16abd3"     # v2 branch, tested (ops run green)
 RAW="https://raw.githubusercontent.com/willyros01/scorecard"
 WORK="$(pwd)/scorecard-bk-tools"
 
