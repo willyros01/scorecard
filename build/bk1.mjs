@@ -12,7 +12,7 @@
  * included too. Nothing is written to the database.
  *
  * Settings (environment): ACCESS_TOKEN (required; "owner" for the emulators),
- * PROJECT (default scorecard-f41b8), FS_BASE, AUTH_BASE.
+ * PROJECT (default scorecard-f41b8), FS_BASE, AUTH_BASE, BK_NO_QUOTA_HEADER.
  */
 import fs from "node:fs";
 
@@ -30,7 +30,9 @@ if (!TOKEN) die("ACCESS_TOKEN is missing.");
 if (!OUT) die("Say where to save the backup.");
 
 const headers = { Authorization: `Bearer ${TOKEN}`, "Content-Type": "application/json" };
-if (TOKEN !== "owner") headers["x-goog-user-project"] = PROJECT;
+/* A person's own Google sign-in (Cloud Shell) needs the project named for
+   quota; the nightly job's helper account must not send it (BK_NO_QUOTA_HEADER=1). */
+if (TOKEN !== "owner" && process.env.BK_NO_QUOTA_HEADER !== "1") headers["x-goog-user-project"] = PROJECT;
 /* Document ids may hold spaces and other characters a web address cannot,
    so every part of a path is encoded. */
 const at = (name) => name.split("/").map(encodeURIComponent).join("/");

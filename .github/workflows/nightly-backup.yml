@@ -1,0 +1,68 @@
+name: Nightly backup
+
+# Every night: a complete, read-only backup of the database (build/bk1.mjs),
+# LOCKED with Willy's passphrase and kept on the "backups" branch for 30 days
+# (.github/scripts/nightly-backup.sh). Willy, Oct 2, 2026.
+#
+# Google sign-in is keyless (Workload Identity Federation) and limited to THIS
+# workflow on main; the helper account can only read (set up by build/nbk.txt).
+# GitHub emails the owner if a night fails.
+# Keep-alive: every run re-enables this schedule (GitHub switches schedules off
+# in public repos after 60 days without activity), and the nightly commit to
+# the backups branch is activity in itself.
+on:
+  schedule:
+    - cron: "0 7 * * *"   # 07:00 UTC = 3 am Toronto in summer, 2 am in winter
+  workflow_dispatch:
+  # Also once whenever this job changes on main (that is how the first night runs).
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/nightly-backup.yml
+      - .github/scripts/nightly-backup.sh
+
+permissions:
+  contents: write   # only to store the locked backup on the backups branch
+  actions: write    # only to keep this workflow's schedule switched on
+  id-token: write   # keyless sign-in to Google
+
+concurrency:
+  group: nightly-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Keyless sign-in to Google (read-only helper, this workflow on main only)
+        id: auth
+        uses: google-github-actions/auth@v3.0.0
+        with:
+          workload_identity_provider: projects/811267714235/locations/global/workloadIdentityPools/scorecard-backup/providers/nightly-backup
+          service_account: scorecard-backup@scorecard-f41b8.iam.gserviceaccount.com
+          token_format: access_token
+          access_token_lifetime: 1800s
+      - name: Complete backup (read only)
+        env:
+          ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+          PROJECT: scorecard-f41b8
+          BK_NO_QUOTA_HEADER: "1"
+        run: node build/bk1.mjs "$RUNNER_TEMP/backup.json"
+      - name: Lock, check and store (keeps 30 days)
+        env:
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+          REMOTE: https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git
+        run: bash .github/scripts/nightly-backup.sh "$RUNNER_TEMP/backup.json"
+      - name: Remove the unlocked copy
+        if: always()
+        run: rm -f "$RUNNER_TEMP/backup.json"
+      - name: Keep the nightly schedule switched on
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X PUT "repos/${GITHUB_REPOSITORY}/actions/workflows/nightly-backup.yml/enable"

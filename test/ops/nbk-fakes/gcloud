@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# A stand-in for gcloud, for test/ops/nbk-tests.sh only. State in $FAKE_DIR:
+#   sa (exists), roles.txt, pool (state), condition.txt, link.txt, calls.txt
+#   fail-provider: the first provider create fails (then removed)
+S="${FAKE_DIR}"; echo "$*" >> "$S/calls.txt"
+arg(){ local k="$1"; shift; for a in "$@"; do [[ "$a" == "$k="* ]] && { echo "${a#*=}"; return; }; done; }
+case "$*" in
+  "config set project"*) exit 0 ;;
+  "config get-value project"*) echo scorecard-f41b8 ;;
+  "auth list"*) echo willyros01@gmail.com ;;
+  "projects describe"*) echo "${FAKE_NUMBER:-811267714235}" ;;
+  "services enable"*) exit 0 ;;
+  "iam service-accounts describe"*) [[ -f "$S/sa" ]] && echo scorecard-backup@scorecard-f41b8.iam.gserviceaccount.com || exit 1 ;;
+  "iam service-accounts create"*) touch "$S/sa" ;;
+  "projects get-iam-policy"*)
+    role="$(arg --filter "$@" | sed -E 's/^bindings\.role:([^ ]+) AND.*/\1/')"
+    grep -qx "$role" "$S/roles.txt" 2>/dev/null && echo "$role"; exit 0 ;;
+  "projects add-iam-policy-binding"*)
+    [[ -f "$S/sa" ]] || exit 1
+    [[ "$(arg --member "$@")" == "serviceAccount:scorecard-backup@scorecard-f41b8.iam.gserviceaccount.com" ]] || exit 1
+    arg --role "$@" >> "$S/roles.txt" ;;
+  "iam workload-identity-pools describe"*) [[ -f "$S/pool" ]] && cat "$S/pool" || exit 1 ;;
+  "iam workload-identity-pools create"*) echo ACTIVE > "$S/pool" ;;
+  "iam workload-identity-pools undelete"*) echo ACTIVE > "$S/pool" ;;
+  "iam workload-identity-pools providers describe"*) [[ -f "$S/condition.txt" ]] && cat "$S/condition.txt" || exit 1 ;;
+  "iam workload-identity-pools providers create-oidc"*)
+    [[ -f "$S/fail-provider" ]] && { rm -f "$S/fail-provider"; exit 1; }
+    [[ "$(arg --issuer-uri "$@")" == "https://token.actions.githubusercontent.com" ]] || exit 1
+    arg --attribute-condition "$@" > "$S/condition.txt"; arg --attribute-mapping "$@" > "$S/mapping.txt" ;;
+  "iam workload-identity-pools providers update-oidc"*) arg --attribute-condition "$@" > "$S/condition.txt" ;;
+  "iam service-accounts get-iam-policy"*) cat "$S/link.txt" 2>/dev/null; exit 0 ;;
+  "iam service-accounts add-iam-policy-binding"*)
+    [[ "$(arg --role "$@")" == roles/iam.workloadIdentityUser ]] || exit 1
+    arg --member "$@" >> "$S/link.txt" ;;
+  *) echo "fake gcloud: unexpected: $*" >&2; exit 1 ;;
+esac
