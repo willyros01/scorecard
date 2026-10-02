@@ -28,6 +28,7 @@ function noteRead(snap, found) {
 }
 export const readsOffline = () => cacheMiss || (typeof navigator !== "undefined" && navigator.onLine === false);
 let persistentCacheOff = false;
+let closing = false;   /* beta.8: set by shutDown() before a page change */
 export const offlineCopyUnavailable = () => persistentCacheOff;
 
 let fb = null;            // { app, auth, db, mod }
@@ -118,11 +119,10 @@ export async function init() {
     if (platform.isApp()) {
       try {
         database = store.initializeFirestore(instance, {
-          /* beta.7: the app has only ever one window, so it takes the saved
-             copy over at once (forceOwnership) instead of waiting for the
-             previous page's hold to run out — that wait is what left
-             "Checking your access" on screen after returning from Tidy. */
-          localCache: store.persistentLocalCache({ tabManager: store.persistentSingleTabManager({ forceOwnership: true }) }),
+          /* beta.8: no forceOwnership. Every page now closes its saved copy
+             cleanly before it is left (shutDown below), so the next page finds
+             it free; beta.7's take-over only moved the wait somewhere else. */
+          localCache: store.persistentLocalCache({ tabManager: store.persistentSingleTabManager() }),
         });
       } catch {
         persistentCacheOff = true;
@@ -214,13 +214,22 @@ async function writeOperation(op) {
 export async function flush() {
   if (outbox.isEmpty()) { setStatus(uid ? "Synced" : configured ? "Connecting" : "On this device"); return; }
   if (!configured) { setStatus("On this device"); return; }
+  if (!fb) return;   /* beta.8: closed for a page change; the next page sends them */
   if (!uid || (typeof navigator !== "undefined" && !navigator.onLine)) {
     setStatus(`Saved on device (${outbox.count()} waiting)`, true);
     return;
   }
 
   setStatus("Syncing");
-  const result = await outbox.flush(writeOperation);
+  /* beta.8: a write cut off by shutDown() is NOT a refusal. Firestore reports
+     it as failed-precondition, which the outbox treats as permanent and would
+     set aside; this keeps it queued instead, for the next page to send. */
+  const closed = () => new Error("Closed for a page change; sent from the next page.");
+  const result = await outbox.flush(async (op) => {
+    if (closing) throw closed();
+    try { return await writeOperation(op); }
+    catch (e) { if (closing) throw closed(); throw e; }
+  });
 
   /* Anything given up on must be SAID. A round that quietly failed to upload
      and then vanished from the queue is the worst outcome there is — worse than
@@ -919,6 +928,30 @@ export function watchCourses(callback) {
   const stop = listen(col("courses"), (snap) => callback(snap.docs.map((d) => d.data())), (e) => report(e));
   unsubscribers.push(stop);
   return stop;
+}
+
+/* beta.8 — THE CAUSE of "Loading your group" after coming back from a tool.
+ *
+ * Inside the iPhone app every page shares one window. A page that is left by
+ * navigating (to Tidy and back) is not destroyed: WebKit keeps it frozen in
+ * memory with its Firestore saved copy (IndexedDB) still open, and any
+ * database step it had in flight frozen with it. The next page's database
+ * steps queue behind that frozen step until iOS throws the old page away
+ * (switching apps, sleep) — exactly what Willy saw. So a page is never left
+ * with Firestore open: shutDown() stops every listener and deletes the
+ * Firebase app, which ends Firestore (gives the saved copy back and closes
+ * IndexedDB) and Auth. Nothing is lost: the saved copy and any waiting
+ * writes stay in IndexedDB, and our own outbox is in localStorage.
+ * Waits for the close to FINISH; it does not time out — a failure is
+ * reported, never hidden. */
+export async function shutDown() {
+  closing = true;
+  stopWatching();
+  if (!fb) return;
+  const instance = fb.db && fb.db.app;
+  const mod = fb.mod;
+  fb = null;   // nothing may reach a closed Firestore (the outbox timer checks fb)
+  if (instance) await mod.app.deleteApp(instance);
 }
 
 export function stopWatching() {

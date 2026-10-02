@@ -1341,12 +1341,27 @@ async function createAccountHere() {
     joining = false;
     flashMsg("Account created. Use this email and password on your other devices.");
   } catch (err) {
-    joining = false;
     const code = String((err && (err.code || err.message)) || "");
     if (code.includes("email-already-in-use")) {
-      accountMode = "signin";
-      flashMsg("That email already has an account. Sign in with it instead.");
+      /* beta.8 (Willy, Oct 2): the email already has an account. Asking for
+         the same email and password again on a sign-in screen was the second
+         screen he objected to. Sign in with what was just typed — the same
+         check as the Sign in screen, so nothing is weaker — and go straight on
+         to the invitation (or the code). Only a password that does not match
+         stops here, on this same screen. */
+      try {
+        const result = await db.signInWithEmail(fields);
+        joining = false;
+        await finishSignIn(result, fields.email, "That email already had an account, so you are signed in with it.");
+      } catch (again) {
+        joining = false;
+        const why = String((again && (again.code || again.message)) || "");
+        openSignInProblem(/no-such-account|wrong-password|invalid-credential|invalid-login/i.test(why)
+          ? Object.assign(new Error("auth/existing-account-password"), { code: "auth/existing-account-password" })
+          : again, fields.email);
+      }
     } else {
+      joining = false;
       openSignInProblem(err, fields.email);
     }
   } finally {
@@ -4839,7 +4854,18 @@ view.addEventListener("click", async (e) => {
       try { sessionStorage.setItem(RETURN_KEY, JSON.stringify({ tab, adminTab, at: Date.now() })); } catch {}
       /* beta.7: every tool is packaged inside the app (on the app's own
          Firebase copy), so each opens here, already signed in — never in
-         Safari, whose sign-in is separate (Willy, Oct 2). */
+         Safari, whose sign-in is separate (Willy, Oct 2).
+         beta.8: but first close this page's Firestore and wait until it is
+         closed. Left open, the iPhone keeps this page frozen with it, and the
+         app coming back from the tool waited on "Loading your group" until
+         the phone threw the frozen page away (store.js shutDown). */
+      busy("Opening");
+      const left = Date.now();
+      let how;
+      try { await db.shutDown(); how = `closed in ${Date.now() - left} ms`; }
+      catch (err) { how = `closing FAILED: ${(err && err.message) || err}`; }
+      /* Kept for the report trail of the page that comes back (Send a report). */
+      try { sessionStorage.setItem(RETURN_KEY, JSON.stringify({ tab, adminTab, at: Date.now(), left: `left for ${tool}: ${how}` })); } catch {}
       location.href = `./${tool}.html${EMULATED_QS}`;
       return;
     }
@@ -5981,27 +6007,7 @@ async function signIn() {
   try {
     const result = await db.signInWithEmail({ email, password });
     joining = false;
-    accountMode = null;
-    if (db.readJoinLink()) {
-      /* Signed in from an invitation: show the invitation next. */
-      await loadInvitedDetails();
-    } else {
-      await settleGroup(db.currentAssociation() || db.recallAssociation());
-    }
-
-    /* Land on Enter. Signing in used to leave people on whichever tab they
-       happened to be on — usually Admin, which is not where anybody wants to
-       start. */
-    tab = "enter";
-
-    flashMsg(
-      result.outcome === "password-added"
-        ? `Password set on ${result.email}. That is now your one account — use this email and password on every device.`
-        : result.outcome === "created" ? "Account created. Use this email and password on your other devices."
-        : `Signed in as ${email}.`);
-    /* Phase C: an approval for the public group waiting for this email.
-       Its own message, if any, replaces the one above. */
-    await checkPublicApproval();
+    await finishSignIn(result, email);
   } catch (err) {
     joining = false;
     openSignInProblem(err, email);
@@ -6010,6 +6016,32 @@ async function signIn() {
     idle();
     render();
   }
+}
+
+/* What follows a successful sign-in, from the Sign in screen or (beta.8) from
+   Create account when the email already had an account. */
+async function finishSignIn(result, email, message) {
+  accountMode = null;
+  if (db.readJoinLink()) {
+    /* Signed in from an invitation: show the invitation next. */
+    await loadInvitedDetails();
+  } else {
+    await settleGroup(db.currentAssociation() || db.recallAssociation());
+  }
+
+  /* Land on Enter. Signing in used to leave people on whichever tab they
+     happened to be on — usually Admin, which is not where anybody wants to
+     start. */
+  tab = "enter";
+
+  flashMsg(message
+    || (result.outcome === "password-added"
+      ? `Password set on ${result.email}. That is now your one account — use this email and password on every device.`
+      : result.outcome === "created" ? "Account created. Use this email and password on your other devices."
+      : `Signed in as ${email}.`));
+  /* Phase C: an approval for the public group waiting for this email.
+     Its own message, if any, replaces the one above. */
+  await checkPublicApproval();
 }
 
 /* A failed sign-in has to say which of the several possible things went wrong,
@@ -6050,6 +6082,12 @@ function openSignInProblem(error, email) {
   } else if (code.includes("weak-password")) {
     title = "Password too short";
     detail = "Use at least six characters.";
+  } else if (code.includes("existing-account-password")) {
+    /* beta.8: Create account, with an email that already has an account and a
+       password that is not that account's. */
+    title = "That email already has an account";
+    detail = "The password you typed is not its password. Type that account's password in both boxes, or reset it.";
+    offerReset = true;
   } else if (code.includes("email-already-in-use") || code.includes("credential-already-in-use")) {
     title = "That email already has an account";
     detail = "Sign in with it instead, or use a different email.";
@@ -6548,7 +6586,13 @@ async function loadInvitedDetails() {
   }
 }
 
+/* beta.8: a page that left closed its Firebase first (store.js shutDown). If
+   the iPhone ever brings that frozen page back (pageshow from its cache), it
+   must not carry on with a closed database: start it afresh. */
+addEventListener("pageshow", (e) => { if (e.persisted) location.reload(); });
+
 (async function boot() {
+  if (returnTo && returnTo.left) note(returnTo.left);
   render();
   await platform.initLinks();   /* iPhone app: the link that opened it, if any */
   platform.onLink(async () => { await loadInvitedDetails(); render(); });
