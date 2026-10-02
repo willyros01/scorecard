@@ -1,11 +1,10 @@
-The Scorecard Version 2.0 (2.30.0-beta.6): Terms of Use and small fixes.
+The Scorecard Version 2.0 (2.30.0-beta.7): tools inside the app, and smoother screens.
 
-1. Terms of Use: the first time the app opens, the Terms of Use come first. Accept works only after ticking "I have read and agree". Decline keeps the app locked; Read the terms again brings them back. After Accept they are not shown again on this device.
-2. The terms can be read any time from the Terms link at the foot of the screen.
-3. Invitation: the screen after tapping an invitation link is shorter: You're invited, Email, New password, Password again, Create account.
-4. Bottom tabs: at the largest text size (A++) the tab names (Admin and the rest) are no longer cut off.
-5. Zoom: pinch to zoom in, and pinch to zoom back out.
-6. Admin, Cockpit, Open Tidy: Tidy opens inside the app, already signed in. "Back to the app" returns to the Admin screen.
-7. Version 1 import removed: an empty group (such as the Public group) no longer offers to "Bring in your existing data". Admin no longer shows "Your version 1 data".
+1. Admin, Cockpit, Open Tidy, and Admin, Settings, Rebuild the roster and Clean up unused groups: each opens inside the app, already signed in, with "Back to the app" at the top. None opens Safari any more.
+2. On those tool pages you can scroll straight away.
+3. After "Back to the app", the app should open quickly, not stay on "Checking your access". If it is ever slow, tap Send a report: it now lists how long each start-up step took.
+4. First screen (signed out): "Become a member or start a group" is now above "I have a code".
+5. Sign-in card: shorter. The old "Set your email and password" screen (old guest sign-ins only) is shorter too.
+6. Still in this version: Terms of Use on first open, the short invitation screen, fixed-size bottom tabs, pinch zoom, and no version 1 import.
 
 Report problems with Send a report in the app.
