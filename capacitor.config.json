@@ -4,6 +4,7 @@
   "webDir": "www",
   "ios": {
     "contentInset": "never",
-    "limitsNavigationsToAppBoundDomains": false
+    "limitsNavigationsToAppBoundDomains": false,
+    "zoomEnabled": true
   }
 }

@@ -241,7 +241,17 @@ const claimedOnce = new Set();   /* golfers this session has already tried to cl
 /* beta.3: the signed-out screens. null = the first screen (Sign in);
    "code" = I have a code; "choose" = Become a member or start a group;
    "member" = the public group application; "group" = a private group request. */
-let adminTab = "cockpit";       /* beta.4: Cockpit | Applications | Members | Settings */
+let adminTab = "cockpit";
+/* beta.5: the screen to return to after Tidy (kept for this browser tab only). */
+const RETURN_KEY = "golf:return";
+const EMULATED_QS = (() => { try { return new URLSearchParams(location.search).has("emulators") ? "?emulators=1" : ""; } catch { return ""; } })();
+let returnTo = (() => {
+  try {
+    const r = JSON.parse(sessionStorage.getItem(RETURN_KEY) || "null");
+    sessionStorage.removeItem(RETURN_KEY);
+    return r && Date.now() - r.at < 2 * 60 * 60 * 1000 ? { ...r, until: Date.now() + 20000 } : null;
+  } catch { return null; }
+})();       /* beta.4: Cockpit | Applications | Members | Settings */
 let signedOutStep = null;
 let applySentTo = "";           /* signed out: the application just sent */
 let applySentAuto = false;      /* beta.4: that application got the sign-in link (Auto) */
@@ -1132,13 +1142,13 @@ function signInCard({ heading, lead = "", backAct = "", backLabel = "" }) {
 /* Email, password and the password again — a typo in a new password locks
    somebody out of an account they have only just made. */
 function newAccountFields() {
+  /* beta.5: short labels (Willy: the invitation screen was too wordy). */
   return `<label class="lbl">Email</label>
     <input class="field" name="email" type="email" value="${esc(authForm.email || "")}" placeholder="you@example.com" autocomplete="username" autocapitalize="none">
-    <label class="lbl">Choose a password for this app</label>
-    <input class="field" name="password" type="password" placeholder="At least 6 characters" autocomplete="new-password">
-    <label class="lbl">The same password again</label>
-    <input class="field" name="password-again" type="password" placeholder="At least 6 characters" autocomplete="new-password">
-    <p class="hint"><b>Not your email password.</b> Pick a different one, for The Scorecard only.</p>`;
+    <label class="lbl">New password</label>
+    <input class="field" name="password" type="password" placeholder="Not your email password" autocomplete="new-password">
+    <label class="lbl">Password again</label>
+    <input class="field" name="password-again" type="password" placeholder="At least 6 characters" autocomplete="new-password">`;
 }
 
 /* Nobody signed in. With an invitation or a code, the account comes first
@@ -1156,9 +1166,8 @@ function screenSignedOut(invite) {
   const mode = accountMode || (joiningSomething ? "create" : "signin");
   const adminOnly = invite && invite.role === "admin" && !invite.golferId;
   const heading = invite
-    ? (adminOnly ? "You have been invited to help run a group" : "You have been invited to a group")
+    ? (adminOnly ? "You\u2019re invited to help run a group" : "You\u2019re invited")
     : showCodeEntry ? "Join with a code" : "Sign in";
-  const next = invite ? "Then you will see your invitation." : "Then you join the group with your code.";
 
   if (joiningSomething && mode === "create") {
     return `<div class="stack">
@@ -1166,12 +1175,12 @@ function screenSignedOut(invite) {
       ${offlineAccountNote()}
       <div class="card padded">
         <h2 class="panel-title">${heading}</h2>
-        <p class="hint">First, create your account: your email and a password. It is the same account on every device, so your groups and handicap follow you. ${next}</p>
+        <p class="lead">${invite ? "Create your account to join." : "Create your account, then type the code."}</p>
         ${newAccountFields()}
         <div class="inline-actions stacked">
-          <button class="btn" data-act="create-account" ${joining ? "disabled" : ""}>${joining ? "Creating your account…" : "Create my account"}</button>
+          <button class="btn" data-act="create-account" ${joining ? "disabled" : ""}>${joining ? "Creating your account…" : "Create account"}</button>
         </div>
-        <p class="hint"><button class="linkbtn" data-act="account-mode-signin">I already have an account — sign in</button></p>
+        <p class="hint"><button class="linkbtn" data-act="account-mode-signin">Have an account? Sign in</button></p>
         ${showCodeEntry && !invite ? `<div class="inline-actions stacked"><button class="btn ghost" data-act="hide-code">Back</button></div>` : ""}
       </div>
       ${versionBlock()}
@@ -1184,10 +1193,10 @@ function screenSignedOut(invite) {
     ${signInCard({
       heading,
       lead: joiningSomething
-        ? `<p class="hint">Sign in with your email and Scorecard password. ${next}</p>`
+        ? `<p class="lead">${invite ? "Sign in to see your invitation." : "Sign in, then type the code."}</p>`
         : "",
       backAct: joiningSomething ? "account-mode-create" : "",
-      backLabel: "New here? Create your account",
+      backLabel: "New here? Create an account",
     })}
     ${joiningSomething ? (showCodeEntry && !invite ? `<div class="inline-actions stacked"><button class="btn ghost" data-act="hide-code">Back</button></div>` : "") : `
       <div class="inline-actions stacked first-choices">
@@ -1196,6 +1205,80 @@ function screenSignedOut(invite) {
       </div>`}
     ${versionBlock()}
   </div>`;
+}
+
+/* ================= beta.5: Terms of Use (Willy, Oct 2) =================
+ *
+ * Shown full screen the first time The Scorecard opens on a device, before
+ * anything else, sign-in included. Accept works only after ticking "I have
+ * read and agree"; Decline keeps the app locked. Accepting is remembered on
+ * this device and, once signed in, recorded on the account itself
+ * (users/{uid}/terms/accepted: version, server time, app version) — that is
+ * the lasting record. If the device forgets, the terms are simply shown again.
+ * A new TERMS_VERSION asks everybody again. Wording follows Fairpot's terms,
+ * with the handicap and account sections written for golf. */
+const TERMS_VERSION = 1;
+const TERMS_EFFECTIVE = "October 2, 2026";
+const TERMS_KEY = "golf:terms";
+const TERMS = [
+  ["1. Who provides The Scorecard", "The Scorecard is provided by Wilfredo Rosales, an individual developer (\u201cwe\u201d, \u201cus\u201d). These terms are an agreement between you and us."],
+  ["2. A free app", "The Scorecard is free. There are no fees, subscriptions, advertising or in-app purchases."],
+  ["3. Provided \u201cas is\u201d", "The Scorecard is provided \u201cas is\u201d and \u201cas available\u201d, without any warranty or condition of any kind, express or implied, including any warranty of merchantability, fitness for a particular purpose, accuracy or non-infringement. We do not promise that it will be free of errors, will always work, or will never lose data."],
+  ["4. Handicaps are estimates", "The Scorecard works out a handicap from the scores entered, following the World Handicap System formula. It is not an official Handicap Index from Golf Canada, the USGA or any golf association. You are responsible for checking every score, course rating and result before you rely on it, including for competitions, prizes or bets."],
+  ["5. Your account and your group", "Your account and your group's scores are kept with Google Firebase, as our Privacy Policy explains. People in your group see your name and handicap. Everyone agrees to our Code of Conduct, and we may remove anyone who breaks it."],
+  ["6. No liability", "To the fullest extent permitted by law, we accept no liability of any kind for any loss or damage arising from your use of The Scorecard or your inability to use it. This includes lost data, wrong scores or handicaps, disputes between people, and any direct, indirect, incidental, special or consequential damages, even if we were told such loss was possible. You use The Scorecard entirely at your own risk."],
+  ["7. Your rights under the law", "Some places do not allow certain warranties or liabilities to be excluded. Where that is the case, the exclusions in these terms apply only as far as the law allows. Nothing in these terms takes away rights you have by law that cannot be given up."],
+  ["8. Apple", "These terms are between you and us, not Apple. Apple is not responsible for The Scorecard or its content, has no obligation to provide maintenance or support for it, and is not responsible for any claim relating to it. Apple and its subsidiaries are third-party beneficiaries of these terms and may enforce them. Apple\u2019s Licensed Application End User License Agreement also applies to your use of The Scorecard."],
+  ["9. Changes to these terms", "We may change these terms in a later version. If we do, The Scorecard will show you the new terms and ask you to accept them before you can continue."],
+  ["10. Governing law", "These terms are governed by the laws of the Province of Ontario and the federal laws of Canada that apply there, except where the law of the place you live requires otherwise."],
+  ["11. Contact", "Questions about The Scorecard or these terms: willyros01@gmail.com"],
+];
+let termsState = "";          /* "" | "declined" | "viewing" (read-only, from the footer) */
+let termsAcceptedNow = false; /* accepted in this session even if the device could not keep it */
+const termsRecordedFor = new Set();
+function termsDevice() {
+  try { const t = JSON.parse(localStorage.getItem(TERMS_KEY) || "null"); return t && t.version >= TERMS_VERSION ? t : null; }
+  catch { return null; }
+}
+function termsAccepted() { return termsAcceptedNow || !!termsDevice(); }
+function termsBody() {
+  return TERMS.map(([h, p]) => `<h3 class="terms-h">${esc(h)}</h3><p>${esc(p)}</p>`).join("");
+}
+function screenTerms() {
+  if (termsState === "declined") {
+    return `<div class="stack terms-gate">
+      <div class="card padded">
+        <h2 class="panel-title">The Scorecard is locked</h2>
+        <p class="lead">You declined the Terms of Use. The Scorecard cannot be used unless you accept them.</p>
+        <div class="inline-actions stacked"><button class="btn" data-act="terms-again">Read the terms again</button></div>
+      </div>
+    </div>`;
+  }
+  const viewing = termsState === "viewing";
+  return `<div class="stack terms-gate">
+    <div class="card padded">
+      <h2 class="panel-title">Terms of Use</h2>
+      <p class="hint">${viewing ? `Effective ${TERMS_EFFECTIVE}.` : "Please read these terms. You must accept them to use The Scorecard."}</p>
+      <div class="terms-text">${termsBody()}</div>
+      ${viewing ? `<div class="inline-actions stacked"><button class="btn" data-act="terms-close">Close</button></div>` : `
+      <label class="terms-agree"><input type="checkbox" id="termsTick" data-terms-tick> I have read and agree to The Scorecard Terms of Use.</label>
+      <p class="hint">By tapping Accept, you agree to these terms. If you decline, The Scorecard stays locked.</p>
+      <div class="terms-buttons">
+        <button class="btn ghost" data-act="terms-decline">Decline</button>
+        <button class="btn" id="termsAccept" data-act="terms-accept" disabled>Accept</button>
+      </div>`}
+    </div>
+  </div>`;
+}
+/* Once signed in, the acceptance is written to the account (once per
+   account per session; never blocks the app if it cannot be saved). */
+function recordTermsOnAccount() {
+  const uid = db.hasUser() && db.status().uid;
+  if (!uid || termsRecordedFor.has(uid) || !termsAccepted()) return;
+  termsRecordedFor.add(uid);
+  const device = termsDevice();
+  db.recordTermsAcceptance({ version: TERMS_VERSION, appVersion: VERSION, deviceAcceptedAt: device ? device.at : Date.now() })
+    .catch(() => termsRecordedFor.delete(uid));
 }
 
 /* An old guest session from before Version 2.0. The rules refuse it
@@ -3642,11 +3725,18 @@ function safe(label, build) {
 }
 
 function versionBlock() {
+  /* beta.5: signed out, only the links (the counts mean nothing yet). */
+  if (!db.hasUser()) {
+    return `<section class="version">
+    <div class="sub"><button class="linkbtn" data-act="open-user-guide">User guide</button> · <button class="linkbtn" data-act="open-support">Support</button> · <button class="linkbtn" data-act="open-privacy">Privacy</button> · <button class="linkbtn" data-act="terms-view">Terms</button></div>
+    <div class="sub">The Scorecard <span class="mono">v${VERSION}</span></div>
+  </section>`;
+  }
   return `<section class="version">
     <div><b>The Scorecard</b> <span class="mono">v${VERSION}</span></div>
     <div class="sub">${rounds.length} round${rounds.length === 1 ? "" : "s"} · ${golfers.length} golfer${golfers.length === 1 ? "" : "s"} · ${courses.length} course${courses.length === 1 ? "" : "s"}</div>
     <div class="sub">${esc(sync.text)} · World Handicap System, best 8 of last 20</div>
-    <div class="sub"><button class="linkbtn" data-act="open-user-guide">User guide</button> · <button class="linkbtn" data-act="open-support">Support</button> · <button class="linkbtn" data-act="open-privacy">Privacy</button></div>
+    <div class="sub"><button class="linkbtn" data-act="open-user-guide">User guide</button> · <button class="linkbtn" data-act="open-support">Support</button> · <button class="linkbtn" data-act="open-privacy">Privacy</button> · <button class="linkbtn" data-act="terms-view">Terms</button></div>
     ${db.hasUser() ? `<div class="sub"><button class="linkbtn" data-act="delete-account">Delete my account</button></div>` : ""}
   </section>`;
 }
@@ -4079,6 +4169,7 @@ function render({ force = false } = {}) {
   }
   redrawWanted = false;
   const drawn = renderNow();
+  recordTermsOnAccount();
   checkPromotion();
   return drawn;
 }
@@ -4097,7 +4188,11 @@ document.addEventListener("focusout", (e) => {
 
 function renderNow() {
   try {
-    if (!ready || settling) {
+    if (!termsAccepted() || termsState === "viewing") {
+      tabsEl.innerHTML = "";
+      view.innerHTML = screenTerms();
+      document.getElementById("brandSub").textContent = "Terms of Use";
+    } else if (!ready || settling) {
       view.innerHTML = bootCard();
     } else if (db.isAnonymousSession()) {
       tabsEl.innerHTML = "";
@@ -4109,6 +4204,10 @@ function renderNow() {
       document.getElementById("brandSub").textContent = "Getting started";
     } else {
       const allowed = visibleTabs().map(([id]) => id);
+      if (returnTo) {
+        if (allowed.includes(returnTo.tab)) { tab = returnTo.tab; if (returnTo.adminTab) adminTab = returnTo.adminTab; returnTo = null; }
+        else if (Date.now() > returnTo.until) returnTo = null;
+      }
       if (!allowed.includes(tab)) tab = "enter";
       renderTabs();
       const screens = { enter: screenEnter, history: screenHistory, summary: screenSummary,
@@ -4330,6 +4429,13 @@ view.addEventListener("keydown", (e) => {
   if (e.target.name === "new-golfer") { e.preventDefault(); addGolfer(); }
   if (e.target.name === "rename-golfer") { e.preventDefault(); saveRename(); }
   if (e.target.name === "finder-q") { e.preventDefault(); runFinder(); }
+});
+
+view.addEventListener("change", (e) => {
+  if (e.target && e.target.matches && e.target.matches("[data-terms-tick]")) {
+    const btn = document.getElementById("termsAccept");
+    if (btn) btn.disabled = !e.target.checked;
+  }
 });
 
 view.addEventListener("click", async (e) => {
@@ -4666,6 +4772,20 @@ view.addEventListener("click", async (e) => {
   }
 
   switch (d.act) {
+    case "terms-accept": {
+      const tick = view.querySelector("[data-terms-tick]");
+      if (!tick || !tick.checked) { flashMsg("Tick \u201cI have read and agree\u201d first"); return; }
+      termsAcceptedNow = true;
+      termsState = "";
+      try { localStorage.setItem(TERMS_KEY, JSON.stringify({ version: TERMS_VERSION, at: Date.now() })); } catch { /* asked again next time */ }
+      window.scrollTo(0, 0);
+      recordTermsOnAccount();
+      return render();
+    }
+    case "terms-decline": termsState = "declined"; window.scrollTo(0, 0); return render();
+    case "terms-again": termsState = ""; return render();
+    case "terms-view": termsState = "viewing"; window.scrollTo(0, 0); return render();
+    case "terms-close": termsState = ""; return render();
     case "look-again": {
       /* A membership can exist while its pointer is missing, so this searches
          the memberships themselves rather than the pointer list — and repairs
@@ -4807,8 +4927,12 @@ view.addEventListener("click", async (e) => {
          In a browser they open as always; in the app, in Safari. */
       const tool = { rebuild: "rebuild", tidy: "tidy", cleanup: "cleanup" }[d.tool];
       if (!tool) return;
-      if (platform.isApp()) platform.openExternal(`${platform.webBase()}${tool}.html`);
-      else location.href = `./${tool}.html`;
+      /* beta.5: coming back from a tool lands on the screen it was opened from. */
+      try { sessionStorage.setItem(RETURN_KEY, JSON.stringify({ tab, adminTab, at: Date.now() })); } catch {}
+      /* beta.5: Tidy is packaged inside the app (on the app's own Firebase copy),
+         so it opens here, already signed in. The other tools still open in Safari. */
+      if (platform.isApp() && tool !== "tidy") platform.openExternal(`${platform.webBase()}${tool}.html`);
+      else location.href = `./${tool}.html${EMULATED_QS}`;
       return;
     }
     case "reset-password": {

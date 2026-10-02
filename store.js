@@ -1388,6 +1388,24 @@ export async function stampLastSeen() {
   } catch { /* harmless: tried again next time */ }
 }
 
+/* beta.5: the Terms of Use acceptance, recorded on the account itself — the
+   lasting record (users/{uid}/terms/accepted). Written once per version, then
+   it counts only once the server has confirmed the write (a batch commit
+   resolves only then), and it is read back to be sure. */
+export async function recordTermsAcceptance({ version, appVersion, deviceAcceptedAt }) {
+  if (!fb || !uid) return false;
+  const { getDoc } = fb.mod.store;
+  const target = ref("users", uid, "terms", "accepted");
+  const before = await getDoc(target).catch(() => null);
+  if (before && before.exists() && Number((before.data() || {}).version) >= version) return true;
+  await commitTogether([{ op: "set", path: ["users", uid, "terms", "accepted"],
+    data: { version, appVersion: String(appVersion || ""), deviceAcceptedAt: Number(deviceAcceptedAt) || null,
+      acceptedAt: { __serverTimestamp: true } } }], "record the Terms of Use");
+  const after = await getDoc(target);
+  if (!after.exists() || Number((after.data() || {}).version) < version) throw new Error("terms not recorded");
+  return true;
+}
+
 const isoDay = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const millisOf = (t) => (t && typeof t.toMillis === "function" ? t.toMillis() : (t && t.seconds ? t.seconds * 1000 : (typeof t === "number" ? t : 0)));
 

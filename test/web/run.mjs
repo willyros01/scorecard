@@ -279,7 +279,10 @@ for (const [name, type] of browsers) {
   console.log(`--- ${name} ---`);
   const browser = await type.launch();
   const _newContext = browser.newContext.bind(browser);
-  browser.newContext = async (...a) => { const c = await _newContext(...a); c.setDefaultTimeout(45000); c.setDefaultNavigationTimeout(45000); return c; };
+  browser.newContext = async (...a) => { const c = await _newContext(...a); c.setDefaultTimeout(45000); c.setDefaultNavigationTimeout(45000);
+    /* beta.5: the Terms of Use were accepted on this device (T tests use a fresh one). */
+    if (!globalThis.__termsFresh) await c.addInitScript(() => { try { if (!localStorage.getItem("golf:terms")) localStorage.setItem("golf:terms", JSON.stringify({ version: 1, at: 1 })); } catch {} });
+    return c; };
   const tag = name === "webkit" ? "WK" : "CH";
 
   /* ---- the web app as web users will get it after the merge ---- */
@@ -313,7 +316,7 @@ for (const [name, type] of browsers) {
       await page.locator('[data-act="code-continue"]').first().click();
       await waitForText(page, /Join with a code/);
       const t = await bodyText(page);
-      if (!/Create my account/.test(t) || !/I already have an account/.test(t)) throw new Error("no create-account card");
+      if (!/Create account/.test(t) || !/Have an account\? Sign in/.test(t)) throw new Error("no create-account card");
       await page.locator('[data-act="hide-code"]').first().click();
       await waitForText(page, /Type the group code you were given/);
       await page.locator('[data-act="hide-apply"]').first().click();
@@ -406,7 +409,7 @@ for (const [name, type] of browsers) {
     await page.goto(`${BASE}/`, { waitUntil: "load" });
     let user = null;
     await check(`C2-${tag}`, `${name} (app): the link that opened the app is read (cold start)`, async () => {
-      await waitForText(page, /You have been invited/);
+      await waitForText(page, /You.re invited|You have been invited/);
       const link = await page.evaluate(async () => (await import("/store.js")).readJoinLink());
       if (!link || link.associationId !== "GAPP" || link.golferId !== "golferA") throw new Error(JSON.stringify(link));
     });
@@ -456,9 +459,9 @@ for (const [name, type] of browsers) {
     await page.goto(`${BASE}/?join=GNONE.CODE9`, { waitUntil: "load" });
     let user = null;
     await check(`B2-${tag}`, `${name}: an invitation while signed out asks to create an account first`, async () => {
-      await waitForText(page, /You have been invited to a group/);
+      await waitForText(page, /You.re invited/);
       const t = await bodyText(page);
-      if (!/Create my account/.test(t)) throw new Error("no Create my account button");
+      if (!/Create account/.test(t)) throw new Error("no Create account button");
       if (/Type the name you play under/.test(t)) throw new Error("the invitation was shown before an account");
     });
     await check(`B3-${tag}`, `${name}: two different passwords are refused before anything is created`, async () => {
