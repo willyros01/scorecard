@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<title>Groups Check</title>
+<style>
+:root{color-scheme:light dark;--bg:#fbf7ee;--paper:#fff;--ink:#14261f;--pine:#1f5641;--red:#a3362a;--muted:#46534c;--line:#d5cbb4}
+@media(prefers-color-scheme:dark){:root{--bg:#101713;--paper:#19231e;--ink:#f4f2e9;--pine:#80c9aa;--red:#f08a7c;--muted:#c3cec8;--line:#3a4a42}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:22px;line-height:1.5}
+main{max-width:860px;margin:auto;padding:28px 16px 80px}
+h1{font-family:Georgia,serif;font-size:40px;margin:0 0 8px}
+h2{font-family:Georgia,serif;font-size:30px;margin:34px 0 10px;color:var(--pine)}
+.lead{font-size:24px;color:var(--muted)}
+.card{background:var(--paper);border:1px solid var(--line);border-radius:16px;padding:16px 18px;margin:10px 0}
+.card b{font-size:24px}
+.small{color:var(--muted)}
+.stop{border:3px solid var(--red);color:var(--red);font-weight:700}
+.good{border:3px solid var(--pine)}
+label.pick{display:inline-block;background:var(--pine);color:#fff;font-weight:700;font-size:24px;padding:16px 24px;border-radius:14px;cursor:pointer}
+@media(prefers-color-scheme:dark){label.pick{color:#101713}}
+input[type=file]{position:absolute;left:-9999px}
+.num{font-size:30px;font-weight:800}
+</style>
+</head>
+<body>
+<main>
+  <h1>Groups check</h1>
+  <p class="lead">This page only shows. It changes nothing and sends nothing anywhere. It reads the backup file on this device and shows exactly what the clean-up will do.</p>
+  <p><label class="pick" for="file">Choose the backup file</label><input id="file" type="file" accept=".json,application/json"></p>
+  <div id="out"></div>
+</main>
+<script type="module" src="./build/groups-check.js"></script>
+</body>
+</html>
