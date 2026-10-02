@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# The Scorecard — CHECK THE NIGHTLY BACKUP (prepared by Claude, Oct 2, 2026)
+#
+# Check the newest:   bash ckb.txt
+# Keep an open copy:  bash ckb.txt open
+#
+# Fetches the newest locked backup from the "backups" branch on GitHub, asks
+# for your passphrase, opens it and shows what it holds. Reads only; changes
+# nothing anywhere. "open" also keeps the opened file in your home folder.
+
+# ---------------------------------------------------------------------------
+# THE GOOGLE PROJECT — defined first, before any command runs.
+# ---------------------------------------------------------------------------
+PROJECT_ID="scorecard-f41b8"
+unset CLOUDSDK_CORE_PROJECT GOOGLE_CLOUD_PROJECT
+
+set -Eeuo pipefail
+
+echo "Switching Cloud Shell to project ${PROJECT_ID} ..."
+gcloud config set project "${PROJECT_ID}" --quiet >/dev/null 2>&1 || { echo "ERROR: could not switch to project ${PROJECT_ID}." >&2; exit 1; }
+CURRENT_PROJECT="$(gcloud config get-value project 2>/dev/null)"
+[[ "${CURRENT_PROJECT}" == "${PROJECT_ID}" ]] || { echo "ERROR: Cloud Shell is on '${CURRENT_PROJECT}', not ${PROJECT_ID}." >&2; exit 1; }
+echo "OK: Cloud Shell is now on project ${CURRENT_PROJECT}."
+
+MODE="${1:-check}"
+REMOTE="${CKB_REMOTE:-https://github.com/willyros01/scorecard.git}"
+die(){ echo "ERROR: $*" >&2; exit 1; }
+[[ "${MODE}" == check || "${MODE}" == open ]] || die "Use: bash ckb.txt   or   bash ckb.txt open"
+for c in git gpg jq; do command -v "$c" >/dev/null || die "$c is unavailable. Run this in Google Cloud Shell."; done
+
+WORK="$(mktemp -d)"; trap 'rm -rf "${WORK}"' EXIT
+echo "Fetching the backups from GitHub ..."
+git clone -q --depth 1 --branch backups "${REMOTE}" "${WORK}/b" 2>/dev/null || die "No backups were found on GitHub yet."
+LATEST="$(ls -1 "${WORK}/b"/scorecard-*.json.gpg 2>/dev/null | sort | tail -n 1)"
+[[ -n "${LATEST}" ]] || die "No backups were found on GitHub yet."
+COUNT="$(ls -1 "${WORK}/b"/scorecard-*.json.gpg | wc -l)"
+echo "OK: ${COUNT} nights stored. The newest is $(basename "${LATEST}")."
+echo
+read -r -s -p "Type your backup passphrase (it does not show): " PASS; echo
+export GNUPGHOME="${WORK}/gnupg"; mkdir -m 700 "${GNUPGHOME}"
+gpg --batch --quiet --yes --no-tty --pinentry-mode loopback --passphrase-fd 3 \
+  --decrypt --output "${WORK}/open.json" "${LATEST}" 3<<<"${PASS}" 2>/dev/null \
+  || die "It did not open. Check the passphrase and try again."
+jq -e '.kind == "scorecard-full-backup"' "${WORK}/open.json" >/dev/null || die "It opened, but it is not a Scorecard backup."
+echo
+echo "OPENED. It holds:"
+jq -r '"  saved          : \(.savedAt)",
+  "  groups         : \([.documents[] | select((.missing|not) and (.path|test("^associations/[^/]+$")))] | length)",
+  "  golfers        : \([.documents[] | select((.missing|not) and (.path|test("^golfers/[^/]+$")))] | length)",
+  "  rounds         : \([.documents[] | select(.path|test("^associations/[^/]+/rounds/[^/]+$"))] | length)",
+  "  accounts       : \(.accounts | length)",
+  "  all documents  : \(.documents | length)"' "${WORK}/open.json"
+jq -r '"  group names    : " + ([.documents[] | select((.missing|not) and (.path|test("^associations/[^/]+$"))) | .fields.name.stringValue // "?"] | join(", "))' "${WORK}/open.json"
+if [[ "${MODE}" == open ]]; then
+  OUT="$(pwd)/$(basename "${LATEST}" .gpg | sed 's/^scorecard-/scorecard-backup-opened-/')"
+  cp "${WORK}/open.json" "${OUT}"
+  echo
+  echo "Kept an open copy: ${OUT##*/}"
+fi
+echo
+echo "DONE. The backup is good."

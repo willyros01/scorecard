@@ -1,0 +1,125 @@
+#!/usr/bin/env bash
+# The Scorecard — NIGHTLY BACKUP SETUP, run ONCE (prepared by Claude, Oct 2, 2026)
+#
+# Run:     bash nbk.txt
+# Check:   bash nbk.txt verify
+#
+# Creates the READ-ONLY helper the nightly backup on GitHub signs in as:
+#   1. a helper account, scorecard-backup, that can only READ the database and
+#      the list of sign-in accounts — it cannot change or delete anything;
+#   2. a keyless sign-in for GitHub that only the nightly-backup workflow of the
+#      willyros01/scorecard repository, on main, can use. No key file exists.
+# No data is read or changed. Safe to run again.
+
+# ---------------------------------------------------------------------------
+# THE GOOGLE PROJECT — defined first, before any command runs.
+# ---------------------------------------------------------------------------
+PROJECT_ID="scorecard-f41b8"
+unset CLOUDSDK_CORE_PROJECT GOOGLE_CLOUD_PROJECT
+
+set -Eeuo pipefail
+
+echo "Switching Cloud Shell to project ${PROJECT_ID} ..."
+gcloud config set project "${PROJECT_ID}" --quiet >/dev/null 2>&1 || { echo "ERROR: could not switch to project ${PROJECT_ID}. Nothing changed." >&2; exit 1; }
+CURRENT_PROJECT="$(gcloud config get-value project 2>/dev/null)"
+[[ "${CURRENT_PROJECT}" == "${PROJECT_ID}" ]] || { echo "ERROR: Cloud Shell is on '${CURRENT_PROJECT}', not ${PROJECT_ID}. Nothing changed." >&2; exit 1; }
+echo "OK: Cloud Shell is now on project ${CURRENT_PROJECT}."
+export CLOUDSDK_CORE_PROJECT="${PROJECT_ID}"
+export GOOGLE_CLOUD_PROJECT="${PROJECT_ID}"
+
+MODE="${1:-apply}"
+NUMBER="811267714235"                     # the project number the workflow uses
+SA="scorecard-backup@${PROJECT_ID}.iam.gserviceaccount.com"
+POOL="scorecard-backup"
+PROVIDER="nightly-backup"
+REPO_ID="1327018101"                      # GitHub's id for willyros01/scorecard (survives a rename)
+WORKFLOW="willyros01/scorecard/.github/workflows/nightly-backup.yml@refs/heads/main"
+CONDITION="assertion.repository_id=='${REPO_ID}' && assertion.workflow_ref=='${WORKFLOW}'"
+MAPPING="google.subject=assertion.sub,attribute.repository_id=assertion.repository_id,attribute.workflow_ref=assertion.workflow_ref"
+MEMBER="principalSet://iam.googleapis.com/projects/${NUMBER}/locations/global/workloadIdentityPools/${POOL}/*"
+ROLES=(roles/datastore.viewer roles/firebaseauth.viewer)
+
+die(){ echo "ERROR: $*" >&2; exit 1; }
+command -v gcloud >/dev/null || die "gcloud is unavailable. Run this in Google Cloud Shell."
+[[ "${MODE}" == apply || "${MODE}" == verify ]] || die "Use: bash nbk.txt   or   bash nbk.txt verify"
+ACCOUNT="$(gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -n1)"
+[[ -n "${ACCOUNT}" ]] || die "No active Google account. Sign in to Cloud Shell first."
+FOUND="$(gcloud projects describe "${PROJECT_ID}" --format='value(projectNumber)' 2>/dev/null || true)"
+[[ "${FOUND}" == "${NUMBER}" ]] || die "Project ${PROJECT_ID} has number '${FOUND}', expected ${NUMBER}. Nothing changed. Send a screenshot to Claude."
+echo
+echo "  Google account : ${ACCOUNT}"
+echo "  Project        : ${PROJECT_ID} (${NUMBER})"
+echo
+
+retry(){ local n; for n in 1 2 3 4 5 6; do "$@" && return 0; sleep $((n * ${NBK_SLEEP:-5})); done; return 1; }
+has_role(){ gcloud projects get-iam-policy "${PROJECT_ID}" --flatten='bindings[].members' \
+  --filter="bindings.role:$1 AND bindings.members:${SA}" --format='value(bindings.role)' | grep -qx "$1"; }
+sa_ok(){ gcloud iam service-accounts describe "${SA}" --format='value(email)' >/dev/null 2>&1; }
+pool_state(){ gcloud iam workload-identity-pools describe "${POOL}" --location=global --format='value(state)' 2>/dev/null || true; }
+provider_ok(){
+  local c; c="$(gcloud iam workload-identity-pools providers describe "${PROVIDER}" --location=global \
+    --workload-identity-pool="${POOL}" --format='value(attributeCondition)' 2>/dev/null)" || return 1
+  [[ "${c}" == "${CONDITION}" ]]
+}
+link_ok(){ gcloud iam service-accounts get-iam-policy "${SA}" --flatten='bindings[].members' \
+  --filter="bindings.role:roles/iam.workloadIdentityUser" --format='value(bindings.members)' | grep -Fqx "${MEMBER}"; }
+
+verify(){
+  local bad=0
+  sa_ok && echo "OK: the helper account exists." || { echo "MISSING: the helper account."; bad=1; }
+  for r in "${ROLES[@]}"; do has_role "$r" && echo "OK: it can read ($r)." || { echo "MISSING: $r"; bad=1; }; done
+  [[ "$(pool_state)" == ACTIVE ]] && echo "OK: the keyless sign-in is set up." || { echo "MISSING: the keyless sign-in."; bad=1; }
+  provider_ok && echo "OK: only the nightly-backup workflow on main can use it." || { echo "MISSING: the GitHub link."; bad=1; }
+  link_ok && echo "OK: the workflow may act as the helper." || { echo "MISSING: the helper link."; bad=1; }
+  return "${bad}"
+}
+
+if [[ "${MODE}" == verify ]]; then
+  verify || die "The setup is not complete. Run: bash nbk.txt"
+  echo "DONE. Everything is in place."
+  exit 0
+fi
+
+echo "This creates a READ-ONLY helper for the nightly backup. No data is changed."
+read -r -p "Type yes to go ahead: " ANSWER
+[[ "${ANSWER}" == "yes" ]] || die "Stopped. Nothing was changed."
+
+echo "1. Switching on the sign-in services (free) ..."
+gcloud services enable iam.googleapis.com iamcredentials.googleapis.com sts.googleapis.com --project="${PROJECT_ID}" --quiet >/dev/null \
+  || die "Could not switch on the sign-in services. Send a screenshot to Claude."
+
+echo "2. The read-only helper account ..."
+if ! sa_ok; then
+  gcloud iam service-accounts create scorecard-backup --display-name="Scorecard nightly backup (read only)" --quiet >/dev/null \
+    || die "Could not create the helper account. Send a screenshot to Claude."
+fi
+for r in "${ROLES[@]}"; do
+  has_role "$r" || retry gcloud projects add-iam-policy-binding "${PROJECT_ID}" --member="serviceAccount:${SA}" \
+    --role="$r" --condition=None --quiet >/dev/null || die "Could not give the helper ${r}. Send a screenshot to Claude."
+done
+
+echo "3. The keyless sign-in for GitHub ..."
+case "$(pool_state)" in
+  ACTIVE) ;;
+  DELETED) gcloud iam workload-identity-pools undelete "${POOL}" --location=global --quiet >/dev/null || die "Could not restore the sign-in pool." ;;
+  *) gcloud iam workload-identity-pools create "${POOL}" --location=global --display-name="Scorecard nightly backup" --quiet >/dev/null \
+       || die "Could not create the sign-in pool. Send a screenshot to Claude." ;;
+esac
+if gcloud iam workload-identity-pools providers describe "${PROVIDER}" --location=global --workload-identity-pool="${POOL}" >/dev/null 2>&1; then
+  gcloud iam workload-identity-pools providers update-oidc "${PROVIDER}" --location=global --workload-identity-pool="${POOL}" \
+    --attribute-mapping="${MAPPING}" --attribute-condition="${CONDITION}" --quiet >/dev/null || die "Could not update the GitHub link."
+else
+  retry gcloud iam workload-identity-pools providers create-oidc "${PROVIDER}" --location=global --workload-identity-pool="${POOL}" \
+    --display-name="GitHub nightly backup" --issuer-uri="https://token.actions.githubusercontent.com" \
+    --attribute-mapping="${MAPPING}" --attribute-condition="${CONDITION}" --quiet >/dev/null || die "Could not create the GitHub link. Send a screenshot to Claude."
+fi
+
+echo "4. Letting that workflow act as the helper ..."
+link_ok || retry gcloud iam service-accounts add-iam-policy-binding "${SA}" --role=roles/iam.workloadIdentityUser \
+  --member="${MEMBER}" --quiet >/dev/null || die "Could not link the workflow to the helper. Send a screenshot to Claude."
+
+echo
+echo "5. Checking ..."
+verify || die "Something is missing (see above). Run bash nbk.txt again; if it repeats, send a screenshot to Claude."
+echo
+echo "DONE. The nightly backup can now sign in. Tell Claude."
