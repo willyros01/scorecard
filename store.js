@@ -2322,31 +2322,6 @@ export async function renameGolfer(golferId, name) {
 }
 
 
-/* ---------------- importing a version 1 scorecard ---------------- */
-
-/* Reads the old single-document scorecard. Returns null when there is none —
-   which is the normal case for anybody joining a group rather than starting one. */
-export async function readLegacyV1() {
-  if (!fb || !uid) return null;
-  try {
-    const migrate = await import("./migrate.js");
-    const v1 = await migrate.readV1({ db: fb.db, mod: fb.mod.store, uid });
-    return v1 ? { v1, preview: migrate.preview(v1) } : null;
-  } catch { return null; }
-}
-
-/* Creates a group from the old scorecard and makes you its owner.
-   The version 1 document is left exactly where it is. */
-export async function importLegacyV1({ v1, assocName, displayName }) {
-  const migrate = await import("./migrate.js");
-  const result = await migrate.run({ db: fb.db, mod: fb.mod.store, uid, v1, assocName, displayName });
-  const check = await migrate.verify({ db: fb.db, mod: fb.mod.store, assocId: result.assocId,
-    expected: { golfers: (v1.golfers || []).length, rounds: (v1.rounds || []).length } });
-  assocId = result.assocId;
-  rememberAssociation(result.assocId);
-  return { ...result, check };
-}
-
 
 /* The group document carries settings everybody needs — the course lookup key
    among them. Watched rather than read once, so changing the key reaches every
@@ -2666,25 +2641,6 @@ export async function createAnotherGroup({ name, displayName, addToRoster = true
 }
 
 
-/* Brings a version 1 scorecard into the group you are already in. */
-/* Names already in use are reused rather than duplicated — this is what gave
-   the user two "Willy Rosales" and eighteen golfers instead of seventeen. */
-export async function importLegacyIntoCurrentGroup({ v1 }) {
-  const migrate = await import("./migrate.js");
-
-  /* Look up who already exists before writing anything. */
-  const existingByNameKey = {};
-  try {
-    const { getDocs, collection } = fb.mod.store;
-    const snap = await getDocs(collection(fb.db, "golfers"));
-    snap.forEach((d) => { const g = d.data(); if (g.nameKey) existingByNameKey[g.nameKey] = g; });
-  } catch { /* none found; the import creates them */ }
-
-  const written = await migrate.runInto({ db: fb.db, mod: fb.mod.store, uid, v1, assocId, existingByNameKey });
-  const check = await migrate.verify({ db: fb.db, mod: fb.mod.store, assocId,
-    expected: { golfers: (v1.golfers || []).length, rounds: (v1.rounds || []).length } });
-  return { written, check };
-}
 
 
 /* ---------------- writing several documents as one ---------------- */

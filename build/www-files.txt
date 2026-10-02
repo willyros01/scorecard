@@ -13,5 +13,4 @@ model.js
 outbox.js
 courses-api.js
 platform.js
-migrate.js
 vendor/
