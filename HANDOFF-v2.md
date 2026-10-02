@@ -98,3 +98,10 @@ Decisions kept from before: free app; Version 1 was to be unlisted; one GolfCour
 - Rules: `firestore.rules` (header lists every phase's changes). Tests: `test/ops/*.sh`, `test/ops/golive-tests.mjs`, `test/app/e2e.mjs`, `test/web/run.mjs`.
 - App: `app.js` (screens), `store.js` (Firebase), `model.js` (handicap maths), `platform.js`. Tools: `tidy.html`, `rebuild.html`.
 - Migration spec: Claude doc "Scorecard iOS Migration Spec" (Version 2.0 section) and PDFs in Willy's outputs. Onboarding design: "Scorecard_Onboarding_Privacy_Architecture - Revision 2.docx".
+
+## One-time group clean-up (Oct 1, evening)
+
+- **Step 1, backup:** `build/bk1.txt` (pinned 9e69664) runs `build/bk1.mjs`: every document and subcollection, accounts without passwords, to one JSON file. Tests BK1–BK2.
+- **Step 2, clean-up:** `groups-check.html` (live on the web, read only: reads a backup file on the device, no network) shows the plan from `build/cl5-plan.mjs`; `build/cl5.txt` (pinned b935bed) takes a backup, shows the same plan, waits for yes, then: golfers found only in orphan groups move to Philippine Golfers with their rounds (window repointed, handicap kept; a double-counted round is counted once and the window refilled); accounts only in orphan groups join Philippine Golfers; copies of rounds already in a real group are removed and handicaps pointed at the real copy; the orphan groups, their links and join codes are removed; then a second backup and `verify`. Rerunnable. Stops if any of the four group names is missing or ambiguous. Tests CL1–CL9.
+- Decision still open: rounds of golfers who STAY in a real group but sit in an orphan group are removed (Willy's decision 2); the page flags them in red. If any exist, ask Willy before he runs cl5.txt.
+- **Step 3 (next):** nightly encrypted backup workflow, 3 am Toronto, 30 days.
