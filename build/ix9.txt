@@ -1,0 +1,122 @@
+#!/usr/bin/env bash
+# The Scorecard — THE MEMBERSHIP SEARCH INDEX (prepared by Claude, Oct 2, 2026)
+#
+# Run:     bash ix9.txt
+# Check:   bash ix9.txt verify
+#
+# Why: "Delete my account" (and finding your groups when the group list is
+# missing) searches every group's members for your account at once. Google
+# answers that kind of search only when the database has a matching index,
+# and ours never had one, so the search was refused ("Your groups couldn't
+# be checked").
+#
+# What it does:
+#   1. runs that same search, to prove the index is missing (if the search
+#      already works, it says so and changes nothing);
+#   2. asks you to type yes, then adds the one index (members, field uid);
+#   3. waits while Google builds it (usually a few minutes) and runs the
+#      search again until it works.
+# No data is read, changed or deleted. An index costs nothing at this size.
+
+# ---------------------------------------------------------------------------
+# THE GOOGLE PROJECT — defined first, before any command runs.
+# ---------------------------------------------------------------------------
+PROJECT_ID="scorecard-f41b8"
+unset CLOUDSDK_CORE_PROJECT GOOGLE_CLOUD_PROJECT
+
+set -Eeuo pipefail
+
+echo "Switching Cloud Shell to project ${PROJECT_ID} ..."
+gcloud config set project "${PROJECT_ID}" --quiet >/dev/null 2>&1 || { echo "ERROR: could not switch to project ${PROJECT_ID}. Nothing changed." >&2; exit 1; }
+CURRENT_PROJECT="$(gcloud config get-value project 2>/dev/null)"
+[[ "${CURRENT_PROJECT}" == "${PROJECT_ID}" ]] || { echo "ERROR: Cloud Shell is on '${CURRENT_PROJECT}', not ${PROJECT_ID}. Nothing changed." >&2; exit 1; }
+echo "OK: Cloud Shell is now on project ${CURRENT_PROJECT}."
+export CLOUDSDK_CORE_PROJECT="${PROJECT_ID}"
+export GOOGLE_CLOUD_PROJECT="${PROJECT_ID}"
+
+MODE="${1:-apply}"
+FS="${IX9_FS_BASE:-https://firestore.googleapis.com/v1}/projects/${PROJECT_ID}/databases/(default)"
+FIELD_URL="${FS}/collectionGroups/members/fields/uid"
+WAIT_SECONDS="${IX9_WAIT:-15}"     # between checks while Google builds it
+TRIES="${IX9_TRIES:-60}"           # 60 x 15 s = 15 minutes
+
+die(){ echo "ERROR: $*" >&2; exit 1; }
+for c in gcloud curl jq; do command -v "$c" >/dev/null || die "$c is unavailable. Run this in Google Cloud Shell."; done
+[[ "${MODE}" == apply || "${MODE}" == verify ]] || die "Use: bash ix9.txt   or   bash ix9.txt verify"
+
+ACCOUNT="$(gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -n1)"
+[[ -n "${ACCOUNT}" ]] || die "No active Google account. Sign in to Cloud Shell first."
+FOUND_ID="$(gcloud projects describe "${PROJECT_ID}" --project="${PROJECT_ID}" --format='value(projectId)' 2>/dev/null || true)"
+[[ "${FOUND_ID}" == "${PROJECT_ID}" ]] || die "Project ${PROJECT_ID} was not found, or ${ACCOUNT} cannot see it. Nothing changed."
+echo
+echo "  Google account : ${ACCOUNT}"
+echo "  Project        : ${PROJECT_ID}"
+echo
+
+WORK="$(mktemp -d)"; trap 'rm -rf "${WORK}"' EXIT
+
+# The app's own search: every group's members where uid == (an account).
+# Returns 0 = it works, 1 = Google wants the index, 2 = something else (shown).
+probe(){
+  local code
+  jq -n '{structuredQuery:{from:[{collectionId:"members",allDescendants:true}],
+    where:{fieldFilter:{field:{fieldPath:"uid"},op:"EQUAL",value:{stringValue:"ix9-check"}}},limit:1}}' > "${WORK}/q.json"
+  code="$(curl -sS -o "${WORK}/a.json" -w '%{http_code}' -X POST \
+    -H "Authorization: Bearer $(gcloud auth print-access-token)" -H "x-goog-user-project: ${PROJECT_ID}" \
+    -H 'Content-Type: application/json' --data-binary "@${WORK}/q.json" "${FS}/documents:runQuery" 2>/dev/null || echo 000)"
+  [[ "${code}" == 200 ]] && return 0
+  if grep -qi "index" "${WORK}/a.json" 2>/dev/null; then return 1; fi
+  echo "  Google's answer (HTTP ${code}): $(head -c 300 "${WORK}/a.json" 2>/dev/null)"
+  return 2
+}
+
+set +e; probe; state=$?; set -e
+
+if [[ "${MODE}" == verify ]]; then
+  case "${state}" in
+    0) echo "OK: the membership search works. Delete my account can check your groups."; exit 0 ;;
+    1) die "The index is not ready yet. If you ran bash ix9.txt less than 15 minutes ago, wait and check again." ;;
+    *) die "The search could not be checked (see above). Send a screenshot to Claude." ;;
+  esac
+fi
+
+case "${state}" in
+  0) echo "OK: the membership search already works. Nothing to add, nothing changed."
+     echo "(If this is the first time you run ix9.txt, tell Claude: the cause is something else.)"; exit 0 ;;
+  1) echo "CONFIRMED: Google refuses the membership search because the index is missing." ;;
+  *) die "The search could not be checked (see above). Nothing changed. Send a screenshot to Claude." ;;
+esac
+echo
+echo "The change: one database index (members, field uid), so that search works."
+echo "No data is read, changed or deleted."
+echo
+read -r -p "Type yes to add it: " ANSWER
+[[ "${ANSWER}" == "yes" ]] || die "Stopped. Nothing was changed."
+
+# The field keeps its normal single-group indexes and gains the across-groups one.
+jq -n '{indexConfig:{indexes:[
+  {queryScope:"COLLECTION",fields:[{fieldPath:"uid",order:"ASCENDING"}]},
+  {queryScope:"COLLECTION",fields:[{fieldPath:"uid",order:"DESCENDING"}]},
+  {queryScope:"COLLECTION",fields:[{fieldPath:"uid",arrayConfig:"CONTAINS"}]},
+  {queryScope:"COLLECTION_GROUP",fields:[{fieldPath:"uid",order:"ASCENDING"}]}]}}' > "${WORK}/index.json"
+code="$(curl -sS -o "${WORK}/p.json" -w '%{http_code}' -X PATCH \
+  -H "Authorization: Bearer $(gcloud auth print-access-token)" -H "x-goog-user-project: ${PROJECT_ID}" \
+  -H 'Content-Type: application/json' --data-binary "@${WORK}/index.json" "${FIELD_URL}?updateMask=indexConfig" 2>/dev/null || echo 000)"
+[[ "${code}" == 200 ]] || die "Google refused the index (HTTP ${code}): $(head -c 300 "${WORK}/p.json" 2>/dev/null). Nothing changed. Send a screenshot to Claude."
+echo "OK: the index was requested. Google is building it now (usually a few minutes)."
+
+for (( i = 1; i <= TRIES; i++ )); do
+  sleep "${WAIT_SECONDS}"
+  set +e; probe; state=$?; set -e
+  if [[ "${state}" == 0 ]]; then
+    echo
+    echo "OK: the membership search now works."
+    echo "DONE. Delete my account can check your groups. Tell Claude."
+    exit 0
+  fi
+  echo "  still building ... ($(( i * WAIT_SECONDS / 60 )) min)"
+done
+echo
+echo "Google is still building the index. That is normal for a while."
+echo "In 15 minutes, type:  bash ix9.txt verify"
+exit 0

@@ -172,3 +172,10 @@ Willy's test: a member deleted their own account, the deletion stopped part-way 
 - **Completion job**: every 15 minutes (7,22,37,52), MIN_AGE_SECONDS 300 (set in the workflow; script default still 3600); also deletes `accountEmails/{email}` (email from Firebase Auth, not the request); logs saved only when there was something to do, a failure, a push run, or the 07 UTC hour (keep-alive activity).
 - Tests: E30 (delete end to end + rejoin with the same email as the same golfer), E31 (stopped part-way: signed out, sign-in refused, rules lock, job finishes incl. email), E32 (invitation when already a member: E32 failed on beta.8 with Willy's exact refusal); DEL1 updated (no withdrawal once removal began); DL0–DL7 for dl9.txt.
 - Not changed: privacy/support pages still promise "within one day" (now within ~20 minutes, so still true).
+
+## OPEN after beta.9 (Oct 2, 5 pm) — Delete my account never got past step 1 in production
+
+- Willy (as wrosales@icloud.com, admin of Golfing Buddies, online): "Your groups couldn't be checked. Connect to the internet and try again. Nothing was changed." The same happened in his earlier test (the job then found no request).
+- Cause: `myGroupIdsFromServer()` (and `groupsFromMemberships()`) run a COLLECTION-GROUP query `members where uid == me`. Production Firestore needs a collection-group single-field index on members.uid; it was never created (only the rounds/date one, by ap4). The emulators need no index, so E30/E31/DEL1 could not catch it.
+- Fix without a build: `build/ix9.txt` (tests IX1–IX6, fakes in test/ops/ix9-fakes): proves the query is refused, adds the field override (members/uid: COLLECTION asc/desc/contains + COLLECTION_GROUP asc), waits until the same query works. `bash ix9.txt verify` re-checks.
+- [Willy] TO DO for the Thursday Oct 8 build: (1) step 1 of deleteMyAccount must show and report the REAL error (not "Connect to the internet"); (2) put the reason in Send a report; (3) a test that lists every filtered collection-group query in the code and fails unless its index is in a repo index list that a script keeps live.
