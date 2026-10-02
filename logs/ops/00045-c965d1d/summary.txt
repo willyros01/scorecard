@@ -1,0 +1,48 @@
+kind:    ops
+result:  success
+branch:  v2
+commit:  c965d1d2cd2afac520d114b1d0d49c4e773c08c0
+run:     45 (id 37012956699)
+time:    2026-10-02T13:29:50Z
+
+--- last lines of ops-tests.log ---
+PASS  NB4 the oldest kept is 30 days back
+PASS  NB4 no history piles up (one commit)
+== NB5 the same night run twice replaces, never duplicates
+PASS  NB5 succeeds
+PASS  NB5 still 30 files
+== NB6 the repository cannot be reached: earlier backups untouched
+      | Backup complete: 1 groups, 1 golfers, 1 rounds, 0 accounts.
+      | Locked and checked: scorecard-2026-11-07.json.gpg (0 KB).
+      | ERROR: could not reach the repository (code 128); nothing was changed.
+PASS  NB6 stops
+PASS  NB6 the backups branch is unchanged
+== NB7 the workflow
+PASS  NB7 runs daily at 07:00 UTC (3 am Toronto in summer)
+PASS  NB7 signs in to Google without a key
+PASS  NB7 uses the read-only helper
+PASS  NB7 takes the passphrase from the secret
+== NB8 ckb.txt opens the newest night with the passphrase
+      |   group names    : Golfing Buddies
+      | 
+      | DONE. The backup is good.
+PASS  NB8 opens (exit 0)
+PASS  NB8 names the newest night
+PASS  NB8 shows what it holds
+PASS  NB8 keeps no open copy when only checking
+      | 
+      | 
+      | ERROR: It did not open. Check the passphrase and try again.
+PASS  NB8 a wrong passphrase does not open it
+      | Kept an open copy: scorecard-backup-opened-2026-11-06.json
+      | 
+      | DONE. The backup is good.
+PASS  NB8 open keeps a copy, identical to the backup
+
+RESULT: 29 passed, 0 failed
+[32m[1m✔ [22m[39m Script exited successfully (code 0)
+[36m[1mi  emulators:[22m[39m Shutting down emulators.
+[36m[1mi  firestore:[22m[39m Stopping Firestore Emulator
+[36m[1mi  auth:[22m[39m Stopping Authentication Emulator
+[36m[1mi  hub:[22m[39m Stopping emulator hub
+[36m[1mi  logging:[22m[39m Stopping Logging Emulator
