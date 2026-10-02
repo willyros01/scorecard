@@ -1,21 +1,32 @@
 kind:    checks
 result:  bootstrap=success verify=success web=success
 branch:  v2
-commit:  0cb05b53757a6ac8fbbaa874b267da6f7bc74c56
-run:     62 (id 36927430109)
-time:    2026-10-01T21:17:21Z
+commit:  dc9acd490deb58ad5e61b56d3bdbd6e3ae69f617
+run:     92 (id 37051828708)
+time:    2026-10-02T19:07:41Z
 
 --- last lines of bootstrap.log ---
+npm warn deprecated uuid@7.0.3: uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).
+
+added 180 packages in 5s
+
+  vendor/firebase/firebase-10.12.0.js  384.2kb
+
+⚡ Done in 52ms
+[v2 1474e74] Add the generated lockfile and Firebase bundle (exact approved versions)
+ 2 files changed, 12 insertions(+), 12 deletions(-)
+To https://github.com/willyros01/scorecard
+   dc9acd4..1474e74  HEAD -> v2
 
 --- last lines of verify.log ---
 OK    V1 npm ci succeeded from the committed lockfile
 OK    V2 every package is exactly the approved version
 
-  vendor/firebase/firebase-10.12.0.js  384.1kb
+  vendor/firebase/firebase-10.12.0.js  384.2kb
 
-⚡ Done in 50ms
+⚡ Done in 62ms
 OK    V3 the committed bundle is identical to a fresh build
-OK    V4 no remote code in the 15 packaged files
+OK    V4 no remote code in the 19 packaged files
 OK    V5 Capacitor core, cli and ios are 8.5.2
 OK    V6 no location.origin; the bundle exports everything store.js uses
 verify.sh: all checks passed
