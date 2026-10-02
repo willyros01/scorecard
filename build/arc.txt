@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# The Scorecard — ARCHIVE LEFTOVER GOLFER COPIES (prepared by Claude, Oct 2, 2026)
+#
+# Run:     bash arc.txt
+# Check:   bash arc.txt verify
+#
+# What it does:
+#   1. takes a complete backup first, kept in your home folder as
+#      scorecard-backup-before-archive-<date>-<time>.json;
+#   2. lists the leftover copies (in no group, no rounds, same name as a golfer
+#      in your groups) and waits for you to type yes;
+#   3. ARCHIVES them — hidden from every list, never deleted, marked as merged
+#      into the real person. Nothing else is written: not your real golfer,
+#      not the name list, not any sign-in;
+#   4. takes a second backup and checks no copies are left.
+# It stops, changing nothing, if anything looks unusual.
+
+# ---------------------------------------------------------------------------
+# THE GOOGLE PROJECT — defined first, before any command runs.
+# ---------------------------------------------------------------------------
+PROJECT_ID="scorecard-f41b8"
+unset CLOUDSDK_CORE_PROJECT GOOGLE_CLOUD_PROJECT
+
+set -Eeuo pipefail
+
+echo "Switching Cloud Shell to project ${PROJECT_ID} ..."
+gcloud config set project "${PROJECT_ID}" --quiet >/dev/null 2>&1 || { echo "ERROR: could not switch to project ${PROJECT_ID}. Nothing changed." >&2; exit 1; }
+CURRENT_PROJECT="$(gcloud config get-value project 2>/dev/null)"
+[[ "${CURRENT_PROJECT}" == "${PROJECT_ID}" ]] || { echo "ERROR: Cloud Shell is on '${CURRENT_PROJECT}', not ${PROJECT_ID}. Nothing changed." >&2; exit 1; }
+echo "OK: Cloud Shell is now on project ${CURRENT_PROJECT}."
+export CLOUDSDK_CORE_PROJECT="${PROJECT_ID}"
+export GOOGLE_CLOUD_PROJECT="${PROJECT_ID}"
+
+COMMIT="PIN_ME"     # v2 branch, tested
+RAW="https://raw.githubusercontent.com/willyros01/scorecard"
+WORK="$(pwd)/scorecard-arc-tools"
+MODE="${1:-apply}"
+
+die(){ echo "ERROR: $*" >&2; exit 1; }
+for c in gcloud curl node; do command -v "$c" >/dev/null || die "$c is unavailable. Run this in Google Cloud Shell."; done
+[[ "$(node -p 'process.versions.node.split(".")[0]')" -ge 18 ]] || die "Node 18 or newer is needed."
+[[ "${MODE}" == apply || "${MODE}" == verify ]] || die "Use: bash arc.txt   or   bash arc.txt verify"
+ACCOUNT="$(gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -n1)"
+[[ -n "${ACCOUNT}" ]] || die "No active Google account. Sign in to Cloud Shell first."
+echo
+echo "  Google account : ${ACCOUNT}"
+echo "  Project        : ${PROJECT_ID}"
+echo
+mkdir -p "${WORK}/build"
+echo '{"type":"module"}' > "${WORK}/package.json"
+for f in build/bk1.mjs build/arc.mjs build/cl5-plan.mjs model.js; do
+  curl --fail --silent --show-error "${RAW}/${COMMIT}/${f}" -o "${WORK}/${f}" || die "Cannot read ${f} from GitHub. Nothing changed."
+done
+backup(){ ACCESS_TOKEN="$(gcloud auth print-access-token)" PROJECT="${PROJECT_ID}" node "${WORK}/build/bk1.mjs" "$1" || die "The backup did not finish. Nothing changed."; }
+STAMP="$(date +%Y-%m-%d-%H%M)"
+
+if [[ "${MODE}" == verify ]]; then
+  backup "${WORK}/check-${STAMP}.json"
+  PROJECT="${PROJECT_ID}" node "${WORK}/build/arc.mjs" verify "${WORK}/check-${STAMP}.json"
+  exit $?
+fi
+
+echo "1. A complete backup first ..."
+BEFORE="$(pwd)/scorecard-backup-before-archive-${STAMP}.json"
+backup "${BEFORE}"
+echo
+echo "2. The leftover copies:"
+ACCESS_TOKEN="$(gcloud auth print-access-token)" PROJECT="${PROJECT_ID}" node "${WORK}/build/arc.mjs" apply "${BEFORE}" || exit 1
+echo
+echo "3. Checking ..."
+backup "${WORK}/check-${STAMP}.json"
+PROJECT="${PROJECT_ID}" node "${WORK}/build/arc.mjs" verify "${WORK}/check-${STAMP}.json" || exit 1
+echo
+echo "DONE. Your backup from before is ${BEFORE##*/}"
