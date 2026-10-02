@@ -28,6 +28,9 @@ dl9(){ ( cd "${RUN}" && printf 'yes\n' | PATH="${HERE}/go2-fakes:${PATH}" FAKE_D
   bash "${REPO}/build/dl9.txt" ${DL9_MODE:-} ) > "${RUN}/out.txt" 2>&1; echo $?; }
 show(){ sed 's/^/      | /' "${RUN}/out.txt" | tail -n "${1:-8}"; }
 
+PIN="$(grep -o '^COMMIT="[0-9a-f]\{40\}"' "${REPO}/build/dl9.txt" | cut -d'"' -f2)"
+check "DL7 dl9.txt is pinned to a tested commit"                             test -n "${PIN}"
+check "DL7 ... whose rules are exactly these"                               bash -c "cd '${REPO}' && { git cat-file -e '${PIN}' 2>/dev/null || git fetch -q --depth 1 origin '${PIN}'; } && git show '${PIN}:firestore.rules' | diff -q - firestore.rules >/dev/null"
 check "DL0 the new rules hold the deletion lock"                             grep -q "function deleting()" "${REPO}/firestore.rules"
 
 echo "== DL1 publishing fails: the earlier rules stay"

@@ -35,7 +35,7 @@ export CLOUDSDK_CORE_PROJECT="${PROJECT_ID}"
 export GOOGLE_CLOUD_PROJECT="${PROJECT_ID}"
 
 MODE="${1:-apply}"
-COMMIT="PINNED_AFTER_TESTS"                                  # v2 branch, tested: the new rules
+COMMIT="acd6cee5b2fbaa8043c7948e488534b596f90eba"                                            # v2 branch, tested: the new rules
 LIVE_COMMIT="0cb05b53757a6ac8fbbaa874b267da6f7bc74c56"      # the rules ap4.txt published (Oct 1)
 RAW="https://raw.githubusercontent.com/willyros01/scorecard"
 STATE="$(pwd)/scorecard-dl9-backup"
