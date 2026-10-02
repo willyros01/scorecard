@@ -129,7 +129,7 @@ Willy: "V1 was a mistake ... make it irrelevant forever." The app no longer read
 - Shorter old-guest screen (screenUpgrade) and sign-in card; "Become a member or start a group" above "I have a code" (fits without scrolling except on the smallest iPhone at A++).
 - Tests: E26 (all tools in place, signed in, scrolling, top back link), E25 checks the first-screen order.
 
-## OPEN — beta.7 hang on "Loading your group" after returning from a tool (Oct 2, analysed, NOT built)
+## FIXED in beta.8 — beta.7 hang on "Loading your group" after returning from a tool (analysis kept below)
 
 **Symptom (Willy, iPhone app):** after opening Tidy (or any tool) and tapping Back, the boot card stays on "Opening your scorecard / Checking your access ✓ / Loading your group" until the app is backgrounded or the phone sleeps; on return everything is normal.
 
@@ -147,3 +147,16 @@ Willy: "V1 was a mistake ... make it irrelevant forever." The app no longer read
 4. Review EVERY start-up read path for the same class of stall before building (not just the reported one).
 5. New e2e test that reproduces the frozen page: keep the old page's Firestore + IndexedDB open (e.g. a second page/iframe holding the persistent client), open Tidy, come back, and require boot to reach "ready" within a few seconds — online and offline (from the saved copy). It must FAIL on beta.7 code first.
 6. Confirm on device with Send a report (start-up timings "start-up: ... reached after N ms").
+
+## 2.30.0-beta.8 (Oct 2) — the cause of the tool round-trip hang, and one invitation screen less
+
+- **store.js `shutDown()`**: sets `closing`, stops every listener, sets `fb = null`, then `await terminate(db)` FIRST and `await deleteApp(instance)` second. Deleting the app alone hangs when Firestore was never used (auth deleted while Firestore's terminate waits for it) — reproduced in Chromium; it stuck Tidy's Back when signed out. No time-out: it waits for the close to finish.
+- **app.js open-tool**: `await db.shutDown()` before `location.href = ./tool.html`. The time it took (or the failure) is put in the `golf:return` record and written to the report trail of the page that comes back ("left for tidy: closed in N ms").
+- **tool-firebase.js**: remembers what it opened; every `a[href="./"]` (Back to the app) closes Firestore, then the app, then navigates.
+- Both pages: `pageshow` with `persisted` → `location.reload()` (a page restored from the iPhone's page cache never reuses a closed Firebase).
+- **forceOwnership removed** (persistentSingleTabManager() plain).
+- **Outbox**: a write cut off by the close is NOT counted as refused (Firestore reports failed-precondition, which the outbox treats as permanent) — it stays queued for the next page.
+- `terminate` added to build/firebase-entry.js; CI rebuilt and committed the bundle (1474e74).
+- The beta.7 6 s limit on the deletion check is KEPT for now (it also covers starting with no signal); Willy dislikes time-outs that hide problems — ask him before removing it.
+- **Invitation, existing email**: `createAccountHere()` on email-already-in-use signs in with what was typed (`db.signInWithEmail`, the same check as Sign in) and continues via `finishSignIn()` (shared with `signIn()`), straight to the invitation. A wrong password shows "That email already has an account / The password you typed is not its password" (code auth/existing-account-password) on the same screen, with Reset.
+- Tests: E27 (app mode via a fake window.Capacitor: the Firestore saved copy's `owner` lease is released before Tidy loads; Back opens the app within 8 s) and E28 (existing email on an invitation) FAILED on beta.7 code (27b8917) and pass on beta.8; E29 (Back from a signed-out Tidy). E24 now names the failing step.
