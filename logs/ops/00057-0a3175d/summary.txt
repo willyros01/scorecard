@@ -1,0 +1,48 @@
+kind:    ops
+result:  failure
+branch:  v2
+commit:  0a3175dcc8c8f54801bbdc6e7820f9bcff5b06b6
+run:     57 (id 37060057766)
+time:    2026-10-02T20:27:03Z
+
+--- last lines of ops-tests.log ---
+      | File: /tmp/tmp.94juo0s3tO/scorecard-arc-tools/check-2026-10-02-2026.json (5 KB)
+      | BACKUP DONE.
+      | OK: no leftover copies remain in the lists.
+      | 
+      | DONE. Your backup from before is scorecard-backup-before-archive-2026-10-02-2026.json
+PASS  AR3 succeeds
+PASS  AR3 lists the copy tied to another golfer's sign-in as left as is
+PASS  AR3 it checks itself
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+PASS  AR3 c1 archived, merged into the real golfer
+PASS  AR3 c1 keeps its name and sign-in link
+PASS  AR3 c2 archived, merged into the real golfer
+PASS  AR3 c2 keeps its name and sign-in link
+PASS  AR3 c3 archived, merged into the real golfer
+PASS  AR3 c3 keeps its name and sign-in link
+== AR4 nothing else changed: the real golfer, the name list, rounds, groups, other copies
+PASS  AR4 everything else is exactly as before
+== AR5 running it again does nothing; verify agrees
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+      | 
+      | DONE. Your backup from before is scorecard-backup-before-archive-2026-10-02-2027.json
+PASS  AR5 nothing to archive (exit 0)
+PASS  AR5 says so
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+      | BACKUP DONE.
+      | OK: no leftover copies remain in the lists.
+PASS  AR5 verify passes
+== AR6 the app no longer lists them (it hides archived golfers)
+PASS  AR6 the group-less list skips archived golfers
+
+RESULT: 21 passed, 0 failed
+[33m[1m⚠ [22m[39m Script exited unsuccessfully (code 1)
+[36m[1mi  emulators:[22m[39m Shutting down emulators.
+[36m[1mi  firestore:[22m[39m Stopping Firestore Emulator
+[36m[1mi  auth:[22m[39m Stopping Authentication Emulator
+[36m[1mi  hub:[22m[39m Stopping emulator hub
+[36m[1mi  logging:[22m[39m Stopping Logging Emulator
+
+[1m[31mError:[39m[22m Script "[1ms=0; bash sec-tests.sh || s=1; echo; bash del1-tests.sh || s=1; echo; if [ -f privacy-tests.sh ]; then bash privacy-tests.sh || s=1; fi; echo; bash acc-tests.sh || s=1; echo; bash pub-tests.sh || s=1; echo; bash grp-tests.sh || s=1; echo; bash grq-tests.sh || s=1; echo; bash ck4-tests.sh || s=1; echo; if [ -d ../../node_modules/playwright ]; then node ../app/e2e.mjs ../.. || s=1; else echo "SKIP  app tests (npm ci not run)"; fi; echo; node golive-tests.mjs || s=1; echo; bash go2-tests.sh || s=1; echo; bash rq3-tests.sh || s=1; echo; bash ap4-tests.sh || s=1; echo; bash bk1-tests.sh || s=1; echo; bash cl5-tests.sh || s=1; echo; bash bdg-tests.sh || s=1; echo; NBK_SLEEP=0 bash nbk-tests.sh || s=1; echo; bash nb-tests.sh || s=1; echo; bash arc-tests.sh || s=1; exit $s[22m" exited with code 1
