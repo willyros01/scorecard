@@ -1,0 +1,48 @@
+kind:    ops
+result:  success
+branch:  v2
+commit:  acd6cee5b2fbaa8043c7948e488534b596f90eba
+run:     58 (id 37061490608)
+time:    2026-10-02T20:40:16Z
+
+--- last lines of ops-tests.log ---
+PASS  DL2 succeeds (exit 0)
+PASS  DL2 the new rules are live
+PASS  DL2 it says DONE
+== DL3 once more only checks
+PASS  DL3 exit 0
+PASS  DL3 ... and says they are already live
+PASS  DL3 verify says OK
+== DL4 the manual rollback
+      |   Project        : scorecard-f41b8
+      | 
+      | OK: the earlier rules are published again. Tell Claude.
+PASS  DL4 rollback succeeds (exit 0)
+PASS  DL4 the earlier rules are live
+== DL5 the check after publishing fails: the earlier rules are put back
+      | The change: an account that has asked to be deleted is locked. It cannot
+      | act as an admin, post, join or add anything; it can only finish its own
+      | deletion. Nothing else changes and no data is touched.
+      | 
+      | 
+      | Something failed during checking the published rules. Putting the earlier rules back automatically ...
+      | DONE: the earlier rules are live again. The app works as before; only the lock waits.
+      | Send a screenshot to Claude. When it is fixed, bash dl9.txt can simply be run again.
+PASS  DL5 dl9.txt stops (exit 1)
+PASS  DL5 it names the step
+PASS  DL5 the earlier rules are live
+== DL6 the live rules are not the expected ones: nothing is changed
+      |   Project        : scorecard-f41b8
+      | 
+      | ERROR: The published rules are not the ones ap4.txt published. Nothing changed. Send a screenshot to Claude.
+PASS  DL6 dl9.txt refuses (exit 1)
+PASS  DL6 it says why
+PASS  DL6 nothing was published
+
+RESULT: 18 passed, 0 failed
+[32m[1m✔ [22m[39m Script exited successfully (code 0)
+[36m[1mi  emulators:[22m[39m Shutting down emulators.
+[36m[1mi  firestore:[22m[39m Stopping Firestore Emulator
+[36m[1mi  auth:[22m[39m Stopping Authentication Emulator
+[36m[1mi  hub:[22m[39m Stopping emulator hub
+[36m[1mi  logging:[22m[39m Stopping Logging Emulator
