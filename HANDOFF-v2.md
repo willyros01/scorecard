@@ -116,3 +116,7 @@ Decisions kept from before: free app; Version 1 was to be unlisted; one GolfCour
 - **Pinch zoom** in the app: capacitor.config.json ios.zoomEnabled = true.
 - **Tidy inside the app**: tidy.html now loads vendor/firebase (no gstatic) with initializeAuth + IndexedDB, is in build/www-files.txt, and opens in the same window (app and web). Opening a tool stores the tab/admin tab in sessionStorage (`golf:return`); the app restores it on return. Rebuild and Clean up still open in Safari from the app. Tests E24.
 - E4c is occasionally flaky (passed on b750b49, failed on a610050 with only version.js changed).
+
+## 2.30.0-beta.6 (Oct 2) — version 1 import removed for good
+
+Willy: "V1 was a mistake ... make it irrelevant forever." The app no longer reads version 1 data (readLegacyV1, importLegacyV1, importLegacyIntoCurrentGroup removed), shows no import card on Enter (empty group), Join or Admin, and migrate.js is gone from the repo, the app package and the service worker list. model.migrateFromV1 remains as an unused pure function. The old version 1 documents under users/{uid} are still in the database (untouched); users/{uid}/terms/accepted now lives beside them.
