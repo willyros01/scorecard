@@ -1,0 +1,118 @@
+kind:    testflight
+result:  success
+branch:  v2
+commit:  8e17abffa2c8307d942f331aaa4f7b4566c9c01f
+run:     17 (id 37098635916)
+time:    2026-10-03T05:09:29Z
+
+--- last lines of build.log ---
+** ARCHIVE SUCCEEDED **
+
+--- 7. Audit the finished, distribution-signed app (A1-A7). No upload unless it passes.
+Audit of App.app — 2.30.0 (17)
+      privacy manifests found: 3
+        Frameworks/Capacitor.framework/PrivacyInfo.xcprivacy
+        Frameworks/Cordova.framework/PrivacyInfo.xcprivacy
+        PrivacyInfo.xcprivacy
+OK    A1 the app's own manifest: no tracking, no tracking domains
+      categories declared across all manifests: NSPrivacyAccessedAPICategoryUserDefaults
+      App: none
+      Capacitor: none
+      Cordova: none
+OK    A2 every required-reason API category used is declared
+      frameworks and resource bundles in the app:
+        Frameworks/Capacitor.framework
+        Frameworks/Cordova.framework
+OK    A3 Capacitor (on Apple's commonly used SDK list) ships its own privacy manifest
+OK    A3 every embedded framework carries a valid signature
+OK    A4 no NS…UsageDescription keys (no camera, photos, location or contacts)
+      entitlements: application-identifier beta-reports-active com.apple.developer.associated-domains com.apple.developer.team-identifier get-task-allow
+OK    A5 no unexpected entitlements
+OK    A5 get-task-allow is false
+OK    A5 associated domains: applinks:www.cuberoot-systems.com only
+OK    A6 no App Transport Security exceptions
+OK    A7 ITSAppUsesNonExemptEncryption is NO
+OK    A7 no bundled encryption library (SQLCipher, OpenSSL, BoringSSL)
+
+AUDIT PASSED (A1-A7)
+--- 8. Upload to TestFlight
+::notice title=Uploaded::The Scorecard 2.30.0 build 17 sent to App Store Connect.
+--- 9. Test Information and What to Test
+Test Information filled.
+Waiting for Apple to process build 17 (not listed yet)…
+Waiting for Apple to process build 17 (not listed yet)…
+Waiting for Apple to process build 17 (not listed yet)…
+"What to Test" filled for build 17.
+Export compliance already set (usesNonExemptEncryption: false).
+Group "Willy": POST /v1/betaGroups/a860dc30-33c8-4115-b7eb-2835e7bec0ad/relationships/builds — ENTITY_UNPROCESSABLE: Cannot add internal group to a build. (automatic distribution may already have added it).
+RESULT: success — The Scorecard 2.30.0 build 17 uploaded to TestFlight.
+
+--- last lines of xcodebuild.log ---
+
+Validate /Users/runner/Library/Developer/Xcode/DerivedData/App-foiydrissoivwcgqlipyfvsodhew/Build/Intermediates.noindex/ArchiveIntermediates/App/InstallationBuildProductsLocation/Applications/App.app (in target 'App' from project 'App')
+    cd /Users/runner/work/scorecard/scorecard/ios/App
+    builtin-validationUtility /Users/runner/Library/Developer/Xcode/DerivedData/App-foiydrissoivwcgqlipyfvsodhew/Build/Intermediates.noindex/ArchiveIntermediates/App/InstallationBuildProductsLocation/Applications/App.app -validate-for-store -shallow-bundle -infoplist-subpath Info.plist
+
+Touch /Users/runner/Library/Developer/Xcode/DerivedData/App-foiydrissoivwcgqlipyfvsodhew/Build/Intermediates.noindex/ArchiveIntermediates/App/InstallationBuildProductsLocation/Applications/App.app (in target 'App' from project 'App')
+    cd /Users/runner/work/scorecard/scorecard/ios/App
+    /usr/bin/touch -c /Users/runner/Library/Developer/Xcode/DerivedData/App-foiydrissoivwcgqlipyfvsodhew/Build/Intermediates.noindex/ArchiveIntermediates/App/InstallationBuildProductsLocation/Applications/App.app
+
+** ARCHIVE SUCCEEDED **
+
+2026-10-03 05:06:06.277 xcodebuild[49737:119691] [MT] IDEDistribution: -[IDEDistributionLogging _createLoggingBundleAtPath:]: Created bundle at path "/var/folders/36/tjdph2t965j8snz9_vkdnw0r0000gn/T/App_2026-10-03_05-06-06.269.xcdistributionlogs".
+Exported App to: /Users/runner/work/_temp/export
+** EXPORT SUCCEEDED **
+
+2026-10-03 05:06:26.007 xcodebuild[51084:123462] [MT] IDEDistribution: -[IDEDistributionLogging _createLoggingBundleAtPath:]: Created bundle at path "/var/folders/36/tjdph2t965j8snz9_vkdnw0r0000gn/T/App_2026-10-03_05-06-26.002.xcdistributionlogs".
+2026-10-03 05:06:39.486 xcodebuild[51084:123462] Starting upload
+2026-10-03 05:06:40.671 xcodebuild[51084:123510] Progress 0%: Making copy of ‘App.ipa’…
+2026-10-03 05:06:40.672 xcodebuild[51084:123510] Progress 0%: Making copy of ‘App.ipa’…
+2026-10-03 05:06:40.672 xcodebuild[51084:123510] Progress 0%: Preparing to upload ‘App.ipa’…
+2026-10-03 05:07:02.766 xcodebuild[51084:123510] Progress 0%: Analyzing package…
+2026-10-03 05:07:03.684 xcodebuild[51084:123508] Progress 0%: Sending analysis to App Store Connect…
+2026-10-03 05:07:05.054 xcodebuild[51084:123508] Progress 0%: Waiting for App Store Connect analysis response…
+2026-10-03 05:07:06.364 xcodebuild[51084:123508] Progress 0%: Waiting for App Store Connect analysis response…
+2026-10-03 05:07:22.946 xcodebuild[51084:123510] Progress 0%: Sending SPI analysis to App Store Connect…
+2026-10-03 05:07:23.617 xcodebuild[51084:123510] Progress 0%: Waiting for App Store Connect SPI analysis response…
+2026-10-03 05:07:25.056 xcodebuild[51084:123510] Progress 0%: Waiting for App Store Connect SPI analysis response…
+2026-10-03 05:07:51.111 xcodebuild[51084:123510] Progress 0%: Requesting upload instructions from App Store Connect…
+2026-10-03 05:07:51.910 xcodebuild[51084:123510] Progress 0%: Preparing file for upload to App Store Connect…
+2026-10-03 05:07:51.920 xcodebuild[51084:123510] Progress 0%: Preparing file for upload to App Store Connect…
+2026-10-03 05:07:51.921 xcodebuild[51084:123510] Progress 0%: Uploading to App Store Connect…
+2026-10-03 05:07:51.941 xcodebuild[51084:123510] Progress 100%: Uploading to App Store Connect…
+2026-10-03 05:07:51.942 xcodebuild[51084:123510] Progress 100%: Uploading to App Store Connect…
+2026-10-03 05:07:52.271 xcodebuild[51084:123510] Progress 100%: Completing upload…
+2026-10-03 05:07:53.568 xcodebuild[51084:123510] Progress 100%: Waiting for package to begin processing…
+2026-10-03 05:07:53.691 xcodebuild[51084:123510] Progress 100%: Uploaded package is processing.
+2026-10-03 05:07:53.697 xcodebuild[51084:123510] Progress 100%: Upload succeeded.
+Uploaded App
+** EXPORT SUCCEEDED **
+
+
+--- last lines of audit-report.txt ---
+Audit of App.app — 2.30.0 (17)
+      privacy manifests found: 3
+        Frameworks/Capacitor.framework/PrivacyInfo.xcprivacy
+        Frameworks/Cordova.framework/PrivacyInfo.xcprivacy
+        PrivacyInfo.xcprivacy
+OK    A1 the app's own manifest: no tracking, no tracking domains
+      categories declared across all manifests: NSPrivacyAccessedAPICategoryUserDefaults
+      App: none
+      Capacitor: none
+      Cordova: none
+OK    A2 every required-reason API category used is declared
+      frameworks and resource bundles in the app:
+        Frameworks/Capacitor.framework
+        Frameworks/Cordova.framework
+OK    A3 Capacitor (on Apple's commonly used SDK list) ships its own privacy manifest
+OK    A3 every embedded framework carries a valid signature
+OK    A4 no NS…UsageDescription keys (no camera, photos, location or contacts)
+      entitlements: application-identifier beta-reports-active com.apple.developer.associated-domains com.apple.developer.team-identifier get-task-allow
+OK    A5 no unexpected entitlements
+OK    A5 get-task-allow is false
+OK    A5 associated domains: applinks:www.cuberoot-systems.com only
+OK    A6 no App Transport Security exceptions
+OK    A7 ITSAppUsesNonExemptEncryption is NO
+OK    A7 no bundled encryption library (SQLCipher, OpenSSL, BoringSSL)
+
+AUDIT PASSED (A1-A7)
