@@ -1059,6 +1059,53 @@ await check("E32", "an invitation for a golfer you already are, in a group you a
   if ((await lou.evaluate(async () => (await import("/store.js")).currentAssociation())) !== "G1") throw new Error("the group did not open");
 });
 
+
+/* Oct 2 review: exercise the real join and sign-out paths. Native launch
+   delivery is simulated here; the iPhone still needs a device acceptance run. */
+for (const mode of ["web", "native-immediate", "native-delayed"]) {
+  await check("E33-" + mode, "join then sign out returns to ordinary Sign in (" + mode + ")", async () => {
+    const key = "gLogout" + mode.replace(/[^a-z]/g, "");
+    const email = key.toLowerCase() + "@example.com";
+    const password = "logout-test-pass-1";
+    await joinedPerson(key, "Logout " + mode, email, password);
+    const page = await newPage();
+    const launchUrl = "https://www.cuberoot-systems.com/scorecard/join/?join=G1.PRIV01." + key;
+    if (mode !== "web") {
+      await page.addInitScript(({url, delayed}) => {
+        window.Capacitor = { isNativePlatform: () => true, Plugins: {
+          App: { getLaunchUrl: async () => ({url}), addListener: () => ({remove(){}}) }
+        }};
+        // Age the successful-consumption record only on the subsequent reload.
+        if (delayed) {
+          const key = "golf:v2:lastLink";
+          const record = JSON.parse(localStorage.getItem(key) || "null");
+          if (record) { record.at = Date.now() - 11 * 60 * 1000; localStorage.setItem(key, JSON.stringify(record)); }
+        }
+      }, {url: launchUrl, delayed: mode === "native-delayed"});
+    }
+    await page.goto(mode === "web" ? APP + "&join=G1.PRIV01." + key : APP, {waitUntil: "load"});
+    await waitForText(page, /You.re invited/);
+    await page.fill('[name="email"]', email);
+    await page.fill('[name="password"]', password);
+    await page.fill('[name="password-again"]', password);
+    await page.locator('[data-act="create-account"]').click();
+    await waitForText(page, new RegExp("Logout " + mode));
+    await page.locator('[data-act="accept-named"]').click();
+    await page.waitForFunction(async () => (await import("/store.js")).currentAssociation() === "G1");
+    await page.locator('[data-tab="summary"]').waitFor();
+    await Promise.all([
+      page.waitForNavigation({waitUntil: "load"}),
+      page.evaluate(async () => { await (await import("/store.js")).signOutEverywhere(); })
+    ]);
+    await page.locator('[data-act="sign-in"]').first().waitFor();
+    if (/You.re invited/.test(await text(page))) throw new Error("used invitation returned after sign-out");
+    const query = await page.evaluate(async () => (await import("/platform.js")).linkQuery());
+    if (new URLSearchParams(query).has("join")) throw new Error("invitation remains pending");
+    if (await signedInNow(page)) throw new Error("account remains signed in");
+    await page.close();
+  });
+}
+
 await browser.close();
 server.kill();
 console.log(`\nRESULT: ${passed} passed, ${failed} failed`);
