@@ -41,7 +41,7 @@ export const joinBase = () => JOIN_BASE;
    takeLink(), which keeps exactly one waiting link and ignores repeats. */
 
 const LAST_LINK_KEY = "golf:v2:lastLink";
-const REPEAT_WINDOW_MS = 10 * 60 * 1000;   // a repeat within 10 minutes is a duplicate delivery
+const USED_LINKS_KEY = "golf:usedInvitationLinks"; // outside account data; survives account deletion
 let pendingQuery = "";
 
 function keyOf(query) {
@@ -55,10 +55,14 @@ function keyOf(query) {
   } catch { return ""; }
 }
 
+function usedLinkKeys() {
+  try { return JSON.parse(localStorage.getItem(USED_LINKS_KEY) || "[]"); } catch { return []; }
+}
+
 function lastUsedKey() {
   try {
     const saved = JSON.parse(localStorage.getItem(LAST_LINK_KEY) || "null");
-    if (saved && saved.key && Date.now() - saved.at < REPEAT_WINDOW_MS) return saved.key;
+    if (saved && saved.key) return saved.key;
   } catch { /* unreadable: treat as none */ }
   return "";
 }
@@ -70,7 +74,7 @@ export function takeLink(url) {
   const key = keyOf(query);
   if (!key) return false;
   if (key === keyOf(pendingQuery)) return false;   // already waiting on screen
-  if (key === lastUsedKey()) return false;          // just used successfully here
+  if (key === lastUsedKey() || usedLinkKeys().includes(key)) return false;
   pendingQuery = query;
   return true;
 }
@@ -87,7 +91,8 @@ export function clearLinkQuery() {
   if (!isApp()) return;   // the browser path is history.replaceState in store.js, unchanged
   const key = keyOf(pendingQuery);
   if (key) {
-    try { localStorage.setItem(LAST_LINK_KEY, JSON.stringify({ key, at: Date.now() })); } catch { /* best effort */ }
+    try { localStorage.setItem(LAST_LINK_KEY, JSON.stringify({ key, at: Date.now() }));
+      localStorage.setItem(USED_LINKS_KEY, JSON.stringify([...new Set([...usedLinkKeys(), key])])); } catch { /* best effort */ }
   }
   pendingQuery = "";
 }
@@ -156,3 +161,4 @@ export async function openExternal(url, how = "self") {
   if (how === "tab") { window.open(url, "_blank"); return; }
   location.href = url;
 }
+

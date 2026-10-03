@@ -1,0 +1,52 @@
+#!/usr/bin/env python3
+"""A stand-in for curl, for test/ops/ix9-tests.sh only: plays Firestore's
+runQuery and the index (field) API, keeping its state in $FAKE_DIR.
+  index-ready       exists -> the across-groups index is built
+  build-polls       holds N -> after the PATCH, N more searches are refused
+  patch-fails       exists -> the PATCH is refused (403)
+  other-error       exists -> every search fails without mentioning an index
+  patch-body.json   written with what the script asked for
+"""
+import json, os, sys, pathlib
+FAKE = pathlib.Path(os.environ["FAKE_DIR"])
+args = sys.argv[1:]
+method, data, out, wfmt, url = "GET", None, None, None, None
+i = 0
+while i < len(args):
+    a = args[i]
+    if a == "-X": method = args[i+1]; i += 2; continue
+    if a == "--data-binary": data = args[i+1]; i += 2; continue
+    if a == "-o": out = args[i+1]; i += 2; continue
+    if a == "-w": wfmt = args[i+1]; i += 2; continue
+    if a == "-H": i += 2; continue
+    if a.startswith("http"): url = a
+    i += 1
+def reply(code, body):
+    text = json.dumps(body)
+    if out: pathlib.Path(out).write_text(text)
+    else: sys.stdout.write(text)
+    if wfmt: sys.stdout.write(str(code))
+    sys.exit(0)
+log = FAKE / "calls.txt"
+with log.open("a") as f: f.write(f"{method} {url}\n")
+if url.endswith("documents:runQuery"):
+    if (FAKE / "other-error").exists():
+        reply(403, {"error": {"code": 403, "message": "Missing or insufficient permissions."}})
+    polls = FAKE / "build-polls"
+    if polls.exists():
+        n = int(polls.read_text() or "0")
+        if n <= 0:
+            polls.unlink(); (FAKE / "index-ready").write_text("1")
+        else:
+            polls.write_text(str(n - 1))
+    if (FAKE / "index-ready").exists():
+        reply(200, [{"readTime": "2026-10-02T21:00:00Z"}])
+    reply(400, {"error": {"code": 400, "status": "FAILED_PRECONDITION",
+        "message": "The query requires a COLLECTION_GROUP_ASC index for collection members and field uid. You can create it here: https://console.firebase.google.com/..."}})
+if "/collectionGroups/members/fields/uid" in url and method == "PATCH":
+    if (FAKE / "patch-fails").exists():
+        reply(403, {"error": {"code": 403, "message": "The caller does not have permission"}})
+    (FAKE / "patch-body.json").write_text(pathlib.Path(data[1:]).read_text())
+    if not (FAKE / "build-polls").exists(): (FAKE / "build-polls").write_text("2")
+    reply(200, {"name": "operations/fake", "metadata": {}})
+reply(404, {"error": {"message": f"fake curl: unexpected {method} {url}"}})

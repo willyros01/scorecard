@@ -23,14 +23,17 @@ cp "${FAKE}/old-rules.txt" "${FAKE}/raw/${LIVE_COMMIT}/firestore.rules"
 echo "projects/${P}/rulesets/r0" > "${FAKE}/release.txt"
 live(){ cat "${FAKE}/rulesets/$(basename "$(cat "${FAKE}/release.txt")").txt"; }
 live_is_old(){ [[ "$(live)" == "$(cat "${FAKE}/old-rules.txt")" ]]; }
-live_is_new(){ diff -q <(live) "${REPO}/firestore.rules" >/dev/null; }
+live_is_new(){ diff -q <(live) "${FAKE}/raw/${PIN}/firestore.rules" >/dev/null; }
 dl9(){ ( cd "${RUN}" && printf 'yes\n' | PATH="${HERE}/go2-fakes:${PATH}" FAKE_DIR="${FAKE}" REPO_DIR="${REPO}" \
   bash "${REPO}/build/dl9.txt" ${DL9_MODE:-} ) > "${RUN}/out.txt" 2>&1; echo $?; }
 show(){ sed 's/^/      | /' "${RUN}/out.txt" | tail -n "${1:-8}"; }
 
 PIN="$(grep -o '^COMMIT="[0-9a-f]\{40\}"' "${REPO}/build/dl9.txt" | cut -d'"' -f2)"
 check "DL7 dl9.txt is pinned to a tested commit"                             test -n "${PIN}"
-check "DL7 ... whose rules are exactly these"                               bash -c "cd '${REPO}' && { git cat-file -e '${PIN}' 2>/dev/null || git fetch -q --depth 1 origin '${PIN}'; } && git show '${PIN}:firestore.rules' | diff -q - firestore.rules >/dev/null"
+# dl9 is a historical beta.9 deployment. Test its pinned rules, not beta.10.
+mkdir -p "${FAKE}/raw/${PIN}"
+check "DL7 pinned deletion-lock rules are available" bash -c "cd '${REPO}' && { git cat-file -e '${PIN}' 2>/dev/null || git fetch -q --depth 1 origin '${PIN}'; } && git show '${PIN}:firestore.rules' > '${FAKE}/raw/${PIN}/firestore.rules'"
+check "DL7 pinned rules retain the deletion lock" grep -q "function deleting()" "${FAKE}/raw/${PIN}/firestore.rules"
 check "DL0 the new rules hold the deletion lock"                             grep -q "function deleting()" "${REPO}/firestore.rules"
 
 echo "== DL1 publishing fails: the earlier rules stay"
@@ -77,3 +80,4 @@ check "DL6 nothing was published"                                          [ "$(
 echo
 echo "RESULT: ${pass} passed, ${fail} failed"
 [[ "${fail}" -eq 0 ]]
+

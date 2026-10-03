@@ -14,7 +14,12 @@ on:
       - firestore.rules
       - "*.js"
       - "*.html"
-      - build/firebase-entry.js
+      - build/**
+      - package.json
+      - package-lock.json
+      - styles.css
+      - test/review/**
+      - .github/workflows/release-checks.yml
       - vendor/**
 
 permissions:
@@ -54,3 +59,4 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: bash .github/scripts/save-logs.sh ops "${{ steps.tests.outcome }}" ops-tests.log
+

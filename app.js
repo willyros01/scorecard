@@ -372,7 +372,12 @@ setInterval(applyTheme, 5 * 60 * 1000);
 const empty = (title, hint) => `<div class="empty"><h2>${title}</h2><p>${hint}</p></div>`;
 const flashBar = () => (flash ? `<div class="note">${esc(flash)}</div>` : "");
 
-function flashMsg(msg) { flash = msg; render(); setTimeout(() => { flash = null; render(); }, 3200); }
+let flashTimer;
+function flashMsg(msg) {
+  clearTimeout(flashTimer);
+  flash = msg; render();
+  flashTimer = setTimeout(() => { flash = null; render(); }, 10000);
+}
 
 /* ================= joining ================= */
 
@@ -1016,7 +1021,7 @@ async function approveRequestHere(key) {
     await start(groupId);
     tab = "admin";
     await db.ensureAdminCode();
-    const link = db.inviteLink("admin");
+    const link = await db.inviteLink("admin");
     idleAll();
     if (!link) {
       flashMsg(`"${req.groupName}" is created and the request is approved. Send the organiser an admin invitation from Admin: Invite an admin who doesn't play.`);
@@ -3776,9 +3781,10 @@ function openPasswordSheet({ heading, because, allowLater = false } = {}) {
 
 /* ================= Delete my account (Change 7) ================= */
 
-function openDeleteAccount({ resume = false, problem = "" } = {}) {
+function openDeleteAccount({ resume = false, problem = "", reportable = false } = {}) {
   const needsPassword = db.hasPassword() && !(db.currentEmail() || "").startsWith("delete-");
   const blockers = db.deletionBlockers();
+  sheetEl.dataset.deletionError = reportable ? problem : "";
   sheetEl.hidden = false;
   sheetEl.dataset.report = "";
   sheetEl.innerHTML = `<div class="sheet-body">
@@ -3796,6 +3802,7 @@ function openDeleteAccount({ resume = false, problem = "" } = {}) {
       <input class="field" name="delete-password" type="password" autocomplete="current-password" placeholder="To confirm it's you">` : ""}
     <div class="inline-actions stacked">
       <button class="btn danger" data-del="go">${resume ? "Try again" : "Delete my account"}</button>
+      ${reportable ? `<button class="btn ghost" data-del="report">Send a report</button>` : ""}
       ${resume ? "" : `<button class="btn ghost" data-close="1">Keep it</button>`}
     </div>
   </div>`;
@@ -3856,6 +3863,9 @@ sheetEl.addEventListener("click", async (e) => {
 sheetEl.addEventListener("click", async (e) => {
   const button = e.target.closest("[data-del]");
   if (!button) return;
+  if (button.dataset.del === "report") {
+    return openProblem({ title: "Your account deletion check failed", detail: sheetEl.dataset.deletionError, advice: "Nothing was changed. This report includes the real reason the check failed." });
+  }
   if (button.dataset.del === "dismiss") { db.dismissAbandoned(); return openDeleteAccount(); }
   if (button.dataset.del !== "go") return;
   const password = ((sheetEl.querySelector('[name="delete-password"]') || {}).value) || "";
@@ -3878,7 +3888,8 @@ sheetEl.addEventListener("click", async (e) => {
       <div class="inline-actions stacked"><button class="btn" data-del="restart">Done</button></div></div>`;
     return;
   }
-  openDeleteAccount({ resume: db.deletionPending() || resume, problem: (result && result.message) || "Something went wrong. Nothing was reported as deleted." });
+  if (result && result.reason === "CHECK") note(`deletion check failed: ${result.message}`);
+  openDeleteAccount({ resume: db.deletionPending() || resume, problem: (result && result.message) || "Something went wrong. Nothing was reported as deleted.", reportable: !!(result && result.reason === "CHECK") });
 });
 sheetEl.addEventListener("click", (e) => {
   if (e.target.closest('[data-del="restart"]')) location.reload();
@@ -4905,6 +4916,11 @@ view.addEventListener("click", async (e) => {
     }
     case "accept-invite": return acceptInvite();
     case "not-me": {
+      if ((db.readJoinLink() || {}).token) {
+        db.clearJoinLink(); invitedGolfer = null;
+        flashMsg("Ask the admin for your own invitation.");
+        await settleGroup(db.recallAssociation()); return render();
+      }
       /* Fall back to typing a name, rather than joining as the wrong person. */
       invitedGolfer = null;
       flashMsg("Type the name you play under instead.");
@@ -4921,10 +4937,9 @@ view.addEventListener("click", async (e) => {
            read the group document, so asking it is pointless — the rules verify
            the code against the group when the membership is written. */
         const role = link.role || "member";
-        const result = await db.acceptNamedInvite({
-          associationId: link.associationId, code: link.code,
-          golferId: link.golferId, role,
-        });
+        const result = link.token
+          ? await db.acceptTokenInvite({ associationId: link.associationId, token: link.token })
+          : await db.acceptNamedInvite({ associationId: link.associationId, code: link.code, golferId: link.golferId, role });
         joining = false;
         if (!result.ok) {
           idleAll();
@@ -5383,8 +5398,13 @@ view.addEventListener("click", async (e) => {
     case "share-ranking": return openShare(rankingShareText(), "Rankings");
     case "share-indexes": return openShare(indexShareText(), "Handicap indexes");
 
-    case "share-invite": return openShare(
-      `Join our golf scorecard:\n${db.joinLink(association)}\n\nOne tap, enter your name, done.`, "Invitation");
+    case "share-invite": {
+      busy("Preparing the invitation");
+      try { return openShare(`Join our golf scorecard:\n${await db.inviteLink("member")}\n\nCreate an account or sign in. This link works once.`, "Invitation"); }
+      catch (err) { openProblem({ title: "Could not prepare the invitation", detail: String(err.message || err), advice: "Try again when connected." }); }
+      finally { idleAll(); }
+      return;
+    }
     case "tidy-signins": {
       /* Removes only SUPERSEDED memberships — never the newest for any person,
          never the owner, never your own. A membership is just a sign-in record;
@@ -5423,7 +5443,7 @@ view.addEventListener("click", async (e) => {
       busy("Preparing the invitation");
       try {
         await db.ensureAdminCode();
-        const link = db.inviteLink("admin");
+        const link = await db.inviteLink("admin");
         if (!link) {
           idleAll();
           return openProblem({
@@ -5452,7 +5472,7 @@ view.addEventListener("click", async (e) => {
           <h2>Group code</h2><button class="rowbtn" data-close="1">Close</button></div>
         <p class="hint">For somebody who cannot receive a link. Read it out — it is six characters.</p>
         <div class="codebox">${esc(association.joinCode)}</div>
-        <p class="hint">The invitation link is easier and carries this code inside it.</p>
+        <p class="hint">An invitation link is easier: it has its own one-use secret. This group code is for manual entry only.</p>
       </div>`;
       return;
     }
@@ -5663,7 +5683,7 @@ sheetEl.addEventListener("click", async (e) => {
     busy("Preparing the invitation");
     try {
       if (role === "admin") await db.ensureAdminCode();
-      const link = db.inviteLink(role, golferId);
+      const link = await db.inviteLink(role, golferId);
       if (golferId) db.noteInvitation(golferId, role, named);
       if (!link) {
         /* This used to flashMsg and return without redrawing, so the button
@@ -5692,7 +5712,7 @@ sheetEl.addEventListener("click", async (e) => {
           : "Tap the link, create your account (your email and a password) or sign in, then type the name you play under.",
         role === "admin"
           ? "This makes you an admin, so you will be asked to set a password. It works once, so keep it to yourself."
-          : "No account and no password needed.",
+          : "Create an account or sign in with your email and password. This invitation works once.",
       ].join("\n");
 
       openShare(text, role === "admin" ? "Admin invitation" : "Invitation");
@@ -6158,7 +6178,15 @@ async function acceptInvite() {
   joining = true;
   busy("Joining the group");
   render();
-  const result = await db.joinAssociation({ associationId: invite.associationId, code: invite.code, displayName: name });
+  let result;
+  try { result = invite.token
+    ? await db.acceptTokenInvite({ associationId: invite.associationId, token: invite.token, displayName: name })
+    : await db.joinAssociation({ associationId: invite.associationId, code: invite.code, displayName: name });
+  } catch (err) {
+    joining = false; idleAll();
+    openProblem({ title: "This invitation could not be accepted", detail: String(err.code || err.message || err), advice: "Nothing was changed. Ask the admin for a fresh link if this one was used or replaced." });
+    return render();
+  }
   if (result.ok) {
     db.clearJoinLink();
 
@@ -6608,7 +6636,7 @@ async function settleGroupInner(preferred) {
   /* Nothing belongs to this account: the first screen handles it. */
 }
 
-db.onChange((s) => { sync = s; render(); });
+db.onChange((s, patch) => { sync = s; if (patch && patch.deletionDetected) refuseDeletingAccount(); render(); });
 
 /* The steps boot() runs for an invitation that names somebody: fetch them so
    the screen can greet them. Also used when a link arrives while the iPhone
@@ -6620,6 +6648,23 @@ async function loadInvitedDetails() {
      guest session, the account screen comes first. */
   if (!db.hasUser() || db.isAnonymousSession()) return;
   const link = db.readJoinLink();
+  if (link && link.token) {
+    try {
+      const inv = await db.loadInvitation(link);
+      if (!inv) {
+        db.clearJoinLink();
+        flashMsg("This invitation was used or cancelled. Sign in normally, or ask the admin for a fresh link.");
+        await settleGroup(db.recallAssociation());
+        return;
+      }
+      invitedGolfer = inv.golferId && inv.name ? { ...inv, id: inv.golferId } : null;
+      invitedGroupName = inv.groupName || "";
+    } catch (err) {
+      note(`invitation read: ${String(err.code || err.message || err)}`);
+      flashMsg("The invitation could not be checked. Reconnect and open the link again.");
+    }
+    return;
+  }
   if (link && link.golferId) {
     /* Go-live fix 1: from the invitation record, not the private golfer. */
     const inv = await db.invitationFor(link.associationId, link.golferId);
@@ -6672,3 +6717,4 @@ addEventListener("pageshow", (e) => { if (e.persisted) location.reload(); });
     render();
   });
 })();
+

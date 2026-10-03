@@ -2,7 +2,7 @@
  *
  * The real app, served on this test machine at http://localhost:8000 with
  * ?emulators=1, so it talks only to the emulators started by test/ops/run.sh:
- * a demo project that cannot reach any live data. Chromium only.
+ * a demo project that cannot reach any live data. Chromium and WebKit.
  *
  * E1–E9: the PUBLIC group from both sides (Phase C) — apply while signed out,
  * approve as the owner, choose a password from the email, sign in and land in
@@ -11,7 +11,7 @@
  *
  * Usage (inside firebase emulators:exec): node test/app/e2e.mjs <site-dir>
  */
-import { chromium } from "playwright";
+import { chromium, webkit } from "playwright";
 import { spawn } from "node:child_process";
 import path from "node:path";
 
@@ -159,7 +159,7 @@ const server = spawn("python3", ["-m", "http.server", String(PORT), "--bind", "1
 await new Promise((r) => setTimeout(r, 1500));
 setTimeout(() => { console.log("FAIL  WATCHDOG  the app tests took longer than 10 minutes"); server.kill(); process.exit(1); }, 10 * 60 * 1000).unref();
 
-const browser = await chromium.launch();
+const browser = await (process.env.TEST_BROWSER === "webkit" ? webkit : chromium).launch();
 /* beta.5: every test device has accepted the Terms of Use, except where a test
    sets globalThis.__termsFresh to see the first-open screen itself (E24). */
 {
@@ -282,7 +282,9 @@ await check("E4c", "an approval interrupted part-way is finished by the same rev
   await waitForText(owner, /approval not finished/);
   await owner.locator('[data-act="review-application"][data-id="retry@example.com"]').click();
   await owner.locator('[data-pc="approve"]').click();
-  await waitForText(owner, /Ray Retry is approved/);
+  const deadline = Date.now() + 20000;
+  while (Date.now() < deadline && (await getDoc("publicApplications/retry@example.com"))?.status !== "approved") await owner.waitForTimeout(200);
+
   const app = await getDoc("publicApplications/retry@example.com");
   if (app.status !== "approved" || app.golferId !== "gRetry") throw new Error(JSON.stringify(app));
   if ((await getDoc("golfers/gRetry")).name !== "Ray Retry") throw new Error("the claimed golfer was not used");
@@ -523,7 +525,7 @@ await check("E16", "Willy approves: the group is created with him as owner, the 
   const msg = await wil.evaluate(() => (document.querySelector("pre.msg") || {}).innerText || "");
   const found = /join=([A-Za-z0-9._-]+)&as=admin/.exec(msg);
   if (!found || !found[1].startsWith(`${r.groupId}.`)) throw new Error(`no admin invitation link in: ${msg.slice(0, 300)}`);
-  adminLink = `${APP}&join=${found[1]}&as=admin`;
+  adminLink = `${APP}&join=${found[1]}&as=admin&v=2`;
   await wil.locator('[data-close="1"]').first().click().catch(() => {});
   if (wil.errors.length) throw new Error(wil.errors.join(" | "));
 });
@@ -1059,7 +1061,251 @@ await check("E32", "an invitation for a golfer you already are, in a group you a
   if ((await lou.evaluate(async () => (await import("/store.js")).currentAssociation())) !== "G1") throw new Error("the group did not open");
 });
 
+for (const mode of ["web", "native-immediate", "native-delayed"]) {
+  await check("E33-" + mode, "join then sign out returns to ordinary Sign in (" + mode + ")", async () => {
+    const key = "gLogout" + mode.replace(/[^a-z]/g, "");
+    const email = key.toLowerCase() + "@example.com";
+    const password = "logout-test-pass-1";
+    await joinedPerson(key, "Logout " + mode, email, password);
+    const page = await newPage();
+    const launchUrl = "https://www.cuberoot-systems.com/scorecard/join/?join=G1.PRIV01." + key;
+    if (mode !== "web") {
+      await page.addInitScript(({url, delayed}) => {
+        window.Capacitor = { isNativePlatform: () => true, Plugins: {
+          App: { getLaunchUrl: async () => ({url}), addListener: () => ({remove(){}}) }
+        }};
+        // Age the successful-consumption record only on the subsequent reload.
+        if (delayed) {
+          const key = "golf:v2:lastLink";
+          const record = JSON.parse(localStorage.getItem(key) || "null");
+          if (record) { record.at = Date.now() - 11 * 60 * 1000; localStorage.setItem(key, JSON.stringify(record)); }
+        }
+      }, {url: launchUrl, delayed: mode === "native-delayed"});
+    }
+    await page.goto(mode === "web" ? APP + "&join=G1.PRIV01." + key : APP, {waitUntil: "load"});
+    await waitForText(page, /You.re invited/);
+    await page.fill('[name="email"]', email);
+    await page.fill('[name="password"]', password);
+    await page.fill('[name="password-again"]', password);
+    await page.locator('[data-act="create-account"]').click();
+    await waitForText(page, new RegExp("Logout " + mode));
+    await page.locator('[data-act="accept-named"]').click();
+    await page.waitForFunction(async () => (await import("/store.js")).currentAssociation() === "G1");
+    await page.locator('[data-tab="summary"]').waitFor();
+    await Promise.all([
+      page.waitForNavigation({waitUntil: "load"}),
+      page.evaluate(async () => { await (await import("/store.js")).signOutEverywhere(); })
+    ]);
+    await page.locator('[data-act="sign-in"]').first().waitFor();
+    if (/You.re invited/.test(await text(page))) throw new Error("used invitation returned after sign-out");
+    const query = await page.evaluate(async () => (await import("/platform.js")).linkQuery());
+    if (new URLSearchParams(query).has("join")) throw new Error("invitation remains pending");
+    if (await signedInNow(page)) throw new Error("account remains signed in");
+    await page.close();
+  });
+}
+
+
+/* beta.10: production invitation rules enabled. No live project is touched. */
+await put("settings/invitationLinks", { version: 2 });
+await wil.evaluate(async () => {
+  const db = await import("/store.js"); db.setAssociation("G1");
+  await db.loadMembership("G1"); await db.loadAssociation("G1");
+});
+async function freshInvitation(golferId, role = "member", page = wil) {
+  return page.evaluate(async ({golferId, role}) => (await import("/store.js")).inviteLink(role, golferId), {golferId, role});
+}
+async function tokenPerson(key, name, email) {
+  const password = "invited-pass-1";
+  const uid = await signUp(email, password);
+  await put(`golfers/${key}`, { name, nameKey: key, linkedUid: null, groups: ["G1"] });
+  await put(`associations/G1/roster/${key}`, { golferId: key });
+  const page = await newPage(); await page.goto(APP, {waitUntil:"load"});
+  await waitForText(page, /Sign in/); await signIn(page, email, password);
+  await page.waitForFunction(async expected => { const db = await import("/store.js"); return db.isSignedIn() && db.status().uid === expected; }, uid);
+  await page.waitForFunction(() => !document.querySelector('[data-act="sign-in"]'));
+  return { uid, page, email, password };
+}
+async function acceptToken(page, url, displayName = "Invited Person") {
+  const u = new URL(url); const [associationId, token] = u.searchParams.get("join").split(".");
+  return page.evaluate(async x => {
+    try { return await (await import("/store.js")).acceptTokenInvite(x); }
+    catch(e) { return { ok:false, error:String(e.code || e.message || e) }; }
+  }, {associationId,token,displayName});
+}
+let invitationCase;
+await check("INV1", "resend creates a different secret and the previous link cannot create membership", async () => {
+  invitationCase = await tokenPerson("gToken", "Token Player", "token@example.com");
+  const first = await freshInvitation("gToken"); const second = await freshInvitation("gToken");
+  if (!first || first === second || !second.includes("&v=2")) throw new Error("not a fresh independent secret");
+  if ((await acceptToken(invitationCase.page, first)).ok) throw new Error("replaced invitation accepted");
+  if (await getDoc(`associations/G1/members/${invitationCase.uid}`)) throw new Error("partial membership after refusal");
+  invitationCase.url = second;
+});
+await check("INV2", "one atomic join links the existing golfer, preserves rounds, and spends the invitation", async () => {
+  const x = invitationCase;
+  await put("associations/G1/rounds/token-round", { golferId:"gToken", date:"2026-10-01", gross:90 });
+  const result = await acceptToken(x.page, x.url);
+  if (!result.ok) throw new Error(JSON.stringify(result));
+  if ((await getDoc("golfers/gToken")).linkedUid !== x.uid) throw new Error("golfer not linked");
+  const token = new URL(x.url).searchParams.get("join").split(".")[1];
+  const receipt = await getDoc(`associations/G1/invitationTokens/${token}`);
+  if (receipt.state !== "used" || receipt.acceptedBy || receipt.email) throw new Error("missing non-personal used receipt");
+  if (!(await getDoc("associations/G1/rounds/token-round"))) throw new Error("round lost");
+  if ((await acceptToken(x.page, x.url)).ok) throw new Error("used invitation accepted twice");
+});
+await check("INV3", "a forwarded used invitation cannot be accepted by another account", async () => {
+  const y = await tokenPerson("gOtherToken", "Other Token", "other-token@example.com");
+  if ((await acceptToken(y.page, invitationCase.url)).ok) throw new Error("forwarded used link accepted");
+  if (await getDoc(`associations/G1/members/${y.uid}`)) throw new Error("partial membership");
+});
+await check("INV4", "deleting the accepting account leaves a spent receipt; fresh reinvitation retains the golfer and rounds", async () => {
+  const x = invitationCase;
+  const result = await x.page.evaluate(async password => (await import("/store.js")).deleteMyAccount({password}), x.password);
+  if (!result.ok) throw new Error(JSON.stringify(result));
+  const y = await tokenPerson("gScratchToken", "Scratch Token", "token@example.com");
+  if ((await acceptToken(y.page, x.url)).ok) throw new Error("deletion reactivated old invitation");
+  const fresh = await freshInvitation("gToken");
+  const joined = await acceptToken(y.page, fresh);
+  if (!joined.ok) throw new Error("fresh reinvitation refused: " + JSON.stringify(joined));
+  if ((await getDoc("golfers/gToken")).linkedUid !== y.uid) throw new Error("new account not linked to preserved golfer");
+  if (!(await getDoc("associations/G1/rounds/token-round"))) throw new Error("round history lost");
+});
+await check("INV5", "an admin cannot create an admin invitation", async () => {
+  const r = await ada.evaluate(async () => { try { await (await import("/store.js")).inviteLink("admin"); return true; } catch { return false; } });
+  if (r) throw new Error("admin could send admin invitation");
+});
+await check("INV6", "legacy named and admin shared-code links are refused after activation", async () => {
+  const x = await tokenPerson("gLegacy", "Legacy Player", "legacy-token@example.com");
+  const token = await idToken(x.email,x.password);
+  for (const role of ["member","admin"]) {
+    const status = await writeAs(token, `associations/G1/members/${x.uid}`, {uid:x.uid,displayName:"Legacy Player",golferId:"gLegacy",role,joinCode:role === "member" ? "PRIV01" : "ADMIN1"});
+    if (status === 200) throw new Error("legacy link could create " + role + " membership");
+  }
+});
+await check("INV7", "two accounts racing for one invitation: exactly one joins, without partial membership", async () => {
+  const a = await tokenPerson("gRace", "Race Player", "race-a@example.com");
+  const b = await tokenPerson("gUnusedRace", "Unused Race", "race-b@example.com");
+  const url = await freshInvitation("gRace");
+  const results = await Promise.all([acceptToken(a.page,url),acceptToken(b.page,url)]);
+  if (results.filter(r=>r.ok).length !== 1) throw new Error(JSON.stringify(results));
+  const members = await Promise.all([getDoc(`associations/G1/members/${a.uid}`),getDoc(`associations/G1/members/${b.uid}`)]);
+  if (members.filter(Boolean).length !== 1) throw new Error("partial or duplicate membership");
+});
+await check("INV8", "refused golfer link does not create membership or spend the invitation", async () => {
+  const a = await tokenPerson("gRefused", "Refused Player", "refused-token@example.com");
+  await put("golfers/gRefused", { name:"Refused Player", linkedUid:W.uid, groups:["G1"] });
+  const url = await freshInvitation("gRefused");
+  if ((await acceptToken(a.page,url)).ok) throw new Error("claimed someone else's golfer");
+  if (await getDoc(`associations/G1/members/${a.uid}`)) throw new Error("left partial membership");
+  const token = new URL(url).searchParams.get("join").split(".")[1];
+  if ((await getDoc(`associations/G1/invitationTokens/${token}`)).state !== "pending") throw new Error("spent refused invitation");
+});
+await check("INV9", "admin non-player invitations work once and do not create a golfer", async () => {
+  const a = await tokenPerson("gAdminScratch", "Admin Scratch", "admin-token@example.com");
+  const url = await freshInvitation(null,"admin");
+  const result = await acceptToken(a.page,url,"New Organiser");
+  if (!result.ok || result.role !== "admin" || result.golferId) throw new Error(JSON.stringify(result));
+  if ((await acceptToken(a.page,url,"New Organiser")).ok) throw new Error("admin link reusable");
+});
+await check("INV10", "same-account fresh invitation preserves the existing admin role", async () => {
+  const url = await freshInvitation(null,"member");
+  const result = await acceptToken(ada,url,"Ada Admin");
+  if (!result.ok || result.role !== "admin") throw new Error(JSON.stringify(result));
+});
+
+
+await check("INV11", "a general member link accepts a name and creates that member's own golfer", async () => {
+  const a = await tokenPerson("gGeneralScratch", "General Scratch", "general-token@example.com");
+  const url = await freshInvitation(null, "member");
+  const r = await acceptToken(a.page, url, "General Newcomer");
+  if (!r.ok) throw new Error(JSON.stringify(r));
+  const golfer = await a.page.evaluate(async () => {
+    const db = await import("/store.js");
+    const g = await db.linkGolferForMember("General Newcomer");
+    await db.flush(); return g;
+  });
+  if (!golfer || (await getDoc(`golfers/${golfer.id}`)).linkedUid !== a.uid) throw new Error("general member did not get their own golfer");
+});
+
+
+for (const mode of ["web", "native"]) {
+  await check("INV12-" + mode, "new token invitation: sign in, join, sign out and reopen show ordinary Sign in (" + mode + ")", async () => {
+    const key = "gTokenUi" + mode, email = "token-ui-" + mode + "@example.com", password = "token-ui-pass-1";
+    await signUp(email, password);
+    await put(`golfers/${key}`, {name:"Token UI " + mode, linkedUid:null, groups:["G1"]});
+    await put(`associations/G1/roster/${key}`, {golferId:key});
+    const url = await freshInvitation(key);
+    const page = await newPage();
+    if (mode === "native") await page.addInitScript(url => {
+      window.Capacitor = {isNativePlatform:()=>true, Plugins:{App:{getLaunchUrl:async()=>({url}),addListener:()=>({remove(){}})}}};
+    }, url);
+    await page.goto(mode === "web" ? APP + "&" + new URL(url).search.slice(1) : APP, {waitUntil:"load"});
+    await waitForText(page, /You.re invited/);
+    await page.fill('[name="email"]',email); await page.fill('[name="password"]',password); await page.fill('[name="password-again"]',password);
+    await page.locator('[data-act="create-account"]').click();
+    await page.locator('[data-act="accept-named"]').waitFor();
+    await page.locator('[data-act="accept-named"]').click();
+    await page.locator('[data-tab="summary"]').waitFor();
+    await Promise.all([page.waitForNavigation({waitUntil:"load"}),page.evaluate(async()=> (await import("/store.js")).signOutEverywhere())]);
+    await page.locator('[data-act="sign-in"]').first().waitFor();
+    if (/You.re invited/.test(await text(page))) throw new Error("token invitation returned after logout");
+    await page.reload({waitUntil:"load"}); await page.locator('[data-act="sign-in"]').first().waitFor();
+    if (/You.re invited/.test(await text(page))) throw new Error("token invitation returned after reopening");
+    await page.close();
+  });
+}
+
+
+
+await check("INV13", "an outstanding invitation cannot join a deleted group or leave orphan membership", async () => {
+  const a = await tokenPerson("gRemovedGroup", "Removed Group Player", "removed-group@example.com");
+  const token = "a".repeat(64);
+  await put(`associations/REMOVED/invitationTokens/${token}`, {slot:"open-member",golferId:null,role:"member",name:"",groupName:"Deleted group",state:"pending"});
+  await put("associations/REMOVED/invitationSlots/open-member",{token});
+  if ((await acceptToken(a.page, `https://www.cuberoot-systems.com/scorecard/join/?join=REMOVED.${token}&v=2`)).ok) throw new Error("joined deleted group");
+  if (await getDoc(`associations/REMOVED/members/${a.uid}`)) throw new Error("orphan membership left");
+  if (await getDoc(`userGroups/${a.uid}/groups/REMOVED`)) throw new Error("orphan pointer left");
+  if ((await getDoc(`associations/REMOVED/invitationTokens/${token}`)).state !== "pending") throw new Error("refused invitation spent");
+  await a.page.close();
+});
+
+await check("ERR1", "a failed deletion precheck preserves the real error for Send a report; no deletion request is written", async () => {
+  const a = await tokenPerson("gError", "Error Player", "error-token@example.com");
+  for (const code of ["failed-precondition", "permission-denied", "unavailable"]) {
+    const result = await a.page.evaluate(async code => {
+      globalThis.__scorecardGroupCheckError = code;
+      const db = await import("/store.js");
+      const result = await db.deleteMyAccount({password:"invited-pass-1"});
+      delete globalThis.__scorecardGroupCheckError;
+      return {result, error:db.status().error};
+    }, code);
+    if (result.result.ok || result.result.reason !== "CHECK" || !result.result.message.includes(code) || !result.error.full.includes(code)) throw new Error(JSON.stringify(result));
+    if (await getDoc(`accountDeletions/${a.uid}`)) throw new Error("request written after failed precheck");
+  }
+});
+
+
+await check("ERR2", "the real deletion screen offers a report containing the error code and reason, without the password", async () => {
+  const a = await tokenPerson("gReport", "Report Player", "report-token@example.com");
+  const r = await acceptToken(a.page, await freshInvitation("gReport"));
+  if (!r.ok) throw new Error(JSON.stringify(r));
+  await a.page.reload({waitUntil:"load"}); await a.page.locator('[data-tab="summary"]').waitFor();
+  await tab(a.page, "summary");
+  await a.page.evaluate(()=>{globalThis.__scorecardGroupCheckError="failed-precondition";});
+  await a.page.locator('[data-act="delete-account"]').first().click();
+  await a.page.fill('[name="delete-password"]',a.password);
+  await a.page.locator('[data-del="go"]').click();
+  await a.page.locator('[data-del="report"]').waitFor();
+  await a.page.locator('[data-del="report"]').click();
+  const report = await a.page.locator('[data-problem="send"]').evaluate(el=>el.closest('.sheet-body').parentElement.dataset.report);
+  if (!report.includes('failed-precondition') || !report.includes('Checking your groups') || report.includes(a.password)) throw new Error("report missing real error or includes password");
+  if (await getDoc(`accountDeletions/${a.uid}`)) throw new Error("precheck wrote deletion request");
+  await a.page.close();
+});
+
 await browser.close();
 server.kill();
 console.log(`\nRESULT: ${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
+

@@ -1,0 +1,48 @@
+name: Verify processed TestFlight build
+on:
+  push:
+    branches: [v2]
+    paths: [.github/workflows/testflight-status.yml]
+permissions:
+  contents: read
+jobs:
+  status:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Read Apple build and internal testing state without changing anything
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          node --input-type=module <<'JS'
+          import crypto from 'node:crypto';
+          const enc=x=>Buffer.from(JSON.stringify(x)).toString('base64url');
+          const now=Math.floor(Date.now()/1000);
+          const unsigned=enc({alg:'ES256',kid:process.env.ASC_KEY_ID,typ:'JWT'})+'.'+enc({iss:process.env.ASC_ISSUER_ID,iat:now,exp:now+600,aud:'appstoreconnect-v1'});
+          const jwt=unsigned+'.'+crypto.sign('sha256',Buffer.from(unsigned),{key:process.env.ASC_KEY_P8,dsaEncoding:'ieee-p1363'}).toString('base64url');
+          async function get(path){
+            const r=await fetch('https://api.appstoreconnect.apple.com'+path,{headers:{Authorization:'Bearer '+jwt}});
+            if(!r.ok)throw Error('Apple read failed: HTTP '+r.status);
+            return (await r.json()).data;
+          }
+          const app=(await get('/v1/apps?filter[bundleId]=io.github.willyros01.scorecard'))[0];
+          if(!app)throw Error('App record missing');
+          const build=(await get('/v1/builds?filter[app]='+app.id+'&filter[version]=16&filter[preReleaseVersion.version]=2.30.0&limit=1'))[0];
+          if(!build)throw Error('Build 16 missing');
+          console.log('Build: 2.30.0 (16); processing: '+build.attributes.processingState);
+          if(build.attributes.processingState!=='VALID')throw Error('Build not processed');
+          const detail=await get('/v1/builds/'+build.id+'/buildBetaDetail');
+          console.log('Internal testing state: '+detail.attributes.internalBuildState);
+          const notes=await get('/v1/builds/'+build.id+'/betaBuildLocalizations');
+          console.log('What to Test present: '+notes.some(n=>!!n.attributes.whatsNew));
+          for(const g of await get('/v1/apps/'+app.id+'/betaGroups?limit=50')){
+            if(g.attributes.isInternalGroup)console.log('Internal group: '+g.attributes.name+'; automatic distribution: '+g.attributes.automaticDistributionEnabled);
+          }
+          if(detail.attributes.internalBuildState!=='IN_BETA_TESTING')throw Error('Build is not yet available for internal testing');
+          console.log('PASS: build 16 is processed and available for internal TestFlight testing. No Apple records were changed.');
+          JS

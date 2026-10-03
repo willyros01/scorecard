@@ -1,6 +1,6 @@
 rules_version = '2';
 
-/* LAST CHANGED FOR VERSION 2.0, PHASE D + GO-LIVE FIXES (Oct 1), PLUS PRIVATE GROUP REQUESTS (beta.3), PLUS COCKPIT AND AUTO APPLICATIONS (beta.4), PLUS THE DELETION LOCK (beta.9)
+/* LAST CHANGED FOR VERSION 2.0, PHASE D + GO-LIVE FIXES (Oct 1), PLUS PRIVATE GROUP REQUESTS (beta.3), PLUS COCKPIT AND AUTO APPLICATIONS (beta.4), PLUS THE DELETION LOCK (beta.9), PLUS ONE-TIME INVITATIONS (beta.10)
  *
  * beta.9 (Oct 2, approved by Willy): an account that has asked to be deleted
  * (accountDeletions/{uid} exists) is LOCKED. It is no longer a member of any
@@ -344,6 +344,48 @@ service cloud.firestore {
         && getAfter(approvalPath(myEmailKey())).data.get('auto', false) == true;
     }
 
+    /* beta.10. Legacy code entry remains available for regular members only.
+       The deployment marker retires old named/admin URLs; new links contain
+       no shared group/admin code. Tests exercise both migration states. */
+    function invitationLinksV2() {
+      return exists(/databases/$(database)/documents/settings/invitationLinks)
+        && get(/databases/$(database)/documents/settings/invitationLinks).data.version == 2;
+    }
+    function tokenPath(a, token) {
+      return /databases/$(database)/documents/associations/$(a)/invitationTokens/$(token);
+    }
+    function inviteMemberPath(a) {
+      return /databases/$(database)/documents/associations/$(a)/members/$(request.auth.uid);
+    }
+    function pendingInvite(a, token) {
+      let t = get(tokenPath(a, token)).data;
+      return signedIn() && !deleting() && a != publicId()
+        && exists(/databases/$(database)/documents/associations/$(a))
+        && t.state == 'pending'
+        && get(/databases/$(database)/documents/associations/$(a)/invitationSlots/$(t.slot)).data.token == token;
+    }
+    function openTokenMember(a, m) {
+      let t = get(tokenPath(a, m.get('invitationToken', ''))).data;
+      return t.state == 'used' && t.role == 'member' && t.golferId == null;
+    }
+    function manualGolferClaim(golferId) {
+      let a = request.resource.data.get('claimedIn', '');
+      let m = get(inviteMemberPath(a)).data;
+      return a != publicId() && m.role == 'member'
+        && ((m.get('invitationToken', '') == '' && m.joinCode == association(a).joinCode)
+          || (m.get('golferId', null) == null && openTokenMember(a, m)))
+        && exists(/databases/$(database)/documents/associations/$(a)/roster/$(golferId))
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['linkedUid','claimedIn']);
+    }
+    function joinedWithToken(a, token) {
+      let t = get(tokenPath(a, token)).data;
+      let m = getAfter(inviteMemberPath(a)).data;
+      return pendingInvite(a, token)
+        && m.uid == request.auth.uid && m.invitationToken == token
+        && m.get('golferId', null) == t.golferId
+        && getAfter(tokenPath(a, token)).data.state == 'used';
+    }
+
     /* The edit window runs from entry time, not the date played, and is
        measured against request.time — the server's clock, not the device's. */
     function withinEditWindow() {
@@ -418,7 +460,8 @@ service cloud.firestore {
             ||
             (assocId != publicId()
               && request.resource.data.role == 'member'
-              && request.resource.data.joinCode == association(assocId).joinCode)
+              && request.resource.data.joinCode == association(assocId).joinCode
+              && (!invitationLinksV2() || request.resource.data.get('golferId', null) == null))
             ||
             /* An admin invitation carries a DIFFERENT secret. Checking it here
                is what makes a pre-set role safe: a guest link cannot be edited
@@ -426,7 +469,14 @@ service cloud.firestore {
             (assocId != publicId()
               && request.resource.data.role == 'admin'
               && exists(/databases/$(database)/documents/associations/$(assocId)/secrets/admin)
-              && request.resource.data.joinCode == adminSecret(assocId).adminCode)
+              && request.resource.data.joinCode == adminSecret(assocId).adminCode
+              && !invitationLinksV2())
+            ||
+            (request.resource.data.uid == request.auth.uid
+              && request.resource.data.keys().hasOnly(['uid', 'displayName', 'role', 'golferId', 'invitationToken', 'joinedAt'])
+              && request.resource.data.joinedAt == request.time
+              && request.resource.data.role == get(tokenPath(assocId, request.resource.data.invitationToken)).data.role
+              && joinedWithToken(assocId, request.resource.data.invitationToken))
             ||
             /* Phase C: an approved applicant joins the PUBLIC group, as the
                golfer the reviewer chose, once their email is confirmed. */
@@ -443,7 +493,10 @@ service cloud.firestore {
            Phase A: a member may also record WHICH golfer they are on their own
            membership (golferId), and nothing else, and only a golfer that is
            really linked to their account. Games use it to tell who played. */
-        allow update: if (isOwner(assocId)
+        allow update: if (signedIn() && !deleting() && memberUid == request.auth.uid
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['invitationToken', 'golferId'])
+            && joinedWithToken(assocId, request.resource.data.invitationToken))
+          || (isOwner(assocId)
             && memberUid != association(assocId).ownerUid)
           || (signedIn() && !deleting() && memberUid == request.auth.uid
               && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['golferId'])
@@ -469,6 +522,45 @@ service cloud.firestore {
          only the owner can send an admin invitation. */
       match /secrets/{secretId} {
         allow read, write: if isOwner(assocId);
+      }
+
+      /* Independent secrets. Used records are permanent, contain no acceptor
+         UID/email, and are never reopened by account deletion or resend. */
+      match /invitationTokens/{token} {
+        allow get: if signedIn() && (isAdmin(assocId) || resource.data.state != 'pending'
+          || get(/databases/$(database)/documents/associations/$(assocId)/invitationSlots/$(resource.data.slot)).data.token == token);
+        allow list: if isAdmin(assocId);
+        allow create: if isAdmin(assocId) && assocId != publicId()
+          && token.matches('^[a-f0-9]{64}$')
+          && request.resource.data.keys().hasOnly(['slot','golferId','role','name','handicapIndex','groupName','state','sentAt'])
+          && request.resource.data.state == 'pending'
+          && request.resource.data.sentAt == request.time
+          && request.resource.data.role in ['member','admin']
+          && (request.resource.data.role == 'member' || isOwner(assocId))
+          && request.resource.data.name is string && request.resource.data.name.size() <= 120
+          && request.resource.data.groupName is string && request.resource.data.groupName.size() <= 120
+          && ((request.resource.data.golferId == null && request.resource.data.slot == 'open-' + request.resource.data.role)
+            || (request.resource.data.golferId is string
+              && request.resource.data.slot == request.resource.data.golferId
+              && exists(/databases/$(database)/documents/associations/$(assocId)/roster/$(request.resource.data.golferId))))
+          && getAfter(/databases/$(database)/documents/associations/$(assocId)/invitationSlots/$(request.resource.data.slot)).data.token == token;
+        allow update: if (signedIn() && !deleting()
+          && resource.data.state == 'pending' && request.resource.data.state == 'used'
+          && request.resource.data.usedAt == request.time
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['state','usedAt'])
+          && joinedWithToken(assocId, token))
+          || (isAdmin(assocId) && resource.data.state == 'pending'
+            && request.resource.data.state == 'revoked'
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['state']));
+        allow delete: if false;
+      }
+      match /invitationSlots/{slot} {
+        allow read: if isAdmin(assocId);
+        allow create, update: if isAdmin(assocId)
+          && request.resource.data.keys().hasOnly(['token'])
+          && getAfter(tokenPath(assocId, request.resource.data.token)).data.state == 'pending'
+          && getAfter(tokenPath(assocId, request.resource.data.token)).data.slot == slot;
+        allow delete: if isAdmin(assocId);
       }
 
       /* ---------------- invitation records (go-live fix 1) ---------------- */
@@ -533,7 +625,10 @@ service cloud.firestore {
       match /roster/{golferId} {
         allow read: if isMember(assocId);
         /* Phase C: in the PUBLIC group only its admins add golfers. */
-        allow create, update: if (isMember(assocId)
+        allow create, update: if (signedIn() && !deleting()
+            && getAfter(inviteMemberPath(assocId)).data.golferId == golferId
+            && joinedWithToken(assocId, getAfter(inviteMemberPath(assocId)).data.invitationToken))
+          || (isMember(assocId)
           && (assocId != publicId() || isAdmin(assocId)))
           /* beta.4: an automatically approved applicant puts their own golfer
              on the public roster. */
@@ -688,7 +783,15 @@ service cloud.firestore {
       allow update: if signedIn() && !deleting() && (
         resource.data.linkedUid == request.auth.uid
         || (resource.data.linkedUid == null
-            && request.resource.data.linkedUid == request.auth.uid)
+            && request.resource.data.linkedUid == request.auth.uid
+            && (!invitationLinksV2()
+              || (verifiedEmail() && exists(approvalPath(myEmailKey()))
+                && get(approvalPath(myEmailKey())).data.golferId == golferId
+                && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['linkedUid']))
+              || manualGolferClaim(golferId)
+              || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['linkedUid','claimedIn','claimedToken'])
+                && joinedWithToken(request.resource.data.claimedIn, request.resource.data.claimedToken)
+                && get(tokenPath(request.resource.data.claimedIn, request.resource.data.claimedToken)).data.golferId == golferId)))
         || (request.resource.data.linkedUid == resource.data.linkedUid
             && editingAsAdmin(golferId))
         /* An admin may RELEASE a link — set it to nothing — which is what
@@ -1076,3 +1179,4 @@ service cloud.firestore {
     }
   }
 }
+
