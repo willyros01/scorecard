@@ -1,6 +1,33 @@
-# The Scorecard — Version 2.0 handoff (state at 1 October 2026, afternoon)
+# The Scorecard — Version 2.0 handoff (state at 3 October 2026)
 
 Written so that anyone (Claude, ChatGPT or a person) can continue the work. Read it fully before changing anything.
+
+## 2.30.0-beta.13 — invitation wording and roster-tool cleanup (3 October 2026)
+
+Willy approved this build after confirming beta.12 invitation behavior on an iPhone: a fresh link opened the invitation sign-in screen, joining worked, sign-out returned to the ordinary Sign in screen, and the consumed link was refused.
+
+- Every member and admin invitation path, including **Send again**, uses the same explicit notice: **“This invitation link is for one-time use only. Once you join, it cannot be used again.”**
+- Both in-app links to **Rebuild the roster** are removed: Admin → Settings and the empty-roster Manage screen. The unlinked controlled repair page remains in the repository for deliberate recovery work.
+- E4c was diagnosed as a test timing problem. The application completed the approval, but the old test could miss a three-second success message. The current E4c checks the saved Firestore approval for up to 20 seconds. No additional approval-logic change was needed.
+- Automated checks now verify the invitation wording and absence of both roster-rebuild links.
+- No Firebase rule, index or data change is required. TestFlight and the web receive the same beta.13 application files.
+- The separate question of requiring Login on every launch remains deferred. Saved sign-in behavior is unchanged.
+
+See `build/RELEASE-beta13.md` and `build/what-to-test.txt`.
+
+## To do — legacy data verification and roster tool (Willy, 3 October 2026)
+
+- Verify the current database or newest backup before calling Version 1 cleanup outstanding or complete. The Oct 1 cleanup removed orphan groups; its planner does not delete legacy users/{uid} data. beta.6 removed the app's legacy read/import paths; the handoff records those old documents as untouched. A later deletion is not verified. Do not repeat completed cleanup or delete anything without approval; preserve users/{uid}/terms/accepted.
+- **Completed for beta.13:** both in-app links to **Rebuild the roster** were removed from Admin → Settings and the empty-roster Manage screen. The unlinked controlled repair page remains available only for deliberate recovery work.
+
+## For deeper discussion — Login on every launch (Willy, 3 October 2026)
+
+Willy is reconsidering whether every ordinary launch should start at Login, with invitation launches as the exception. **Decision deferred; no implementation is approved.** Keep the current saved sign-in behavior until the discussion and an explicit decision. Discuss what counts as a launch (cold start, return from background, navigation back from tools), convenience versus account security, offline use, and invitation routing before choosing any change. This supersedes the earlier instruction to require Login on every launch.
+
+## Completed — invitation wording (Willy, 3 October 2026)
+
+- **Completed for beta.13:** every invitation message says **“This invitation link is for one-time use only. Once you join, it cannot be used again.”** This covers Send invitation, Send again, member invitations, admin invitations and approved private-group organiser invitations.
+- Device result reported by Willy on beta.12: invitation opened the invitation login, signing in succeeded, logout returned to the regular login, and reopening the accepted invitation showed it was invalid.
 
 ## Latest release: beta.11 (2 October 2026)
 

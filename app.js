@@ -4,6 +4,7 @@ import * as lookup from "./courses-api.js";
 import * as platform from "./platform.js";
 
 const VERSION = (typeof self !== "undefined" && self.APP_VERSION) || "dev";
+const ONE_TIME_INVITATION_NOTICE = "This invitation link is for one-time use only. Once you join, it cannot be used again.";
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -1039,7 +1040,8 @@ async function approveRequestHere(key) {
       "",
       `How it works, in one page: ${guide}`,
       "",
-      "The link works once, so keep it to yourself.",
+      ONE_TIME_INVITATION_NOTICE,
+      "Keep this personal invitation to yourself.",
     ].join("\n");
     openShare(text, "Your private group is approved", { to: req.email });
     flashMsg(`"${req.groupName}" is created. Send the email to ${req.email}.`);
@@ -2549,12 +2551,6 @@ function screenManage() {
   <section class="panel">
     <div class="panel-head"><h2 class="panel-title">Golfers in this group</h2><span class="panel-count">${golfers.length || ""}</span></div>
     <div class="card">
-      ${!golfers.length && db.canManage() && !db.readsOffline() ? `<div class="welcome" style="border:0;padding:1.4rem 1rem">
-        <p style="margin:0 0 1rem">Nobody is on this roster yet. If your golfers already exist from before, put them back in one tap.</p>
-        <div class="inline-actions stacked">
-          <button class="btn" data-act="open-tool" data-tool="rebuild">Rebuild the roster</button>
-        </div>
-      </div>` : ""}
       ${golfers.length ? `<div class="list">
         ${sortedGolfers().map((g) => {
           /* The starting-index editor, shown in place of the row while open —
@@ -3242,7 +3238,7 @@ function groupSection() {
         <button class="btn ghost" data-act="rename-group">Save the name</button>
       </div>
     </div>
-    <p class="hint"><button class="linkbtn" data-act="open-tool" data-tool="rebuild">Rebuild the roster</button> · <button class="linkbtn" data-act="open-tool" data-tool="tidy">Check and tidy the data</button> · <button class="linkbtn" data-act="open-tool" data-tool="cleanup">Clean up unused groups</button></p>
+    <p class="hint"><button class="linkbtn" data-act="open-tool" data-tool="tidy">Check and tidy the data</button> · <button class="linkbtn" data-act="open-tool" data-tool="cleanup">Clean up unused groups</button></p>
     ${platform.isApp() ? `<p class="hint">Opens in Safari. Sign in there with the owner's email if asked.</p>` : ""}
   </section>
 
@@ -5400,7 +5396,7 @@ view.addEventListener("click", async (e) => {
 
     case "share-invite": {
       busy("Preparing the invitation");
-      try { return openShare(`Join our golf scorecard:\n${await db.inviteLink("member")}\n\nCreate an account or sign in. This link works once.`, "Invitation"); }
+      try { return openShare(`Join our golf scorecard:\n${await db.inviteLink("member")}\n\nCreate an account or sign in.\n\n${ONE_TIME_INVITATION_NOTICE}`, "Invitation"); }
       catch (err) { openProblem({ title: "Could not prepare the invitation", detail: String(err.message || err), advice: "Try again when connected." }); }
       finally { idleAll(); }
       return;
@@ -5457,7 +5453,9 @@ view.addEventListener("click", async (e) => {
           `${association ? association.name : "Our golf group"} — you are invited to help run the group.`,
           "", `Join here: ${link}`, "", `How it works, in one page: ${guide}`, "",
           "This makes you an admin: you can add courses, manage the roster and post rounds for anybody. You are not added as a player, so no handicap is kept for you.",
-          "You will be asked to set a password as you join. The link works once, so keep it to yourself.",
+          "You will be asked to set a password as you join.",
+          ONE_TIME_INVITATION_NOTICE,
+          "Keep this personal invitation to yourself.",
         ].join("\n"), "Admin invitation");
       } catch { flashMsg("Couldn't prepare it — the message above says why."); }
       finally { idleAll(); }
@@ -5711,8 +5709,10 @@ sheetEl.addEventListener("click", async (e) => {
           ? "Tap the link, create your account (your email and a password) or sign in, and it greets you by name. One button and you are in."
           : "Tap the link, create your account (your email and a password) or sign in, then type the name you play under.",
         role === "admin"
-          ? "This makes you an admin, so you will be asked to set a password. It works once, so keep it to yourself."
-          : "Create an account or sign in with your email and password. This invitation works once.",
+          ? "This makes you an admin, so you will be asked to set a password."
+          : "Create an account or sign in with your email and password.",
+        ONE_TIME_INVITATION_NOTICE,
+        "Keep this personal invitation to yourself.",
       ].join("\n");
 
       openShare(text, role === "admin" ? "Admin invitation" : "Invitation");
@@ -6717,4 +6717,3 @@ addEventListener("pageshow", (e) => { if (e.persisted) location.reload(); });
     render();
   });
 })();
-

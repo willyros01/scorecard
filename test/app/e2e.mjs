@@ -444,6 +444,10 @@ await check("E12", "an admin invites regular members only: no Admin choice on th
   await waitForText(ada, /Invite Jay Unjoined/);
   if (await ada.locator('[name="invite-role"][value="admin"]').count()) throw new Error("the admin choice is offered to an admin");
   await ada.locator('[data-invite="send"]').click();
+  await waitForText(ada, /one-time use only/);
+  const memberMessage = await ada.evaluate(() => (document.querySelector("pre.msg") || {}).innerText || "");
+  if (!memberMessage.includes("This invitation link is for one-time use only. Once you join, it cannot be used again."))
+    throw new Error("member invitation does not explain one-time use");
   /* Go-live fix 1: sending writes the invitation record the invitee is greeted from. */
   const end = Date.now() + 15000;
   let inv = null;
@@ -523,10 +527,16 @@ await check("E16", "Willy approves: the group is created with him as owner, the 
   const to = await wil.evaluate(() => (document.querySelector("[data-to]") || {}).dataset ? document.querySelector("[data-to]").dataset.to : "");
   if (to !== ORG.email) throw new Error(`the email is addressed to "${to}"`);
   const msg = await wil.evaluate(() => (document.querySelector("pre.msg") || {}).innerText || "");
+  if (!msg.includes("This invitation link is for one-time use only. Once you join, it cannot be used again."))
+    throw new Error("admin invitation does not explain one-time use");
   const found = /join=([A-Za-z0-9._-]+)&as=admin/.exec(msg);
   if (!found || !found[1].startsWith(`${r.groupId}.`)) throw new Error(`no admin invitation link in: ${msg.slice(0, 300)}`);
   adminLink = `${APP}&join=${found[1]}&as=admin&v=2`;
   await wil.locator('[data-close="1"]').first().click().catch(() => {});
+  await subtab(wil, "settings");
+  if (await wil.locator('[data-tool="rebuild"]').count()) throw new Error("Admin Settings still offers Rebuild the roster");
+  await tab(wil, "manage");
+  if (await wil.locator('[data-tool="rebuild"]').count()) throw new Error("Manage still offers Rebuild the roster on an empty roster");
   if (wil.errors.length) throw new Error(wil.errors.join(" | "));
 });
 
@@ -740,18 +750,20 @@ await check("E24", "Tidy opens from Admin already signed in; Back returns to the
   throw new Error(`not back on Admin; the screen says: ${(await text(owner)).replace(/\s+/g, " ").slice(0, 200)}`);
 });
 
-/* E26 (beta.7): every tool opens in the same window from Admin, already
-   signed in, and the page itself scrolls (the shared stylesheet used to lock it). */
-await check("E26", "Rebuild, Clean up, Repair and Tidy open in place, signed in, and scroll", async () => {
+/* E26 (beta.7, beta.13): linked tools open in place and every controlled
+   repair page still works directly. Rebuild is deliberately no longer linked
+   from the app, but remains available for a supervised recovery. */
+await check("E26", "linked tools open in place; controlled repair pages work directly; Rebuild is not offered", async () => {
   const problems = [];
   await owner.setViewportSize({ width: 390, height: 480 });
   for (const tool of ["rebuild", "cleanup", "repair", "tidy"]) {
-    if (tool === "repair") {
-      await owner.goto(`http://localhost:${PORT}/repair.html?emulators=1`, { waitUntil: "load" });
+    if (tool === "repair" || tool === "rebuild") {
+      await owner.goto(`http://localhost:${PORT}/${tool}.html?emulators=1`, { waitUntil: "load" });
     } else {
       await owner.goto(APP, { waitUntil: "load" });
       await tab(owner, "admin");
       await subtab(owner, tool === "tidy" ? "cockpit" : "settings");
+      if (await owner.locator('[data-tool="rebuild"]').count()) problems.push("Admin still offers Rebuild the roster");
       await owner.locator(`[data-act="open-tool"][data-tool="${tool}"]`).first().click();
     }
     try { await owner.waitForURL(new RegExp(`${tool}\\.html\\?emulators=1`), { timeout: 15000 }); }
@@ -1308,4 +1320,3 @@ await browser.close();
 server.kill();
 console.log(`\nRESULT: ${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
-
