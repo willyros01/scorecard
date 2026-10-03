@@ -1,0 +1,26 @@
+Audit of App.app — 2.30.0 (18)
+      privacy manifests found: 3
+        Frameworks/Capacitor.framework/PrivacyInfo.xcprivacy
+        Frameworks/Cordova.framework/PrivacyInfo.xcprivacy
+        PrivacyInfo.xcprivacy
+OK    A1 the app's own manifest: no tracking, no tracking domains
+      categories declared across all manifests: NSPrivacyAccessedAPICategoryUserDefaults
+      App: none
+      Capacitor: none
+      Cordova: none
+OK    A2 every required-reason API category used is declared
+      frameworks and resource bundles in the app:
+        Frameworks/Capacitor.framework
+        Frameworks/Cordova.framework
+OK    A3 Capacitor (on Apple's commonly used SDK list) ships its own privacy manifest
+OK    A3 every embedded framework carries a valid signature
+OK    A4 no NS…UsageDescription keys (no camera, photos, location or contacts)
+      entitlements: application-identifier beta-reports-active com.apple.developer.associated-domains com.apple.developer.team-identifier get-task-allow
+OK    A5 no unexpected entitlements
+OK    A5 get-task-allow is false
+OK    A5 associated domains: applinks:www.cuberoot-systems.com only
+OK    A6 no App Transport Security exceptions
+OK    A7 ITSAppUsesNonExemptEncryption is NO
+OK    A7 no bundled encryption library (SQLCipher, OpenSSL, BoringSSL)
+
+AUDIT PASSED (A1-A7)
