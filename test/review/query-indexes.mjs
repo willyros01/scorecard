@@ -2,8 +2,10 @@
    Emulator success is never reported as proof of a live index. */
 import fs from 'node:fs';
 import crypto from 'node:crypto';
-const source = fs.readFileSync('store.js', 'utf8');
 const queries = [];
+const files = fs.readdirSync('.').filter(p => /\.(?:js|html)$/.test(p)).sort();
+for (const sourceFile of files) {
+const source = fs.readFileSync(sourceFile, 'utf8');
 for (const match of source.matchAll(/\bquery\s*\(/g)) {
   let depth = 1, quote = '', i = match.index + match[0].length;
   const begin = i;
@@ -22,14 +24,20 @@ for (const match of source.matchAll(/\bquery\s*\(/g)) {
   const literals = collection ? [...collection[1].matchAll(/"([^"]+)"/g)].map(m => m[1]) : [];
   const collectionId = group ? group[1] : literals.at(-1);
   if (!collectionId) throw new Error('Query target needs an explicit probe: ' + text);
-  const field = /(?:where|orderBy)\("([^"]+)"/.exec(text)?.[1];
-  const op = /where\("[^"]+", "([^"]+)"/.exec(text)?.[1];
-  const from = [{ collectionId, ...(group ? {allDescendants:true} : {}) }];
-  const structuredQuery = { from, limit:1 };
-  if (field && op) structuredQuery.where = {fieldFilter: {field:{fieldPath:field}, op: ({'==':'EQUAL','>=':'GREATER_THAN_OR_EQUAL','in':'IN','array-contains':'ARRAY_CONTAINS'})[op], value: op === 'in' ? {arrayValue:{values:[{stringValue:'__scorecard_index_probe__'}]}} : {stringValue:field === 'date' ? '9999-12-31' : '__scorecard_index_probe__'} }};
-  else if (field) structuredQuery.orderBy = [{field:{fieldPath:field},direction:text.includes('"desc"')?'DESCENDING':'ASCENDING'}];
-  if (structuredQuery.where && !structuredQuery.where.fieldFilter.op) throw new Error('Unsupported probe operator: ' + op);
-  queries.push({signature,collectionId,parent:!group && literals[0]==='associations' && literals.length>1 ? 'associations/__scorecard_index_probe__' : '',structuredQuery});
+  const filters = [...text.matchAll(/where\("([^"]+)", "([^"]+)"/g)].map(m => {
+    const [_,field,op] = m;
+    const operation = {'==':'EQUAL','!=':'NOT_EQUAL','>=':'GREATER_THAN_OR_EQUAL','>':'GREATER_THAN','<=':'LESS_THAN_OR_EQUAL','<':'LESS_THAN','in':'IN','not-in':'NOT_IN','array-contains':'ARRAY_CONTAINS','array-contains-any':'ARRAY_CONTAINS_ANY'}[op];
+    if (!operation) throw new Error('Unsupported probe operator: ' + op);
+    const one = {stringValue:field === 'date' ? '9999-12-31' : '__scorecard_index_probe__'};
+    return {fieldFilter:{field:{fieldPath:field},op:operation,value:['in','not-in','array-contains-any'].includes(op)?{arrayValue:{values:[one]}}:one}};
+  });
+  const orders = [...text.matchAll(/orderBy\("([^"]+)"(?:, "([^"]+)")?/g)].map(m => ({field:{fieldPath:m[1]},direction:m[2]==='desc'?'DESCENDING':'ASCENDING'}));
+  if ([...text.matchAll(/\bwhere\(/g)].length !== filters.length || [...text.matchAll(/\borderBy\(/g)].length !== orders.length) throw new Error('Dynamic constraint needs a manually reviewed probe: ' + text);
+  const structuredQuery = {from:[{collectionId,...(group?{allDescendants:true}:{})}],limit:1};
+  if (filters.length) structuredQuery.where = filters.length===1 ? filters[0] : {compositeFilter:{op:'AND',filters}};
+  if (orders.length) structuredQuery.orderBy=orders;
+  queries.push({sourceFile,signature,collectionId,parent:!group && literals[0]==='associations' && literals.length>1 ? 'associations/__scorecard_index_probe__' : '',structuredQuery});
+}
 }
 const file = 'build/query-indexes.json';
 if (process.argv.includes('--write')) fs.writeFileSync(file, JSON.stringify({queries},null,2)+'\n');

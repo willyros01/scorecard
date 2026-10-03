@@ -106,7 +106,7 @@ check_indexes(){
     fi
     count=$((count+1))
   done < <(jq -c '.queries[]' "${STATE}/query-indexes.json")
-  [[ "${count}" -eq 17 ]] || { echo "ERROR: Unexpected query inventory." >&2; return 1; }
+  [[ "${count}" -eq 21 ]] || { echo "ERROR: Unexpected query inventory." >&2; return 1; }
   echo "OK: all ${count} application query probes succeeded against LIVE Firestore."
 }
 

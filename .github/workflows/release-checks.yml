@@ -32,6 +32,7 @@ jobs:
           node test/review/message-regressions.mjs
           node test/review/deletion-check-regressions.mjs
           node test/review/query-indexes.mjs
+          node test/review/query-index-regressions.mjs
           python3 test/review/deployment-regressions.py
       - name: Complete rules, safety, migration and real app tests
         env:

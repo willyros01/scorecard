@@ -17,7 +17,7 @@ Willy approved building these solutions on 2 October 2026. Email prebinding was 
 
 `release-checks.yml` runs the committed build checks, link/message/deletion-check/query/deployment regressions and Claude's complete emulator/rules/migration/deletion/real-app suites in Chromium and WebKit. `ios-testflight.yml` depends on this gate for the exact release commit before signing/uploading. All pre-existing suites are retained. The historical dl9 script test compares to its pinned historical rules, rather than incorrectly requiring historical rules to equal every future release.
 
-The query inventory records all seventeen query calls in store.js; a source query change fails unless its inventory/probe is updated. `iv0.txt` executes those structured queries against live Firestore before changing rules. Emulator success alone does not prove live index readiness. Browser tests simulate Capacitor link delivery and persistent storage; they do not replace a physical-device TestFlight check.
+The query inventory records all twenty-one query calls in the app and maintenance pages; a source query change fails unless its inventory/probe is updated. `iv0.txt` executes those structured queries against live Firestore before changing rules. Emulator success alone does not prove live index readiness. Browser tests simulate Capacitor link delivery and persistent storage; they do not replace a physical-device TestFlight check.
 
 ## Deployment state and sequence
 
