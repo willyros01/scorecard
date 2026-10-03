@@ -6,13 +6,13 @@
 [36m[1mi  firestore:[22m[39m Firestore Emulator logging to [1mfirestore-debug.log[22m
 [32m[1m✔  firestore:[22m[39m Firestore Emulator was started in standard edition.
 [32m[1m✔  firestore:[22m[39m Firestore Emulator UI websocket is running on 9150.
-[36m[1mi [22m[39m Running script: [1ms=0; bash sec-tests.sh || s=1; echo; bash del1-tests.sh || s=1; echo; if [ -f privacy-tests.sh ]; then bash privacy-tests.sh || s=1; fi; echo; bash acc-tests.sh || s=1; echo; bash pub-tests.sh || s=1; echo; bash grp-tests.sh || s=1; echo; bash grq-tests.sh || s=1; echo; bash ck4-tests.sh || s=1; echo; if [ -d ../../node_modules/playwright ]; then node ../app/e2e.mjs ../.. || s=1; else echo "SKIP  app tests (npm ci not run)"; fi; echo; node golive-tests.mjs || s=1; echo; bash go2-tests.sh || s=1; echo; bash rq3-tests.sh || s=1; echo; bash ap4-tests.sh || s=1; exit $s[22m
+[36m[1mi [22m[39m Running script: [1ms=0; bash sec-tests.sh || s=1; echo; bash del1-tests.sh || s=1; echo; if [ -f privacy-tests.sh ]; then bash privacy-tests.sh || s=1; fi; echo; bash acc-tests.sh || s=1; echo; bash pub-tests.sh || s=1; echo; bash grp-tests.sh || s=1; echo; bash grq-tests.sh || s=1; echo; bash ck4-tests.sh || s=1; echo; if [ -d ../../node_modules/playwright ]; then node ../app/e2e.mjs ../.. || s=1; else echo "SKIP  app tests (npm ci not run)"; fi; echo; node golive-tests.mjs || s=1; echo; bash go2-tests.sh || s=1; echo; bash rq3-tests.sh || s=1; echo; bash ap4-tests.sh || s=1; echo; bash bk1-tests.sh || s=1; echo; bash cl5-tests.sh || s=1; echo; bash bdg-tests.sh || s=1; echo; NBK_SLEEP=0 bash nbk-tests.sh || s=1; echo; bash nb-tests.sh || s=1; echo; bash arc-tests.sh || s=1; echo; bash dl9-tests.sh || s=1; echo; bash ix9-tests.sh || s=1; exit $s[22m
 == Scenario 1: A's forged request names B's group, golfer and invitations
-20:31:46 Deletion completion job for demo-scorecard (requests older than 0s).
-20:31:46 Requests found: 1
-20:31:46 OK X6lP…: cleaned up group G1… (3 writes).
-20:31:46 DONE X6lP…: account confirmed gone; request removed.
-20:31:46 Summary: done 1, blocked 0, waiting for the app 0, failed 0.
+02:41:33 Deletion completion job for demo-scorecard (requests older than 0s).
+02:41:34 Requests found: 1
+02:41:34 OK 2LME…: cleaned up group G1… (3 writes).
+02:41:34 DONE 2LME…: account confirmed gone; request removed.
+02:41:34 Summary: done 1, blocked 0, waiting for the app 0, failed 0.
 PASS  job finished
 PASS  SEC1 B's invitation claim in G1 untouched
 PASS  SEC1 B's invitation claim in G2 untouched
@@ -31,29 +31,29 @@ PASS  A's sign-in deleted
 PASS  B's sign-in untouched
 PASS  A's request removed after confirmation
 == Scenario 2 (SEC4): the owner of two groups requests deletion
-20:31:47 Deletion completion job for demo-scorecard (requests older than 0s).
-20:31:47 Requests found: 1
-20:31:47 BLOCKED I8fM…: owns 2 group(s). Nothing deleted. The owner must delete those groups first.
-20:31:47 Summary: done 0, blocked 1, waiting for the app 0, failed 0.
+02:41:35 Deletion completion job for demo-scorecard (requests older than 0s).
+02:41:35 Requests found: 1
+02:41:35 BLOCKED cgYX…: owns 2 group(s). Nothing deleted. The owner must delete those groups first.
+02:41:35 Summary: done 0, blocked 1, waiting for the app 0, failed 0.
 PASS  job finished (a blocked request is not a failure)
 PASS  SEC4 group G1 completely unchanged
 PASS  SEC4 group G2 completely unchanged
 PASS  SEC4 owner's sign-in NOT deleted
 PASS  SEC4 request kept and marked blocked
 == Scenario 3 (SEC5): Firebase does not confirm the sign-in is gone
-20:31:48 Deletion completion job for demo-scorecard (requests older than 0s).
-20:31:48 Requests found: 1
-20:31:48 OK GyGf…: cleaned up group G1… (3 writes).
-20:31:48 NOT CONFIRMED GyGf…: Firebase still has the account. Request kept; it will be retried.
-20:31:48 FAILED GyGf… (code 11); it will be retried next run.
-20:31:48 Summary: done 0, blocked 0, waiting for the app 0, failed 1.
+02:41:36 Deletion completion job for demo-scorecard (requests older than 0s).
+02:41:36 Requests found: 1
+02:41:36 OK GDL3…: cleaned up group G1… (3 writes).
+02:41:37 NOT CONFIRMED GDL3…: Firebase still has the account. Request kept; it will be retried.
+02:41:37 FAILED GDL3… (code 11); it will be retried next run.
+02:41:37 Summary: done 0, blocked 0, waiting for the app 0, failed 1.
 PASS  job reports a problem
 PASS  SEC5 request kept until the sign-in is confirmed gone
 PASS  SEC5 request marked not confirmed
 == Scenario 4: a request younger than one hour is left for the app
-20:31:49 Deletion completion job for demo-scorecard (requests older than 3600s).
-20:31:49 Requests found: 1
-20:31:49 Summary: done 0, blocked 0, waiting for the app 1, failed 0.
+02:41:37 Deletion completion job for demo-scorecard (requests older than 3600s).
+02:41:37 Requests found: 1
+02:41:37 Summary: done 0, blocked 0, waiting for the app 1, failed 0.
 PASS  job finished
 PASS  young request untouched
 PASS  young request: membership untouched
@@ -94,9 +94,10 @@ PASS  DEL1 end state: A is out of both groups; roster, B and the record remain
 PASS  DEL1 golfer unlinked and the name kept (D1)
 == DEL1 part 3: another account still cannot touch A's record; A can withdraw it (wrong-password path)
 PASS  DEL1 a fellow member cannot delete A's deletion record
+PASS  DEL1 beta.9: once removal has begun, A cannot withdraw its request
 PASS  DEL1 A can delete its own record (D4, the wrong-password withdrawal)
 
-RESULT: 30 passed, 0 failed
+RESULT: 31 passed, 0 failed
 
 == PRIV1 rounds: no reads across the database
 PASS  PRIV1 an outsider cannot read a G1 round directly
@@ -260,7 +261,7 @@ PASS  PUB2 an approved application cannot be claimed again
 PASS  PUB2 the new account starts with an unconfirmed email
 PASS  PUB2 before the email is confirmed, the approval cannot be read
 PASS  PUB2 before the email is confirmed, joining PUBLIC is refused
-[36m[1mi [22m[39m To reset the password for pat.applicant@example.com, follow this link: http://127.0.0.1:9099/emulator/action?mode=resetPassword&lang=en&oobCode=0k2Ko1MXydiPadbBDLm_FyqqTz4p7rwTHJmHrMOt6NEAbOAB_7jOkb&apiKey=fake-api-key&newPassword=NEW_PASSWORD_HERE
+[36m[1mi [22m[39m To reset the password for pat.applicant@example.com, follow this link: http://127.0.0.1:9099/emulator/action?mode=resetPassword&lang=en&oobCode=5Yhk45qTxYxf8R49idOErIWidK-L1jgwFvGiPx04tsmdW6733ZATW_&apiKey=fake-api-key&newPassword=NEW_PASSWORD_HERE
 PASS  PUB2 setting the password from the email confirms the email (email_verified)
 PASS  PUB2 the applicant reads their own approval
 PASS  PUB2 an outsider cannot read it
@@ -425,10 +426,10 @@ PASS  CK2 nobody stamps another member's last seen
 PASS  CK2 last seen must be the server's time
 PASS  CK2 nothing else changes with it
 == CK3 the applications switch
-FAIL  CK3 anyone, signed out, reads the switch (HTTP 404, expected 200)
 PASS  CK3 an ordinary account cannot change it
 PASS  CK3 a reviewer turns it to Auto
 PASS  CK3 Willy turns it back to Manual
+PASS  CK3 anyone, signed out, reads the switch
 PASS  CK3 only Manual or Auto
 PASS  CK3 the daily limit is 1 to 500
 PASS  CK3 other settings documents are closed
@@ -446,49 +447,52 @@ PASS  CK5 nobody can list them
 PASS  CK5 an email with an account cannot apply
 PASS  CK5 an account removes its own email
 == CK6 Auto: refused while the switch is on Manual
-[36m[1mi [22m[39m To reset the password for ann.auto@example.com, follow this link: http://127.0.0.1:9099/emulator/action?mode=resetPassword&lang=en&oobCode=_TnMnFZNyGFjNEDH_t_X03M951elg9kEywWqbbkifA4J2q3o2eg7At&apiKey=fake-api-key&newPassword=NEW_PASSWORD_HERE
+[36m[1mi [22m[39m To reset the password for ann.auto@example.com, follow this link: http://127.0.0.1:9099/emulator/action?mode=resetPassword&lang=en&oobCode=WEdSjrDLhuZLanpQ6LvtF3LcqtBXyH6nuNfvCNwDS9w1fMjLYdeAfn&apiKey=fake-api-key&newPassword=NEW_PASSWORD_HERE
 PASS  CK6 Manual: the applicant cannot approve themselves
 == CK7 Auto: every check enforced
-[36m[1mi [22m[39m To reset the password for ted.taken@example.com, follow this link: http://127.0.0.1:9099/emulator/action?mode=resetPassword&lang=en&oobCode=4X-KpqDVDH8Qq2tb1iMXGXAheMwY26dESS8IA_JnLfqEFdAKL77xNu&apiKey=fake-api-key&newPassword=NEW_PASSWORD_HERE
+[36m[1mi [22m[39m To reset the password for ted.taken@example.com, follow this link: http://127.0.0.1:9099/emulator/action?mode=resetPassword&lang=en&oobCode=bqaW1ceQevZtaLJzuNhMsEjt0r6cpvR_bTU7HBUeTz82fYVoS8svTb&apiKey=fake-api-key&newPassword=NEW_PASSWORD_HERE
 PASS  CK7 a name already taken is refused
-[36m[1mi [22m[39m To reset the password for sam.odd@example.com, follow this link: http://127.0.0.1:9099/emulator/action?mode=resetPassword&lang=en&oobCode=XTm0ODeqLebNBY5QLsoTK8VITVNXtQClXecflftZ1XatoIDyXt2p5-&apiKey=fake-api-key&newPassword=NEW_PASSWORD_HERE
+[36m[1mi [22m[39m To reset the password for sam.odd@example.com, follow this link: http://127.0.0.1:9099/emulator/action?mode=resetPassword&lang=en&oobCode=-8-t0LudcNuXm7vasEAVMUEm6PzsV70631A7jiiKQGrkrU7DkAl2L0&apiKey=fake-api-key&newPassword=NEW_PASSWORD_HERE
 PASS  CK7 a one-word name is refused
-[36m[1mi [22m[39m To reset the password for bo.blocked@spam.test, follow this link: http://127.0.0.1:9099/emulator/action?mode=resetPassword&lang=en&oobCode=gqoHDZgHcE-7V7jucYQDQSZ09RcaakMRxkcw4AKsuO2sEUX3uFmsDU&apiKey=fake-api-key&newPassword=NEW_PASSWORD_HERE
+[36m[1mi [22m[39m To reset the password for bo.blocked@spam.test, follow this link: http://127.0.0.1:9099/emulator/action?mode=resetPassword&lang=en&oobCode=j4Na4rlbnsFs_ii2cVtHNUPtEn8nEPdoy98MoUAQb89mKXLEovgfuA&apiKey=fake-api-key&newPassword=NEW_PASSWORD_HERE
 PASS  CK7 a blocked domain is refused
-[36m[1mi [22m[39m To reset the password for bad.person@example.com, follow this link: http://127.0.0.1:9099/emulator/action?mode=resetPassword&lang=en&oobCode=zpkTS2gdzPviFn6JxGv6BIcnPkolbJb9zAgKJLP58b6Q_a5apQd4nk&apiKey=fake-api-key&newPassword=NEW_PASSWORD_HERE
+[36m[1mi [22m[39m To reset the password for bad.person@example.com, follow this link: http://127.0.0.1:9099/emulator/action?mode=resetPassword&lang=en&oobCode=hlpmgueCjRGsnNSeuuhrkwBFjX-vSYzaofydMpXL1fxz3PQiJt0Pgt&apiKey=fake-api-key&newPassword=NEW_PASSWORD_HERE
 PASS  CK7 a blocked name is refused
 PASS  CK7 an unconfirmed email is refused
 PASS  CK7 a different name from the application is refused
 PASS  CK7 without the day's counter it is refused
 PASS  CK7 the golfer must be linked to the applicant
 == CK8 Auto: a clean application is approved by the applicant, then joins
-FAIL  CK8 Ann approves herself (all checks pass) (HTTP 403, expected 200)
+PASS  CK8 Ann approves herself (all checks pass)
 PASS  CK8 the counter cannot move on its own
-FAIL  CK8 she puts her own golfer on the public roster (HTTP 403, expected 200)
+PASS  CK8 she puts her own golfer on the public roster
 PASS  CK8 not somebody else's golfer
-FAIL  CK8 she joins the public group with that golfer (HTTP 403, expected 200)
-FAIL  CK8 she marks her application approved (HTTP 403, expected 200)
+PASS  CK8 she joins the public group with that golfer
+PASS  CK8 she marks her application approved
 PASS  CK8 a second approval for her is refused
 == CK9 Auto: the daily limit
-[36m[1mi [22m[39m To reset the password for lee.limit@example.com, follow this link: http://127.0.0.1:9099/emulator/action?mode=resetPassword&lang=en&oobCode=tMm5CYY76erHvCspJdwS5T3lxsvvn7IDbFhh-Z2eHGs-24sAED33Dx&apiKey=fake-api-key&newPassword=NEW_PASSWORD_HERE
-FAIL  CK9 the second of 2 today passes (HTTP 403, expected 200)
-[36m[1mi [22m[39m To reset the password for max.over@example.com, follow this link: http://127.0.0.1:9099/emulator/action?mode=resetPassword&lang=en&oobCode=IzFrvrhV_a-DoA4Mxliv26aS962zlJmL12jwmLK7_VtwOP6BovYjcK&apiKey=fake-api-key&newPassword=NEW_PASSWORD_HERE
+[36m[1mi [22m[39m To reset the password for lee.limit@example.com, follow this link: http://127.0.0.1:9099/emulator/action?mode=resetPassword&lang=en&oobCode=YNlZdigkp7EYu_r_qL3uNLIkJRZiX4OGkML2aXvyGVARdYslbt9Ya7&apiKey=fake-api-key&newPassword=NEW_PASSWORD_HERE
+PASS  CK9 the second of 2 today passes
+[36m[1mi [22m[39m To reset the password for max.over@example.com, follow this link: http://127.0.0.1:9099/emulator/action?mode=resetPassword&lang=en&oobCode=puME7HfoEZcyr4nwaHIfagm9DMhT0KO1XIrQUdseoHRX7_ZlTBgNpG&apiKey=fake-api-key&newPassword=NEW_PASSWORD_HERE
 PASS  CK9 the third of 2 today is refused
 PASS  CK9 ... and so is skipping the count
+PASS  CK9 ... and so is leaving the counter out
+PASS  CK9 under the limit, leaving the counter out is still refused
+PASS  CK9 under the limit, with the counter, it passes
+PASS  CK9 a reviewer cannot claim an application already approved by Auto
 
-RESULT: 43 passed, 6 failed
+RESULT: 53 passed, 0 failed
 
 PASS  E1  signed out: Sign in, I have a code, Become a member or start a group; no sign-in happens by itself
 PASS  E2  the applicant applies with full name and email; the application is stored as pending
 PASS  E2b  a second application for the same email is refused with a clear message
 PASS  E3  the owner signs in, lands in PUBLIC and sees the application on the Admin tab
-[36m[1mi [22m[39m To reset the password for pat.applicant@example.com, follow this link: http://127.0.0.1:9099/emulator/action?mode=resetPassword&lang=en&oobCode=NSmc2QVDa1G1lYyTJZlOiEDvtyy6Ysdu5I9-KwQ2LkR4hXc0gWm-8d&apiKey=fake-api-key&newPassword=NEW_PASSWORD_HERE
+[36m[1mi [22m[39m To reset the password for pat.applicant@example.com, follow this link: http://127.0.0.1:9099/emulator/action?mode=resetPassword&lang=en&oobCode=p3aPRpZhkbB1UI4ZL4_qz2JqN3Y3Dps_4DPP-K0280Wu-Eh9UJ-hqz&apiKey=fake-api-key&newPassword=NEW_PASSWORD_HERE
 PASS  E4  approving creates the account, the golfer, the directory entry and the approval, and sends the password email
-[36m[1mi [22m[39m To reset the password for second@example.com, follow this link: http://127.0.0.1:9099/emulator/action?mode=resetPassword&lang=en&oobCode=9yJDsc4tQBkm3tXz5cW2Q89e2uLxxG0QAnmbw3ZQIsb9YPZ2_mNQAz&apiKey=fake-api-key&newPassword=NEW_PASSWORD_HERE
-FAIL  E4b  a name already in use is refused and the owner is asked to change it  —  text /already used/ did not appear; the screen says: The Scorecard PUBLIC OWNER · OWNER A+ Auto · night Connected Cockpit Applications Members Settings Group requests No group requests waiting. Approve creates the group with you as its owner (not on its roster), then opens an email to the organiser with an admin invitation link. Decline sends no email
-[36m[1mi [22m[39m To reset the password for retry@example.com, follow this link: http://127.0.0.1:9099/emulator/action?mode=resetPassword&lang=en&oobCode=AbY-5Y2TbxUi2jZIS5Sm4U5VKVrIlCXAWMscqsHlfXaAw1Wa810HBI&apiKey=fake-api-key&newPassword=NEW_PASSWORD_HERE
+PASS  E4b  a name already in use is refused and the owner is asked to change it
+[36m[1mi [22m[39m To reset the password for retry@example.com, follow this link: http://127.0.0.1:9099/emulator/action?mode=resetPassword&lang=en&oobCode=P7jkbMd5Ua0NbSnxB_D25mQumZsECgyflDTGTTt73FMPMSrr-wAgck&apiKey=fake-api-key&newPassword=NEW_PASSWORD_HERE
 PASS  E4c  an approval interrupted part-way is finished by the same reviewer, with the same golfer
-[36m[1mi [22m[39m To reset the password for both@example.com, follow this link: http://127.0.0.1:9099/emulator/action?mode=resetPassword&lang=en&oobCode=_IS6njjtbuX7BU5uwZ9zI5KzYvMIHUpQnAXH_phJAtVzHxe8w609op&apiKey=fake-api-key&newPassword=NEW_PASSWORD_HERE
+[36m[1mi [22m[39m To reset the password for both@example.com, follow this link: http://127.0.0.1:9099/emulator/action?mode=resetPassword&lang=en&oobCode=8gc8AmsVw0vL5JX5TOkE-X0wvGePranihUc_ZqGcNv8KS1klXskVgD&apiKey=fake-api-key&newPassword=NEW_PASSWORD_HERE
 PASS  E4d  two reviewers approving the same application at once: exactly one approval, one golfer, one account
 PASS  E5  the applicant chooses a password from the email, signs in and is in the PUBLIC group
       after E5 the member's screen says: The Scorecard PUBLIC PAT APPLICANT A+ Auto · night Connected Welcome to the public group. Post your rounds on the Enter tab. Almost ready Whoever runs your group still needs to add the roster and a course. ✎ Enter ≡ My rounds ▤ Summary ⚑ Games
@@ -507,24 +511,52 @@ PASS  E17  the organiser taps the link, creates an account and joins the new gro
 PASS  E18  the owner cockpit counts every group, and the owner's last seen is stamped
 PASS  E19  the owner's Members tab is People as before, and Settings holds Group, Backup, Course lookup and Account
 PASS  E20  a group admin sees the mini cockpit of their own group, and two tabs only
-FAIL  E21  an email that already has an account is stopped on screen; nothing is saved  —  text /This email already has an account/ did not appear; the screen says: The Scorecard GETTING STARTED A+ Auto · night Signed out Become a member Give your full name and your email. No password yet. When a person has approved it, you get an email to choose your password. FULL NAME EMAIL Other members of the public group see your full name and your handicap index, and not
+PASS  E21  an email that already has an account is stopped on screen; nothing is saved
 [33m[1m⚠ [22m[39m canHandleCodeInApp is unsupported in Auth Emulator. All OOB operations will complete via web.
-[36m[1mi [22m[39m To sign in as gwen.auto@example.com, follow this link: http://127.0.0.1:9099/emulator/action?mode=signIn&lang=en&oobCode=0TY4Zeksx3gZ3OzkblkvFJQij9WGCfqzDOi2qW5Yca9qXqwe_W3-RA&apiKey=fake-api-key&continueUrl=http%3A%2F%2Flocalhost%3A8000%2F%3Femulators%3D1%26apply%3D1
-FAIL  E22  Auto: the applicant taps the link, chooses a password and is in the public group by themselves  —  text /Welcome to the public group/ did not appear; the screen says: The Scorecard GETTING STARTED A+ Auto · night Connected Expecting to see a group here? If you already belong to one, do not create another — a second group would sit alongside the first with none of your rounds in it. Look again first; if it is still missing, ask whoever runs the group to send you a
+[36m[1mi [22m[39m To sign in as gwen.auto@example.com, follow this link: http://127.0.0.1:9099/emulator/action?mode=signIn&lang=en&oobCode=14PxiTsN1CcoU7gILy36vTqvBt67-Luhlhbcd3sFzcdhMmxdT_3q47&apiKey=fake-api-key&continueUrl=http%3A%2F%2Flocalhost%3A8000%2F%3Femulators%3D1%26apply%3D1
+PASS  E22  Auto: the applicant taps the link, chooses a password and is in the public group by themselves
 [33m[1m⚠ [22m[39m canHandleCodeInApp is unsupported in Auth Emulator. All OOB operations will complete via web.
-[36m[1mi [22m[39m To sign in as mia.two@example.com, follow this link: http://127.0.0.1:9099/emulator/action?mode=signIn&lang=en&oobCode=BaOtoKDa9JBOk6JUq75eXAsv5ErOLeGBBMKbky8Jgj1SNsi64FVqTT&apiKey=fake-api-key&continueUrl=http%3A%2F%2Flocalhost%3A8000%2F%3Femulators%3D1%26apply%3D1
-FAIL  E23  Auto: a name already taken waits for a reviewer, who sees the next number filled in  —  the name offered is "Mia Member 2", not "Mia Member 1"
+[36m[1mi [22m[39m To sign in as mia.two@example.com, follow this link: http://127.0.0.1:9099/emulator/action?mode=signIn&lang=en&oobCode=Y8Jhc8sC_WgIXptnqRDZo9OaeT9Cp8GafELAGSFlJZ1tbhVNhmIKIL&apiKey=fake-api-key&continueUrl=http%3A%2F%2Flocalhost%3A8000%2F%3Femulators%3D1%26apply%3D1
+PASS  E23  Auto: a name already taken waits for a reviewer, who sees the next number filled in
 PASS  E14  Tidy finds and fixes duplicates and unused golfers across Willy's groups
+PASS  E24  Tidy opens from Admin already signed in; Back returns to the Admin cockpit
+PASS  E26  Rebuild, Clean up, Repair and Tidy open in place, signed in, and scroll
+PASS  E25  first open shows the Terms of Use; decline locks; accept is remembered and recorded on the account
+PASS  E27  app mode: Tidy opens only after the app's saved copy is released, and Back opens the app at once
+PASS  E28  invitation, email already has an account: Create account signs in and shows the invitation; a wrong password says so
+PASS  E29  signed out: Back from Tidy returns to the app at once
+PASS  E30  Delete my account: signed out, gone, golfer and rounds kept; invited again with the same email they rejoin as the same golfer
+PASS  E31  a deletion that stops part-way: signed out at once, cannot sign back in, locked by the rules, finished by the job
+PASS  E32  an invitation for a golfer you already are, in a group you are already in: joining opens the group
+PASS  E33-web  join then sign out returns to ordinary Sign in (web)
+PASS  E33-native-immediate  join then sign out returns to ordinary Sign in (native-immediate)
+PASS  E33-native-delayed  join then sign out returns to ordinary Sign in (native-delayed)
+PASS  INV1  resend creates a different secret and the previous link cannot create membership
+PASS  INV2  one atomic join links the existing golfer, preserves rounds, and spends the invitation
+PASS  INV3  a forwarded used invitation cannot be accepted by another account
+PASS  INV4  deleting the accepting account leaves a spent receipt; fresh reinvitation retains the golfer and rounds
+PASS  INV5  an admin cannot create an admin invitation
+PASS  INV6  legacy named and admin shared-code links are refused after activation
+PASS  INV7  two accounts racing for one invitation: exactly one joins, without partial membership
+PASS  INV8  refused golfer link does not create membership or spend the invitation
+PASS  INV9  admin non-player invitations work once and do not create a golfer
+PASS  INV10  same-account fresh invitation preserves the existing admin role
+PASS  INV11  a general member link accepts a name and creates that member's own golfer
+PASS  INV12-web  new token invitation: sign in, join, sign out and reopen show ordinary Sign in (web)
+PASS  INV12-native  new token invitation: sign in, join, sign out and reopen show ordinary Sign in (native)
+PASS  INV13  an outstanding invitation cannot join a deleted group or leave orphan membership
+PASS  ERR1  a failed deletion precheck preserves the real error for Send a report; no deletion request is written
+PASS  ERR2  the real deletion screen offers a report containing the error code and reason, without the password
 
-RESULT: 24 passed, 4 failed
+RESULT: 56 passed, 0 failed
 
       | Owner: willy@example.com — owns 1 of 1 group(s).
       | 
       | == Saturday Group  (owner: willy@example.com; 4 member(s))
-      |    admin  Ada Admin                email              admin@example.com  last sign-in 2026-10-01
-      |    member Gus Guest                guest (no email)     last sign-in 2026-10-01
-      |    member Max Member               email              member@example.com  last sign-in 2026-10-01
-      |    owner  Willy Rosales            email              willy@example.com  last sign-in 2026-10-01
+      |    admin  Ada Admin                email              admin@example.com  last sign-in 2026-10-03
+      |    member Gus Guest                guest (no email)     last sign-in 2026-10-03
+      |    member Max Member               email              member@example.com  last sign-in 2026-10-03
+      |    owner  Willy Rosales            email              willy@example.com  last sign-in 2026-10-03
       | 
       | == Summary
       |    memberships held by guests (no email): 1
@@ -829,11 +861,461 @@ PASS  AP8 it says why
 PASS  AP8 nothing was published
 
 RESULT: 29 passed, 0 failed
-[33m[1m⚠ [22m[39m Script exited unsuccessfully (code 1)
+
+      | Reading the whole database (read only) ...
+      | Saved 98 documents: 33 groups, 1 golfers, 33 rounds, 1 accounts.
+      | File: /tmp/tmp.UQD6XJ9qqS/backup.json (17 KB)
+      | BACKUP DONE.
+PASS  BK1 the backup finishes (exit 0)
+PASS  BK1 a group is saved
+PASS  BK1 its rounds are saved
+PASS  BK1 its members are saved
+PASS  BK1 a golfer is saved
+PASS  BK2 a round under a group document that no longer exists is saved
+true
+PASS  BK2 the accounts are listed, without passwords
+true
+PASS  BK2 the round's value is saved exactly
+PASS  BK3 ids with spaces are read
+true
+PASS  BK3 a wide tree is read in full (31 groups)
+
+RESULT: 10 passed, 0 failed
+
+== CL1 two groups could be the real Golfing Buddies: it stops, nothing changes
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+      | GOLFER RECORDS UPDATED: 4.  HANDICAPS THAT CHANGE: 1.
+      | DOCUMENTS REMOVED IN ALL: 30.
+      | 
+      | ERROR: Nothing was changed. 2 groups are called "golfing buddies" and you belong to more than one of them. Nothing can be decided safely.
+PASS  CL1 stops (exit 1)
+PASS  CL1 says why
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+PASS  CL1 nothing changed
+== CL2 answering no changes nothing
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+      | DOCUMENTS REMOVED IN ALL: 21.
+      | 
+      | Type yes to clean up: ERROR: Stopped. Nothing was changed.
+PASS  CL2 stops (exit 1)
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+PASS  CL2 nothing changed
+/tmp/tmp.D7DxXxIYJX/scorecard-backup-before-cleanup-2026-10-03-0245.json
+PASS  CL2 the backup before was taken
+== CL3 interrupted after its first step, then run again
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+      | 
+      | Type yes to clean up:   1/6  Ana Orphan: rounds 1–3
+      | ERROR: stopped on purpose after 1 steps (test).
+PASS  CL3 the interrupted run stops (exit 1)
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+      |   5/5  removals 1–21 of 21
+      | CLEAN-UP DONE.
+      | 
+      | 3. Checking ...
+      | Reading the whole database (read only) ...
+      | Saved 36 documents: 4 groups, 7 golfers, 5 rounds, 4 accounts.
+      | File: /tmp/tmp.D7DxXxIYJX/scorecard-cl-tools/check-2026-10-03-0245.json (12 KB)
+      | BACKUP DONE.
+      | OK: only your 4 groups remain, and every golfer and account is in one of them.
+      | 
+      | DONE. Your backup from before the clean-up is scorecard-backup-before-cleanup-2026-10-03-0245.json
+      | Keep a copy: More, then Download, and type that name.
+PASS  CL3 the second run finishes (exit 0)
+PASS  CL3 it checks itself
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+== CL4 the four groups are untouched; Philippine Golfers only receives
+PASS  CL4 everything kept is exactly as before
+PASS  CL4 PUBLIC still exists
+PASS  CL4 RR1 still exists
+PASS  CL4 PG1 still exists
+PASS  CL4 GB1 still exists
+== CL5 the orphans are gone, with everything in them
+PASS  CL5 no other group remains
+PASS  CL5 the orphan's join code is gone
+PASS  CL5 the real join code is kept
+PASS  CL5 the link to the orphan group is gone
+== CL6 the golfer found only in orphans moved, with her rounds
+PASS  CL6 on the Philippine Golfers roster
+PASS  CL6 in its directory
+PASS  CL6 her own rounds moved (3), the copy did not
+PASS  CL6 a moved round belongs to Philippine Golfers, no game
+PASS  CL6 her groups are Philippine Golfers only
+PASS  CL6 her handicap window points at Philippine Golfers, once each
+PASS  CL6 her account is a member, as her golfer
+PASS  CL6 and finds the group in her list
+== CL7 nobody is left without a group
+PASS  CL7 the account found only in an orphan joined Philippine Golfers
+PASS  CL7 the golfer who stays keeps his real group
+PASS  CL7 his handicap points at the real copy of a copied round
+PASS  CL7 his handicap number is unchanged
+== CL10 Willy's answer A: a leftover copy stays as it is; an old sign-in is not added
+PASS  CL10 the copy (no rounds, same name) is not put on Philippine Golfers
+PASS  CL10 its record is unchanged (part of CL4's kept list)
+PASS  CL10 the account with no email is not added
+PASS  CL10 a golfer of their own with no rounds still moves
+== CL8 running it again does nothing; verify agrees
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+      | DONE. Your backup from before the clean-up is scorecard-backup-before-cleanup-2026-10-03-0245.json
+      | Keep a copy: More, then Download, and type that name.
+PASS  CL8 nothing to clean up (exit 0)
+PASS  CL8 says so
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+      | BACKUP DONE.
+      | OK: only your 4 groups remain, and every golfer and account is in one of them.
+PASS  CL8 verify passes
+== CL9 the Groups check page shows the same plan, from a backup on the device
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+      | PASS  CL9 two accounts join Philippine Golfers
+      | PASS  CL9 the staying golfer's round is flagged
+      | PASS  CL9 the leftover copy is listed as left as it is
+      | PASS  CL9 the golfer of her own with no rounds moves
+      | PASS  CL9 no page errors
+      | PASS  CL9 nothing is sent anywhere
+PASS  CL9 the page shows the plan
+
+RESULT: 38 passed, 0 failed
+
+PASS  BG0 the project is set before anything else
+== BG1 two billing accounts: it stops, nothing created
+      | Switching Cloud Shell to project scorecard-f41b8 ...
+      | OK: Cloud Shell is now on project scorecard-f41b8.
+      | Making sure the budget tool is switched on ...
+      | ERROR: More than one billing account was found (A B). Nothing changed. Send a screenshot to Claude.
+PASS  BG1 stops (exit 1)
+PASS  BG1 nothing created
+== BG2 the budget tool cannot be switched on: it stops, nothing created
+      | Switching Cloud Shell to project scorecard-f41b8 ...
+      | OK: Cloud Shell is now on project scorecard-f41b8.
+      | Making sure the budget tool is switched on ...
+      | ERROR: Could not switch on the budget tool. Nothing changed. Send a screenshot to Claude.
+PASS  BG2 stops (exit 1)
+PASS  BG2 nothing created
+== BG3 creates the budget: 1.00 CAD, 50/90/100%
+      | Creating the budget: 1.00 CAD a month, emails at 50%, 90% and 100% ...
+      | OK: the budget is in place.
+      | 
+      | DONE. Google will email willyros01@gmail.com if a month's spending reaches 50, 90 or 100 cents.
+PASS  BG3 succeeds (exit 0)
+PASS  BG3 one budget, the right name
+PASS  BG3 on the right billing account
+== BG4 running it again changes nothing
+      |   Google account  : willyros01@gmail.com
+      |   Billing account : 0A1B2C-3D4E5F-6G7H8I (CAD)
+      | 
+      | OK: the budget "Spending alert - 1 dollar" is already there. Nothing else to do.
+PASS  BG4 succeeds (exit 0)
+PASS  BG4 says it is already there
+PASS  BG4 still one budget
+
+RESULT: 11 passed, 0 failed
+
+PASS  NK0 the project is set before anything else
+== NK1 the wrong project number: stops before any change
+      | OK: Cloud Shell is now on project scorecard-f41b8.
+      | ERROR: Project scorecard-f41b8 has number '999', expected 811267714235. Nothing changed. Send a screenshot to Claude.
+PASS  NK1 stops
+PASS  NK1 nothing created
+== NK2 answering no changes nothing
+      | This creates a READ-ONLY helper for the nightly backup. No data is changed.
+      | ERROR: Stopped. Nothing was changed.
+PASS  NK2 stops
+PASS  NK2 nothing created
+== NK3 verify before setup reports what is missing
+      | MISSING: the GitHub link.
+      | MISSING: the helper link.
+      | ERROR: The setup is not complete. Run: bash nbk.txt
+PASS  NK3 verify fails
+== NK4 setup (the GitHub link fails once and is retried)
+      | OK: the helper account exists.
+      | OK: it can read (roles/datastore.viewer).
+      | OK: it can read (roles/firebaseauth.viewer).
+      | OK: the keyless sign-in is set up.
+      | OK: only the nightly-backup workflow on main can use it.
+      | OK: the workflow may act as the helper.
+      | 
+      | DONE. The nightly backup can now sign in. Tell Claude.
+PASS  NK4 succeeds
+PASS  NK4 the helper can only read: exactly two viewer roles
+PASS  NK4 only this repository's nightly-backup workflow on main
+PASS  NK4 the helper is linked to that sign-in only
+PASS  NK4 no key file is ever made
+PASS  NK4 the workflow uses the same pool, provider and helper
+PASS  NK4 the workflow file is the one the condition names
+== NK5 running it again adds nothing twice
+      | 
+      | DONE. The nightly backup can now sign in. Tell Claude.
+PASS  NK5 succeeds
+PASS  NK5 still two roles
+PASS  NK5 still one link
+== NK6 verify passes
+      | OK: the workflow may act as the helper.
+      | DONE. Everything is in place.
+PASS  NK6 verify succeeds
+
+RESULT: 17 passed, 0 failed
+
+== NB1 no passphrase, or a short one: nothing stored
+      | ERROR: the passphrase secret BACKUP_PASSPHRASE is not set on GitHub. Nothing was stored.
+PASS  NB1 stops without a passphrase
+      | ERROR: the passphrase is shorter than 16 characters. Nothing was stored.
+PASS  NB1 stops with a passphrase under 16 characters
+PASS  NB1 nothing stored
+== NB2 an incomplete backup: nothing stored
+      | ERROR: the backup has no groups or no golfers (0 groups, 0 golfers) — something is wrong; nothing was stored.
+PASS  NB2 stops on a backup with no groups
+      | ERROR: the account list could not be read: accounts not read: HTTP 403
+PASS  NB2 stops when the account list was not read
+PASS  NB2 nothing stored
+== NB3 the first night is stored, locked
+      | Backup complete: 1 groups, 1 golfers, 1 rounds, 0 accounts.
+      | Locked and checked: scorecard-2026-10-02.json.gpg (0 KB).
+      | Stored on the backups branch. 1 nights kept (from 2026-09-03).
+PASS  NB3 succeeds
+PASS  NB3 one file on the backups branch
+PASS  NB3 the stored file is not readable as text
+PASS  NB3 it opens with the passphrase, identical
+PASS  NB3 it does not open with a wrong passphrase
+== NB4 35 more nights: only the last 30 are kept, and only one commit
+PASS  NB4 30 files kept
+PASS  NB4 the newest night is there
+PASS  NB4 the oldest kept is 30 days back
+PASS  NB4 no history piles up (one commit)
+== NB5 the same night run twice replaces, never duplicates
+PASS  NB5 succeeds
+PASS  NB5 still 30 files
+== NB6 the repository cannot be reached: earlier backups untouched
+      | Backup complete: 1 groups, 1 golfers, 1 rounds, 0 accounts.
+      | Locked and checked: scorecard-2026-11-07.json.gpg (0 KB).
+      | ERROR: could not reach the repository (code 128); nothing was changed.
+PASS  NB6 stops
+PASS  NB6 the backups branch is unchanged
+== NB7 the workflow
+PASS  NB7 runs daily at 07:00 UTC (3 am Toronto in summer)
+PASS  NB7 signs in to Google without a key
+PASS  NB7 uses the read-only helper
+PASS  NB7 takes the passphrase from the secret
+== NB8 ckb.txt opens the newest night with the passphrase
+      |   group names    : Golfing Buddies
+      | 
+      | DONE. The backup is good.
+PASS  NB8 opens (exit 0)
+PASS  NB8 names the newest night
+PASS  NB8 shows what it holds
+PASS  NB8 keeps no open copy when only checking
+      | 
+      | 
+      | ERROR: It did not open. Check the passphrase and try again.
+PASS  NB8 a wrong passphrase does not open it
+      | Kept an open copy: scorecard-backup-opened-2026-11-06.json
+      | 
+      | DONE. The backup is good.
+PASS  NB8 open keeps a copy, identical to the backup
+
+RESULT: 29 passed, 0 failed
+
+== AR1 mine: it stops, nothing changes
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+      | 
+      | 2. The leftover copies:
+      | ERROR: Nothing was changed. A copy of "Willy Rosales" is linked to YOUR account; it is left for Claude to look at.
+PASS  AR1 mine: stops (exit 1)
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+PASS  AR1 mine: nothing changed
+== AR1 namelist: it stops, nothing changes
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+      | 
+      | 2. The leftover copies:
+      | ERROR: Nothing was changed. The name "willy  rosales" is registered to a copy, not to the real person; nothing can be decided safely.
+PASS  AR1 namelist: stops (exit 1)
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+PASS  AR1 namelist: nothing changed
+== AR2 answering no changes nothing
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+      | Also not touched: 2 other golfer(s) in no group, whose names match nobody in a group.
+      | 
+      | Type yes to archive them: ERROR: Stopped. Nothing was changed.
+PASS  AR2 stops
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+PASS  AR2 nothing changed
+/tmp/tmp.dGNrzMG0Io/scorecard-backup-before-archive-2026-10-03-0245.json
+PASS  AR2 the backup before was taken
+== AR3 it archives the three copies
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+      | Also not touched: 2 other golfer(s) in no group, whose names match nobody in a group.
+      | 
+      | Type yes to archive them: ARCHIVED 3, all together in one step.
+      | 
+      | 3. Checking ...
+      | Reading the whole database (read only) ...
+      | Saved 16 documents: 1 groups, 8 golfers, 2 rounds, 4 accounts.
+      | File: /tmp/tmp.dGNrzMG0Io/scorecard-arc-tools/check-2026-10-03-0245.json (5 KB)
+      | BACKUP DONE.
+      | OK: no leftover copies remain in the lists.
+      | 
+      | DONE. Your backup from before is scorecard-backup-before-archive-2026-10-03-0245.json
+PASS  AR3 succeeds
+PASS  AR3 lists the copy tied to another golfer's sign-in as left as is
+PASS  AR3 it checks itself
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+PASS  AR3 c1 archived, merged into the real golfer
+PASS  AR3 c1 keeps its name and sign-in link
+PASS  AR3 c2 archived, merged into the real golfer
+PASS  AR3 c2 keeps its name and sign-in link
+PASS  AR3 c3 archived, merged into the real golfer
+PASS  AR3 c3 keeps its name and sign-in link
+== AR4 nothing else changed: the real golfer, the name list, rounds, groups, other copies
+PASS  AR4 everything else is exactly as before
+== AR5 running it again does nothing; verify agrees
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+      | 
+      | DONE. Your backup from before is scorecard-backup-before-archive-2026-10-03-0245.json
+PASS  AR5 nothing to archive (exit 0)
+PASS  AR5 says so
+[33m[1m⚠ [22m[39m Multiple projectIds are not recommended in single project mode. Requested project ID scorecard-f41b8, but the emulator is configured for demo-scorecard. To opt-out of single project mode add/set the '"singleProjectMode"' false' property in the firebase.json emulators config.
+      | BACKUP DONE.
+      | OK: no leftover copies remain in the lists.
+PASS  AR5 verify passes
+== AR6 the app no longer lists them (it hides archived golfers)
+PASS  AR6 the group-less list skips archived golfers
+
+RESULT: 21 passed, 0 failed
+
+PASS  DL7 dl9.txt is pinned to a tested commit
+PASS  DL7 pinned deletion-lock rules are available
+PASS  DL7 pinned rules retain the deletion lock
+PASS  DL0 the new rules hold the deletion lock
+== DL1 publishing fails: the earlier rules stay
+      | act as an admin, post, join or add anything; it can only finish its own
+      | deletion. Nothing else changes and no data is touched.
+      | 
+      | curl: (22) The requested URL returned error: 500 (fake)
+      | 
+      | Something failed during publishing the rules. Putting the earlier rules back automatically ...
+      | DONE: the earlier rules are live again. The app works as before; only the lock waits.
+      | Send a screenshot to Claude. When it is fixed, bash dl9.txt can simply be run again.
+PASS  DL1 dl9.txt stops (exit 1)
+PASS  DL1 it names the step
+PASS  DL1 the earlier rules are live
+== DL2 running it again publishes
+      | 
+      | OK: the published rules are the ones with the deletion lock.
+      | 
+      | DONE. The deletion lock is live. Tell Claude.
+PASS  DL2 succeeds (exit 0)
+PASS  DL2 the new rules are live
+PASS  DL2 it says DONE
+== DL3 once more only checks
+PASS  DL3 exit 0
+PASS  DL3 ... and says they are already live
+PASS  DL3 verify says OK
+== DL4 the manual rollback
+      |   Project        : scorecard-f41b8
+      | 
+      | OK: the earlier rules are published again. Tell Claude.
+PASS  DL4 rollback succeeds (exit 0)
+PASS  DL4 the earlier rules are live
+== DL5 the check after publishing fails: the earlier rules are put back
+      | The change: an account that has asked to be deleted is locked. It cannot
+      | act as an admin, post, join or add anything; it can only finish its own
+      | deletion. Nothing else changes and no data is touched.
+      | 
+      | 
+      | Something failed during checking the published rules. Putting the earlier rules back automatically ...
+      | DONE: the earlier rules are live again. The app works as before; only the lock waits.
+      | Send a screenshot to Claude. When it is fixed, bash dl9.txt can simply be run again.
+PASS  DL5 dl9.txt stops (exit 1)
+PASS  DL5 it names the step
+PASS  DL5 the earlier rules are live
+== DL6 the live rules are not the expected ones: nothing is changed
+      |   Project        : scorecard-f41b8
+      | 
+      | ERROR: The published rules are not the ones ap4.txt published. Nothing changed. Send a screenshot to Claude.
+PASS  DL6 dl9.txt refuses (exit 1)
+PASS  DL6 it says why
+PASS  DL6 nothing was published
+
+RESULT: 21 passed, 0 failed
+
+== IX1 the index is missing; typing anything but yes changes nothing
+      | No data is read, changed or deleted.
+      | 
+      | ERROR: Stopped. Nothing was changed.
+PASS  IX1 it confirms the index is missing
+PASS  IX1 stops (exit 1)
+PASS  IX1 nothing was requested
+== IX2 yes: the index is requested, built, and the search then works
+      |   still building ... (0 min)
+      | 
+      | OK: the membership search now works.
+      | DONE. Delete my account can check your groups. Tell Claude.
+PASS  IX2 succeeds (exit 0)
+PASS  IX2 says DONE
+true
+PASS  IX2 asked for the across-groups index on members.uid
+true
+PASS  IX2 kept the normal single-group indexes
+PASS  IX2 only that one field was touched
+== IX3 running it again changes nothing; verify says OK
+      | OK: the membership search already works. Nothing to add, nothing changed.
+      | (If this is the first time you run ix9.txt, tell Claude: the cause is something else.)
+PASS  IX3 exit 0
+PASS  IX3 says it already works
+PASS  IX3 verify says OK
+== IX4 Google refuses the index: nothing changed, it says so
+      | 
+      | ERROR: Google refused the index (HTTP 403): {"error": {"code": 403, "message": "The caller does not have permission"}}. Nothing changed. Send a screenshot to Claude.
+PASS  IX4 stops (exit 1)
+PASS  IX4 says Google refused it
+== IX5 a different problem (not the index): nothing is changed
+      | 
+      |   Google's answer (HTTP 403): {"error": {"code": 403, "message": "Missing or insufficient permissions."}}
+      | ERROR: The search could not be checked (see above). Nothing changed. Send a screenshot to Claude.
+PASS  IX5 stops (exit 1)
+PASS  IX5 shows Google's answer
+PASS  IX5 nothing was requested
+== IX6 still building when the wait ends: says how to check later
+      | 
+      | Google is still building the index. That is normal for a while.
+      | In 15 minutes, type:  bash ix9.txt verify
+PASS  IX6 exit 0
+PASS  IX6 tells you to verify later
+PASS  IX6 verify says not ready yet (exit 1)
+
+RESULT: 19 passed, 0 failed
+[32m[1m✔ [22m[39m Script exited successfully (code 0)
 [36m[1mi  emulators:[22m[39m Shutting down emulators.
 [36m[1mi  firestore:[22m[39m Stopping Firestore Emulator
 [36m[1mi  auth:[22m[39m Stopping Authentication Emulator
 [36m[1mi  hub:[22m[39m Stopping emulator hub
 [36m[1mi  logging:[22m[39m Stopping Logging Emulator
-
-[1m[31mError:[39m[22m Script "[1ms=0; bash sec-tests.sh || s=1; echo; bash del1-tests.sh || s=1; echo; if [ -f privacy-tests.sh ]; then bash privacy-tests.sh || s=1; fi; echo; bash acc-tests.sh || s=1; echo; bash pub-tests.sh || s=1; echo; bash grp-tests.sh || s=1; echo; bash grq-tests.sh || s=1; echo; bash ck4-tests.sh || s=1; echo; if [ -d ../../node_modules/playwright ]; then node ../app/e2e.mjs ../.. || s=1; else echo "SKIP  app tests (npm ci not run)"; fi; echo; node golive-tests.mjs || s=1; echo; bash go2-tests.sh || s=1; echo; bash rq3-tests.sh || s=1; echo; bash ap4-tests.sh || s=1; exit $s[22m" exited with code 1
