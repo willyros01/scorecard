@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The Scorecard — ONE-TIME INVITATIONS (2.30.0-beta.10), Oct 2, 2026
+# The Scorecard — ONE-TIME INVITATIONS (2.30.0-beta.11), Oct 2, 2026
 #
 # Apply:    bash iv0.txt
 # Verify:   bash iv0.txt verify
@@ -13,7 +13,7 @@
 # Existing memberships and manual regular-member code entry are preserved.
 # Recovery restores the old rules and marker. Used tokens are never deleted.
 # Apply AFTER automated tests pass. The old beta.9 app cannot send new tokens;
-# use beta.10 after this step. The web update follows the rules deployment.
+# use beta.11 after this step. The web update follows the rules deployment.
 # Run in Google Cloud Shell with the project owner's Google account.
 
 # ---------------------------------------------------------------------------

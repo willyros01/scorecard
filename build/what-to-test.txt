@@ -1,4 +1,4 @@
-The Scorecard 2.30.0-beta.10: one-time invitations and clearer error reports.
+The Scorecard 2.30.0-beta.11: one-time invitations and clearer error reports.
 
 NEW INVITATIONS NEED THE iv0.txt FIREBASE RULES STEP FIRST. Existing sign-in and normal account deletion continue to work. Update the web after the rules step; older apps cannot send the new links.
 
@@ -11,5 +11,5 @@ NEW INVITATIONS NEED THE iv0.txt FIREBASE RULES STEP FIRST. Existing sign-in and
 7. If Delete my account fails while checking groups, the screen and Send a report retain the actual Firebase error. Its working deletion process and completion job are unchanged.
 8. If the start-up deletion check times out, it reports an unconfirmed account status and retries. It never treats a timeout as proof that no deletion request exists.
 
-Old named/admin shared-code invitation links retire when iv0 is applied. Send fresh links from beta.10. Manual regular-member group-code entry remains available.
+Old named/admin shared-code invitation links retire when iv0 is applied. Send fresh links from beta.11. Manual regular-member group-code entry remains available.
 Report problems with Send a report in the app.

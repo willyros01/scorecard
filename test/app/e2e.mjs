@@ -1291,6 +1291,7 @@ await check("ERR2", "the real deletion screen offers a report containing the err
   const r = await acceptToken(a.page, await freshInvitation("gReport"));
   if (!r.ok) throw new Error(JSON.stringify(r));
   await a.page.reload({waitUntil:"load"}); await a.page.locator('[data-tab="summary"]').waitFor();
+  await tab(a.page, "summary");
   await a.page.evaluate(()=>{globalThis.__scorecardGroupCheckError="failed-precondition";});
   await a.page.locator('[data-act="delete-account"]').first().click();
   await a.page.fill('[name="delete-password"]',a.password);

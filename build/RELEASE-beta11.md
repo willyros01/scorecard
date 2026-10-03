@@ -1,4 +1,4 @@
-# 2.30.0-beta.10 — invitation fixes
+# 2.30.0-beta.11 — invitation fixes
 
 Willy approved building these solutions on 2 October 2026. Email prebinding was explicitly rejected: admins do not collect an email before sending a private-group invitation. The first signed-in account to accept claims the link. Existing owner/admin/member powers and PUBLIC application approval remain.
 
@@ -21,12 +21,12 @@ The query inventory records all twenty-one query calls in the app and maintenanc
 
 ## Deployment state and sequence
 
-The beta.10 app source is on v2. A final server-only tightening refuses tokens belonging to deleted groups; firestore.rules is not packaged into the iOS binary, so this does not change the signed app payload. Its full regression suite is checked separately before the Cloud Shell script is delivered. The live web/main and Firebase have not been updated by this work. `build/iv0.txt` pins the exact new rules and query inventory. It switches first to scorecard-f41b8, requires the live beta.9 rules, checks all live queries, backs up rules and the activation marker, asks `yes`, compiles/publishes/verifies rules and activates the marker. On failure it restores both; rollback works from the saved backup without GitHub access. It never changes existing accounts, golfers, rounds or groups.
+The beta.11 app source is on v2. A final server-only tightening refuses tokens belonging to deleted groups; firestore.rules is not packaged into the iOS binary, so this does not change the signed app payload. Its full regression suite is checked separately before the Cloud Shell script is delivered. The live web/main and Firebase have not been updated by this work. `build/iv0.txt` pins the exact new rules and query inventory. It switches first to scorecard-f41b8, requires the live beta.9 rules, checks all live queries, backs up rules and the activation marker, asks `yes`, compiles/publishes/verifies rules and activates the marker. On failure it restores both; rollback works from the saved backup without GitHub access. It never changes existing accounts, golfers, rounds or groups.
 
 1. Finish required automated tests and TestFlight upload.
 2. Willy uploads iv0.txt to Google Cloud Shell and runs `bash iv0.txt`; type `yes` only after the checks pass. Keep the scorecard-iv0-backup folder.
-3. After successful confirmation, update the live web to the tested beta.10 commit, retaining finish-deletions.yml. Do not merge main before step 2.
-4. Use beta.10 for sending new links and resend outstanding old named/admin links. Existing beta.9 memberships/sign-in and normal deletion continue; beta.9 cannot create these new token links.
+3. After successful confirmation, update the live web to the tested beta.11 commit, retaining finish-deletions.yml. Do not merge main before step 2.
+4. Use beta.11 for sending new links and resend outstanding old named/admin links. Existing beta.9 memberships/sign-in and normal deletion continue; beta.9 cannot create these new token links.
 5. Verify using `bash iv0.txt verify`. Rollback: `bash iv0.txt rollback`; coordinate the matching app/web rollback.
 
 What to test, including the physical iPhone and web logout/reopen checks, is in `build/what-to-test.txt` and uploaded with TestFlight. App Store preparation, V1 cleanup and PUBLIC/group-application redesign are outside this invitation-fix release.

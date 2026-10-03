@@ -2,9 +2,9 @@
 
 Written so that anyone (Claude, ChatGPT or a person) can continue the work. Read it fully before changing anything.
 
-## Latest release: beta.10 (2 October 2026)
+## Latest release: beta.11 (2 October 2026)
 
-Willy approved the invitation fixes and a new TestFlight build. Read `build/RELEASE-beta10.md` for the architecture, test gate, limitations and deployment order; `build/what-to-test.txt` for the device checks. Email prebinding is not required. One-use random token links replace shared-code named/admin URLs. Manual regular-member code entry remains. Account deletion keeps its existing process, with real precheck diagnostics; startup timeouts are marked unknown and retried.
+Willy approved the invitation fixes and a new TestFlight build. Read `build/RELEASE-beta11.md` for the architecture, test gate, limitations and deployment order; `build/what-to-test.txt` for the device checks. Email prebinding is not required. One-use random token links replace shared-code named/admin URLs. Manual regular-member code entry remains. Account deletion keeps its existing process, with real precheck diagnostics; startup timeouts are marked unknown and retried.
 
 **Firebase rules and live web/main have not been deployed by this release work.** First Willy runs the pinned `build/iv0.txt` in Cloud Shell, then the live web can update. Do not merge main before successful rules confirmation. The historical sections below describe earlier releases.
 
