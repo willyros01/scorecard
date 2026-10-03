@@ -2,6 +2,11 @@
 
 Written so that anyone (Claude, ChatGPT or a person) can continue the work. Read it fully before changing anything.
 
+## To do — legacy data verification and roster tool (Willy, 3 October 2026)
+
+- Verify the current database or newest backup before calling Version 1 cleanup outstanding or complete. The Oct 1 cleanup removed orphan groups; its planner does not delete legacy users/{uid} data. beta.6 removed the app's legacy read/import paths; the handoff records those old documents as untouched. A later deletion is not verified. Do not repeat completed cleanup or delete anything without approval; preserve users/{uid}/terms/accepted.
+- Disable (grey out) or remove **Rebuild the roster** from Admin → Settings, as requested by Willy. UI choice remains to be settled before implementation; no app change made. Also check the separate Manage-tab entry to avoid leaving an unintended route to the tool. Current tool queries only groups owned by the signed-in account.
+
 ## For deeper discussion — Login on every launch (Willy, 3 October 2026)
 
 Willy is reconsidering whether every ordinary launch should start at Login, with invitation launches as the exception. **Decision deferred; no implementation is approved.** Keep the current saved sign-in behavior until the discussion and an explicit decision. Discuss what counts as a launch (cold start, return from background, navigation back from tools), convenience versus account security, offline use, and invitation routing before choosing any change. This supersedes the earlier instruction to require Login on every launch.
