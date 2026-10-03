@@ -2,6 +2,11 @@
 
 Written so that anyone (Claude, ChatGPT or a person) can continue the work. Read it fully before changing anything.
 
+## To do — invitation wording (Willy, 3 October 2026)
+
+- Add an explicit notice to every invitation message: **“This invitation link is for one-time use only. Once you join, it cannot be used again.”** Include it for both Send invitation and Send again, and for member and admin invitations. This is a requested future wording change, not implemented in beta.12.
+- Device result reported by Willy on beta.12: invitation opened the invitation login, signing in succeeded, logout returned to the regular login, and reopening the accepted invitation showed it was invalid.
+
 ## Latest release: beta.11 (2 October 2026)
 
 Willy approved the invitation fixes and a new TestFlight build. Read `build/RELEASE-beta11.md` for the architecture, test gate, limitations and deployment order; `build/what-to-test.txt` for the device checks. Email prebinding is not required. One-use random token links replace shared-code named/admin URLs. Manual regular-member code entry remains. Account deletion keeps its existing process, with real precheck diagnostics; startup timeouts are marked unknown and retried.
