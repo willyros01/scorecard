@@ -1,0 +1,5 @@
+00:01:05 Deletion completion job for scorecard-f41b8 (requests older than 300s).
+00:01:05 Requests found: 2
+00:01:13 DONE 4wI2…: account confirmed gone; request removed.
+00:01:18 DONE Mv2J…: account confirmed gone; request removed.
+00:01:18 Summary: done 2, blocked 0, waiting for the app 0, failed 0.
