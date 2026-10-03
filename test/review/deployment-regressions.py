@@ -12,6 +12,7 @@ def fault(name):
  if s.get('fault')==name: s['fault']=''; return True
  return False
 if 'raw.githubusercontent.com' in url:
+ if s.get('fault')=='github': sys.exit(22)
  if url.endswith('query-indexes.json'): result=(root/'build/query-indexes.json').read_text()
  else: result=s['old'] if '/1036ab02e7a0e64e029c069708f2242608e08992/' in url else (root/'firestore.rules').read_text()
 elif ':runQuery' in url:
@@ -76,6 +77,8 @@ with tempfile.TemporaryDirectory() as temp:
  success(run('verify')); check('verify checks rules, marker and all live query probes',lambda: None)
  before=state(); success(run()); assert state()==before; check('repeated apply changes nothing',lambda: None)
  success(run('rollback')); restored(); check('rollback restores rules and absent marker',lambda: None)
+ reset(); s=state(); s['marker']={'version':{'integerValue':'1'},'note':{'stringValue':'preserve'}}; (base/'state.json').write_text(json.dumps(s)); success(run()); s=state(); s['fault']='github'; (base/'state.json').write_text(json.dumps(s)); success(run('rollback')); assert state()['marker']=={'version':{'integerValue':'1'},'note':{'stringValue':'preserve'}}; check('rollback restores an existing marker without GitHub access',lambda: None)
+ reset(); success(run()); backup=(base/'scorecard-iv0-backup/rules-before.txt').read_text(); s=state(); s['marker']=None; (base/'state.json').write_text(json.dumps(s)); assert run().returncode!=0; assert (base/'scorecard-iv0-backup/rules-before.txt').read_text()==backup; success(run('rollback')); restored(); check('unexpected current state cannot overwrite the rollback backup',lambda: None)
  reset(); result=run(answer='no'); assert result.returncode!=0; restored(); check('declining publication changes nothing',lambda: None)
  for fault in ['index','publish','marker']:
   reset(fault); result=run(); assert result.returncode!=0, result.stdout; restored(); check(fault+' failure preserves or restores previous state',lambda: None)

@@ -2076,8 +2076,8 @@ export async function loadInvitation(link) {
 /* The entire join is atomic. A race, interrupted request, or refused golfer
    link leaves no partial membership and does not spend the invitation. */
 export async function acceptTokenInvite({ associationId, token, displayName = "" }) {
-  const { runTransaction, doc, serverTimestamp } = fb.mod.store;
   if (!fb || !uid || isAnonymousSession()) throw new Error("Sign in first.");
+  const { runTransaction, doc, serverTimestamp } = fb.mod.store;
   const db = fb.db;
   const tokenRef = doc(db, "associations", associationId, "invitationTokens", token);
   const memberRef = doc(db, "associations", associationId, "members", uid);

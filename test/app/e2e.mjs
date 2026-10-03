@@ -1229,6 +1229,34 @@ await check("INV11", "a general member link accepts a name and creates that memb
 });
 
 
+for (const mode of ["web", "native"]) {
+  await check("INV12-" + mode, "new token invitation: sign in, join, sign out and reopen show ordinary Sign in (" + mode + ")", async () => {
+    const key = "gTokenUi" + mode, email = "token-ui-" + mode + "@example.com", password = "token-ui-pass-1";
+    await signUp(email, password);
+    await put(`golfers/${key}`, {name:"Token UI " + mode, linkedUid:null, groups:["G1"]});
+    await put(`associations/G1/roster/${key}`, {golferId:key});
+    const url = await freshInvitation(key);
+    const page = await newPage();
+    if (mode === "native") await page.addInitScript(url => {
+      window.Capacitor = {isNativePlatform:()=>true, Plugins:{App:{getLaunchUrl:async()=>({url}),addListener:()=>({remove(){}})}}};
+    }, url);
+    await page.goto(mode === "web" ? APP + "&" + new URL(url).search.slice(1) : APP, {waitUntil:"load"});
+    await waitForText(page, /You.re invited/);
+    await page.fill('[name="email"]',email); await page.fill('[name="password"]',password); await page.fill('[name="password-again"]',password);
+    await page.locator('[data-act="create-account"]').click();
+    await page.locator('[data-act="accept-named"]').waitFor();
+    await page.locator('[data-act="accept-named"]').click();
+    await page.locator('[data-tab="summary"]').waitFor();
+    await Promise.all([page.waitForNavigation({waitUntil:"load"}),page.evaluate(async()=> (await import("/store.js")).signOutEverywhere())]);
+    await page.locator('[data-act="sign-in"]').first().waitFor();
+    if (/You.re invited/.test(await text(page))) throw new Error("token invitation returned after logout");
+    await page.reload({waitUntil:"load"}); await page.locator('[data-act="sign-in"]').first().waitFor();
+    if (/You.re invited/.test(await text(page))) throw new Error("token invitation returned after reopening");
+    await page.close();
+  });
+}
+
+
 await check("ERR1", "a failed deletion precheck preserves the real error for Send a report; no deletion request is written", async () => {
   const a = await tokenPerson("gError", "Error Player", "error-token@example.com");
   for (const code of ["failed-precondition", "permission-denied", "unavailable"]) {

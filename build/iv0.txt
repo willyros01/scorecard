@@ -139,17 +139,20 @@ recover(){
 }
 
 mkdir -p "${STATE}"
-curl --fail --silent --show-error "${RAW}/${COMMIT}/firestore.rules" -o "${STATE}/rules-new.txt" || die "Cannot read the new rules from GitHub. Nothing changed."
-grep -Fq "function joinedWithToken" "${STATE}/rules-new.txt" || die "The downloaded rules are not the ones with one-time invitations. Nothing changed."
+if [[ "${MODE}" != rollback ]]; then
+  curl --fail --silent --show-error "${RAW}/${COMMIT}/firestore.rules" -o "${STATE}/rules-new.txt" || die "Cannot read the new rules from GitHub. Nothing changed."
+  grep -Fq "function joinedWithToken" "${STATE}/rules-new.txt" || die "The downloaded rules are not the ones with one-time invitations. Nothing changed."
+fi
 
 if [[ "${MODE}" == apply ]]; then
   if live_is "${STATE}/rules-new.txt" && marker_is_new; then
     echo "OK: the rules with the one-time invitations are already live. Nothing else to do."; exit 0
   fi
   # 1. The published rules must be exactly the ones dl9.txt published.
-  save_rules "$(release_ruleset)" "${STATE}/rules-before.txt"
+  save_rules "$(release_ruleset)" "${STATE}/rules-current.txt"
   curl --fail --silent --show-error "${RAW}/${LIVE_COMMIT}/firestore.rules" -o "${STATE}/rules-expected.txt" || die "Cannot read the current rules from GitHub. Nothing changed."
-  same_rules "${STATE}/rules-before.txt" "${STATE}/rules-expected.txt" || die "The published rules are not the ones dl9.txt published. Nothing changed. Send a screenshot to Codex."
+  same_rules "${STATE}/rules-current.txt" "${STATE}/rules-expected.txt" || die "The published rules are not the ones dl9.txt published. Nothing changed. Send a screenshot to Codex."
+  cp "${STATE}/rules-current.txt" "${STATE}/rules-before.txt"
   save_marker || die "Invitation activation could not be backed up. Nothing changed."
   check_indexes || die "A live query failed. Nothing changed."
   echo "OK: the published rules and invitation activation are saved for rollback."

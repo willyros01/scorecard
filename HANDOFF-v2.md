@@ -2,6 +2,12 @@
 
 Written so that anyone (Claude, ChatGPT or a person) can continue the work. Read it fully before changing anything.
 
+## Latest release: beta.10 (2 October 2026)
+
+Willy approved the invitation fixes and a new TestFlight build. Read `build/RELEASE-beta10.md` for the architecture, test gate, limitations and deployment order; `build/what-to-test.txt` for the device checks. Email prebinding is not required. One-use random token links replace shared-code named/admin URLs. Manual regular-member code entry remains. Account deletion keeps its existing process, with real precheck diagnostics; startup timeouts are marked unknown and retried.
+
+**Firebase rules and live web/main have not been deployed by this release work.** First Willy runs the pinned `build/iv0.txt` in Cloud Shell, then the live web can update. Do not merge main before successful rules confirmation. The historical sections below describe earlier releases.
+
 ## 1. Working rules from Willy (the owner) — always apply
 
 - **Ask before any change he has not approved.** Describe the change, wait for "go". Never assume.
@@ -181,3 +187,4 @@ Willy's test: a member deleted their own account, the deletion stopped part-way 
 - [Willy] TO DO for the Thursday Oct 8 build: (1) step 1 of deleteMyAccount must show and report the REAL error (not "Connect to the internet"); (2) put the reason in Send a report; (3) a test that lists every filtered collection-group query in the code and fails unless its index is in a repo index list that a script keeps live.
 - [Willy, Oct 2, 5:36 pm] TO DO for Thursday: invitation links one-time and personal (own secret per invitation), cancelled when used or when the account is deleted; "Send again" always makes a fresh link. Today: member links lock to the first account (reusable by it, TAKEN for others) and become usable by anyone after that account is deleted (deleteMyAccount/job remove the claim and unlink the golfer); the link carries the group join code. Admin links are already spent after one use. Propose before building.
 - [Willy, Oct 2, 8:48 pm] TO DO for Thursday: after joining through an invitation, Sign out lands on the INVITATION sign-in screen instead of the regular Sign in screen. Likely cause to check first: the app is re-handed its launch link (platform.initLinks → App.getLaunchUrl() returns the invitation URL again after signOutEverywhere's location.reload, and lastUsedKey's repeat window may not cover it), or the web address still carries ?join=. Fix so that a used invitation never reappears; add a test (join by invitation → sign out → plain Sign in screen, app mode and web).
+
