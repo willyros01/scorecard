@@ -1,15 +1,9 @@
-The Scorecard 2.30.0-beta.11: one-time invitations and clearer error reports.
+The Scorecard 2.30.0-beta.12 — debugging baseline.
 
-NEW INVITATIONS NEED THE iv0.txt FIREBASE RULES STEP FIRST. Existing sign-in and normal account deletion continue to work. Update the web after the rules step; older apps cannot send the new links.
+This build uses the restored beta.11 application code at commit 61f974b3dab44adefcb367b1297fc8cb6f00395c. Only the version/date and these TestFlight notes changed. No invitation fix or Firebase rule change is included. This is not the temporary beta.9 build 17.
 
-1. Owner or private-group admin: open Manage, choose a golfer, and send an invitation. No recipient email is required beforehand. The person creates an account or signs in, then accepts. Their existing golfer and rounds remain.
-2. Send again before acceptance. The new link works; the first link is cancelled. The link is claimed by the first signed-in account to accept it.
-3. After joining, sign out. The ordinary Sign in screen appears. Close and reopen the iPhone app, including more than 10 minutes later: the invitation must not return. Repeat on the web.
-4. Open the used link on another device/account: it must not join. Delete the accepting account, then try that old link: it must still be refused. Ask the admin for a fresh invitation to rejoin with the same golfer and rounds.
-5. Only the owner can send an admin invitation. Test a non-playing organiser invitation. Regular admins still invite regular members and remove regular members from their group.
-6. Normal regression: sign in as member/admin/owner; check permitted groups, own rounds and handicap, rankings, games participated in, posting and editing a round, PUBLIC applications and approval. Private data must remain private.
-7. If Delete my account fails while checking groups, the screen and Send a report retain the actual Firebase error. Its working deletion process and completion job are unchanged.
-8. If the start-up deletion check times out, it reports an unconfirmed account status and retries. It never treats a timeout as proof that no deletion request exists.
+Known reported issue: an invitation sent with Send again can open the ordinary Sign in screen in the iOS app. This remains under investigation; passing automated checks does not establish that the device invitation flow works.
 
-Old named/admin shared-code invitation links retire when iv0 is applied. Send fresh links from beta.11. Manual regular-member group-code entry remains available.
-Report problems with Send a report in the app.
+Check both Send invitation and Send again from the real app, then open each newly received link on iPhone. Record the sender and recipient app versions, intended golfer, actual invitation screen, and whether joining succeeds. Keep full invitation URLs private.
+
+Also check ordinary sign-in, sign-out, groups, own rounds and handicap, ranking, games, and the permitted member/admin/owner actions. Use Send a report for any failure.
