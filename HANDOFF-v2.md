@@ -2,6 +2,10 @@
 
 Written so that anyone (Claude, ChatGPT or a person) can continue the work. Read it fully before changing anything.
 
+## For deeper discussion — Login on every launch (Willy, 3 October 2026)
+
+Willy is reconsidering whether every ordinary launch should start at Login, with invitation launches as the exception. **Decision deferred; no implementation is approved.** Keep the current saved sign-in behavior until the discussion and an explicit decision. Discuss what counts as a launch (cold start, return from background, navigation back from tools), convenience versus account security, offline use, and invitation routing before choosing any change. This supersedes the earlier instruction to require Login on every launch.
+
 ## To do — invitation wording (Willy, 3 October 2026)
 
 - Add an explicit notice to every invitation message: **“This invitation link is for one-time use only. Once you join, it cannot be used again.”** Include it for both Send invitation and Send again, and for member and admin invitations. This is a requested future wording change, not implemented in beta.12.
