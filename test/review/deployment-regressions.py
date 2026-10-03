@@ -16,7 +16,8 @@ if 'raw.githubusercontent.com' in url:
  if url.endswith('query-indexes.json'): result=(root/'build/query-indexes.json').read_text()
  else: result=s['old'] if '/1036ab02e7a0e64e029c069708f2242608e08992/' in url else (root/'firestore.rules').read_text()
 elif ':runQuery' in url:
- if fault('index'): status=400; result={'error':{'message':'Missing index'}}
+ if any(part.startswith('__') and part.endswith('__') for part in url.split('/')): status=400; result={'error':{'status':'INVALID_ARGUMENT','message':'Reserved document ID'}}
+ elif fault('index'): status=400; result={'error':{'status':'FAILED_PRECONDITION','message':'Missing index'}}
  else: result=[{'readTime':'2026-10-03T00:00:00Z'}]
 elif url.endswith('/settings/invitationLinks'):
  if method=='GET':
@@ -81,6 +82,9 @@ with tempfile.TemporaryDirectory() as temp:
  reset(); success(run()); backup=(base/'scorecard-iv0-backup/rules-before.txt').read_text(); s=state(); s['marker']=None; (base/'state.json').write_text(json.dumps(s)); assert run().returncode!=0; assert (base/'scorecard-iv0-backup/rules-before.txt').read_text()==backup; success(run('rollback')); restored(); check('unexpected current state cannot overwrite the rollback backup',lambda: None)
  reset(); result=run(answer='no'); assert result.returncode!=0; restored(); check('declining publication changes nothing',lambda: None)
  for fault in ['index','publish','marker']:
-  reset(fault); result=run(); assert result.returncode!=0, result.stdout; restored(); check(fault+' failure preserves or restores previous state',lambda: None)
+  reset(fault); result=run(); assert result.returncode!=0, result.stdout; restored();
+  if fault=='index': assert 'FAILED_PRECONDITION: Missing index' in result.stderr, result.stderr
+  check(fault+' failure preserves or restores previous state',lambda: None)
  reset(); s=state(); s['rulesets']['r0']='unexpected rules'; (base/'state.json').write_text(json.dumps(s)); result=run(); assert result.returncode!=0 and state()['release']=='r0'; check('unexpected prior rules refused',lambda: None)
+ assert (ROOT/'build/iv1.txt').read_text().replace('bash iv1.txt','bash iv0.txt')==(ROOT/'build/iv0.txt').read_text(); check('accessible replacement matches tested deployment script',lambda: None)
 print(f'RESULT: {passed} deployment checks passed')

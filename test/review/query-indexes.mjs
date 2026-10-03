@@ -36,7 +36,7 @@ for (const match of source.matchAll(/\bquery\s*\(/g)) {
   const structuredQuery = {from:[{collectionId,...(group?{allDescendants:true}:{})}],limit:1};
   if (filters.length) structuredQuery.where = filters.length===1 ? filters[0] : {compositeFilter:{op:'AND',filters}};
   if (orders.length) structuredQuery.orderBy=orders;
-  queries.push({sourceFile,signature,collectionId,parent:!group && literals[0]==='associations' && literals.length>1 ? 'associations/__scorecard_index_probe__' : '',structuredQuery});
+  queries.push({sourceFile,signature,collectionId,parent:!group && literals[0]==='associations' && literals.length>1 ? 'associations/scorecard-index-probe-nonexistent' : '',structuredQuery});
 }
 }
 const file = 'build/query-indexes.json';

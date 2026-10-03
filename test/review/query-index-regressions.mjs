@@ -18,6 +18,11 @@ try {
   assert.equal(run(true).status,0);
   fs.writeFileSync(path.join(dir,'new-tool.html'),'query(collection(db, "associations"), where("ownerUid", "==", uid))');
   assert.notEqual(run().status,0);console.log('PASS new maintenance-page query also blocks verification');
+  fs.writeFileSync(path.join(dir,'new-tool.html'),'query(col("associations", aid, "rounds"), where("golferId", "==", id))');
+  assert.equal(run(true).status,0);
+  const nested=JSON.parse(fs.readFileSync(path.join(dir,'build/query-indexes.json'))).queries.find(q=>q.collectionId==='rounds');
+  assert.ok(nested.parent.split('/').every(id=>!/^__.*__$/.test(id)));
+  console.log('PASS nested query probes never use Google-reserved document IDs');
   fs.writeFileSync(path.join(dir,'new-tool.html'),'query(collection(db, "associations"), where(dynamicField, "==", uid))');
   assert.notEqual(run(true).status,0);console.log('PASS dynamic constraints demand an explicit reviewed probe');
 } finally {fs.rmSync(dir,{recursive:true,force:true});}

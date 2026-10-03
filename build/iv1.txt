@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # The Scorecard — ONE-TIME INVITATIONS (2.30.0-beta.11), Oct 2, 2026
 #
-# Apply:    bash iv0.txt
-# Verify:   bash iv0.txt verify
-# Rollback: bash iv0.txt rollback
+# Apply:    bash iv1.txt
+# Verify:   bash iv1.txt verify
+# Rollback: bash iv1.txt rollback
 #
 # Switches to scorecard-f41b8 first; verifies the current beta.9 rules; checks
 # every registered application query against LIVE Firestore; saves the old
@@ -140,11 +140,11 @@ recover(){
     sleep 3
   done
   if [[ "${back}" == yes ]]; then
-    if ! restore_marker; then echo "WARNING: marker restore failed. Run bash iv0.txt rollback."; exit 1; fi
+    if ! restore_marker; then echo "WARNING: marker restore failed. Run bash iv1.txt rollback."; exit 1; fi
     echo "DONE: the earlier rules and invitation activation are restored."
-    echo "Send a screenshot to Codex. When it is fixed, bash iv0.txt can simply be run again."
+    echo "Send a screenshot to Codex. When it is fixed, bash iv1.txt can simply be run again."
   else
-    echo "WARNING: the earlier rules could not be confirmed. Run:  bash iv0.txt rollback  and send a screenshot to Codex."
+    echo "WARNING: the earlier rules could not be confirmed. Run:  bash iv1.txt rollback  and send a screenshot to Codex."
   fi
   exit 1
 }
@@ -198,6 +198,6 @@ elif [[ "${MODE}" == rollback ]]; then
   restore_marker || die "Rules restored, but invitation marker restore failed."
   echo "OK: the earlier rules and activation marker are restored. Tell Codex."
 else
-  die "Unknown mode ${MODE}. Use: bash iv0.txt   or   bash iv0.txt verify   or   bash iv0.txt rollback"
+  die "Unknown mode ${MODE}. Use: bash iv1.txt   or   bash iv1.txt verify   or   bash iv1.txt rollback"
 fi
 
