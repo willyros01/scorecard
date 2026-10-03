@@ -360,6 +360,7 @@ service cloud.firestore {
     function pendingInvite(a, token) {
       let t = get(tokenPath(a, token)).data;
       return signedIn() && !deleting() && a != publicId()
+        && exists(/databases/$(database)/documents/associations/$(a))
         && t.state == 'pending'
         && get(/databases/$(database)/documents/associations/$(a)/invitationSlots/$(t.slot)).data.token == token;
     }

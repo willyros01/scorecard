@@ -1257,6 +1257,19 @@ for (const mode of ["web", "native"]) {
 }
 
 
+
+await check("INV13", "an outstanding invitation cannot join a deleted group or leave orphan membership", async () => {
+  const a = await tokenPerson("gRemovedGroup", "Removed Group Player", "removed-group@example.com");
+  const token = "a".repeat(64);
+  await put(`associations/REMOVED/invitationTokens/${token}`, {slot:"open-member",golferId:null,role:"member",name:"",groupName:"Deleted group",state:"pending"});
+  await put("associations/REMOVED/invitationSlots/open-member",{token});
+  if ((await acceptToken(a.page, `https://www.cuberoot-systems.com/scorecard/join/?join=REMOVED.${token}&v=2`)).ok) throw new Error("joined deleted group");
+  if (await getDoc(`associations/REMOVED/members/${a.uid}`)) throw new Error("orphan membership left");
+  if (await getDoc(`userGroups/${a.uid}/groups/REMOVED`)) throw new Error("orphan pointer left");
+  if ((await getDoc(`associations/REMOVED/invitationTokens/${token}`)).state !== "pending") throw new Error("refused invitation spent");
+  await a.page.close();
+});
+
 await check("ERR1", "a failed deletion precheck preserves the real error for Send a report; no deletion request is written", async () => {
   const a = await tokenPerson("gError", "Error Player", "error-token@example.com");
   for (const code of ["failed-precondition", "permission-denied", "unavailable"]) {
