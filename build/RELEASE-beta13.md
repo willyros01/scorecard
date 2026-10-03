@@ -12,6 +12,7 @@ Approved by Willy on 3 October 2026.
 
 - E12 checks the exact one-time-use notice in a regular-member invitation.
 - E16 checks the notice in the organiser/admin invitation and verifies that neither Admin → Settings nor empty-roster Manage exposes Rebuild the roster.
+- E26 verifies that the controlled rebuild page still works when opened deliberately while the app does not offer a Rebuild the roster link.
 - The release workflow runs the full rules, operations, application, web, iOS and TestFlight checks before distribution.
 
 ## Deployment

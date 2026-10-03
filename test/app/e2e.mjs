@@ -750,18 +750,20 @@ await check("E24", "Tidy opens from Admin already signed in; Back returns to the
   throw new Error(`not back on Admin; the screen says: ${(await text(owner)).replace(/\s+/g, " ").slice(0, 200)}`);
 });
 
-/* E26 (beta.7): every tool opens in the same window from Admin, already
-   signed in, and the page itself scrolls (the shared stylesheet used to lock it). */
-await check("E26", "Rebuild, Clean up, Repair and Tidy open in place, signed in, and scroll", async () => {
+/* E26 (beta.7, beta.13): linked tools open in place and every controlled
+   repair page still works directly. Rebuild is deliberately no longer linked
+   from the app, but remains available for a supervised recovery. */
+await check("E26", "linked tools open in place; controlled repair pages work directly; Rebuild is not offered", async () => {
   const problems = [];
   await owner.setViewportSize({ width: 390, height: 480 });
   for (const tool of ["rebuild", "cleanup", "repair", "tidy"]) {
-    if (tool === "repair") {
-      await owner.goto(`http://localhost:${PORT}/repair.html?emulators=1`, { waitUntil: "load" });
+    if (tool === "repair" || tool === "rebuild") {
+      await owner.goto(`http://localhost:${PORT}/${tool}.html?emulators=1`, { waitUntil: "load" });
     } else {
       await owner.goto(APP, { waitUntil: "load" });
       await tab(owner, "admin");
       await subtab(owner, tool === "tidy" ? "cockpit" : "settings");
+      if (await owner.locator('[data-tool="rebuild"]').count()) problems.push("Admin still offers Rebuild the roster");
       await owner.locator(`[data-act="open-tool"][data-tool="${tool}"]`).first().click();
     }
     try { await owner.waitForURL(new RegExp(`${tool}\\.html\\?emulators=1`), { timeout: 15000 }); }
