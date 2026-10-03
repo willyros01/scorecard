@@ -79,7 +79,7 @@
       "sourceFile": "store.js",
       "signature": "78289365ad07bb7fa3cefe9956ed370dc931c9ca27205049cc1c436b7741993c",
       "collectionId": "rounds",
-      "parent": "associations/__scorecard_index_probe__",
+      "parent": "associations/scorecard-index-probe-nonexistent",
       "structuredQuery": {
         "from": [
           {
@@ -129,7 +129,7 @@
       "sourceFile": "store.js",
       "signature": "480f75a82e4a6ce33520e6fab8ca27ca06c8eb07fc706ac3db8d7b1d2caa4262",
       "collectionId": "rounds",
-      "parent": "associations/__scorecard_index_probe__",
+      "parent": "associations/scorecard-index-probe-nonexistent",
       "structuredQuery": {
         "from": [
           {
@@ -151,7 +151,7 @@
       "sourceFile": "store.js",
       "signature": "b3e7b056560268960453909ca6813b3904179bc1d4fee874126edf9c15470025",
       "collectionId": "rounds",
-      "parent": "associations/__scorecard_index_probe__",
+      "parent": "associations/scorecard-index-probe-nonexistent",
       "structuredQuery": {
         "from": [
           {
@@ -264,7 +264,7 @@
       "sourceFile": "store.js",
       "signature": "eaf1bf4dacf0e5dd51db7aa34d26c764f3db63486fed10d7e6c7b5e1d581cc99",
       "collectionId": "games",
-      "parent": "associations/__scorecard_index_probe__",
+      "parent": "associations/scorecard-index-probe-nonexistent",
       "structuredQuery": {
         "from": [
           {
@@ -286,7 +286,7 @@
       "sourceFile": "store.js",
       "signature": "f4740ed85e154702c92ab40ce60964636389b53d73fb5d7106ee7c6efa5f55fe",
       "collectionId": "games",
-      "parent": "associations/__scorecard_index_probe__",
+      "parent": "associations/scorecard-index-probe-nonexistent",
       "structuredQuery": {
         "from": [
           {
@@ -311,7 +311,7 @@
       "sourceFile": "store.js",
       "signature": "13fa4f4f393bb59de8310a8e22f5c0eb97552956a9a6c1810002888372f35ac1",
       "collectionId": "games",
-      "parent": "associations/__scorecard_index_probe__",
+      "parent": "associations/scorecard-index-probe-nonexistent",
       "structuredQuery": {
         "from": [
           {
@@ -362,7 +362,7 @@
       "sourceFile": "store.js",
       "signature": "894fda4bc73e367b23a815bb4b15464670d626202cca8b14ef18220fb9993505",
       "collectionId": "rounds",
-      "parent": "associations/__scorecard_index_probe__",
+      "parent": "associations/scorecard-index-probe-nonexistent",
       "structuredQuery": {
         "from": [
           {
@@ -463,7 +463,7 @@
       "sourceFile": "store.js",
       "signature": "9dcae89399159f0c977346bbaafe2419993e8425857399d3ec9dd6f9371a07dc",
       "collectionId": "invites",
-      "parent": "associations/__scorecard_index_probe__",
+      "parent": "associations/scorecard-index-probe-nonexistent",
       "structuredQuery": {
         "from": [
           {
