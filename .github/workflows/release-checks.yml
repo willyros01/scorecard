@@ -30,6 +30,7 @@ jobs:
         run: |
           node test/review/link-regressions.mjs .
           node test/review/message-regressions.mjs
+          node test/review/query-indexes.mjs
       - name: Complete rules, safety, migration and real app tests
         env:
           TEST_BROWSER: ${{ matrix.browser }}

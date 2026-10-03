@@ -6630,7 +6630,7 @@ async function settleGroupInner(preferred) {
   /* Nothing belongs to this account: the first screen handles it. */
 }
 
-db.onChange((s) => { sync = s; render(); });
+db.onChange((s, patch) => { sync = s; if (patch && patch.deletionDetected) refuseDeletingAccount(); render(); });
 
 /* The steps boot() runs for an invitation that names somebody: fetch them so
    the screen can greet them. Also used when a link arrives while the iPhone

@@ -44,7 +44,7 @@ const unsubscribers = [];
 export const onChange = (fn) => { listeners.push(fn); return () => { listeners = listeners.filter((f) => f !== fn); }; };
 export const status = () => ({
   text: statusText, alert: statusAlert, uid, assocId, configured,
-  error: lastError, queued: outbox.count(),
+  error: lastError, queued: outbox.count(), accountStatusUnknown: deletionCheckUnknown,
 });
 const emit = (patch = {}) => { const s = status(); listeners.forEach((fn) => fn(s, patch)); };
 const setStatus = (text, alert = false) => { statusText = text; statusAlert = alert; emit(); };
@@ -2062,7 +2062,9 @@ let loadedInvitation = null;
 export async function loadInvitation(link) {
   if (!link || !link.token || !fb || !uid) return null;
   const { getDocFromServer } = fb.mod.store;
-  const snap = await getDocFromServer(ref("associations", link.associationId, "invitationTokens", link.token));
+  let snap;
+  try { snap = await getDocFromServer(ref("associations", link.associationId, "invitationTokens", link.token)); }
+  catch (e) { if (String(e.code || "").includes("permission")) return null; throw e; }
   if (!snap.exists()) return null;
   const d = snap.data();
   // Slot reads are admin-only. The slot is checked by security rules at acceptance.
@@ -3052,6 +3054,10 @@ function withTimeout(promise, ms, what) {
 
 /* Groups this account owns, read from the server. Throws on a failed read. */
 async function ownedGroupIds() {
+  if (EMULATORS && globalThis.__scorecardGroupCheckError) {
+    const code = globalThis.__scorecardGroupCheckError;
+    const error = new Error(`Simulated group check failure: ${code}`); error.code = code; throw error;
+  }
   const { collection, query, where, getDocsFromServer } = fb.mod.store;
   const snap = await getDocsFromServer(query(collection(fb.db, "associations"), where("ownerUid", "==", uid)));
   return snap.docs.map((d) => d.id);
@@ -3073,6 +3079,8 @@ async function myGroupIdsFromServer() {
    when possible, otherwise from this device's note). Used at start-up to open
    the "not deleted yet" screen, and to hide Sign out meanwhile. */
 let deletionPendingFlag = false;
+let deletionCheckUnknown = false;
+let deletionRetryTimer = null;
 export const deletionPending = () => deletionPendingFlag;
 export async function checkPendingDeletion() {
   deletionPendingFlag = false;
@@ -3084,8 +3092,23 @@ export async function checkPendingDeletion() {
     /* beta.7: never let start-up wait long on this check. */
     const snap = await withTimeout(getDocFromServer(ref("accountDeletions", uid)), 6000, "The deletion check");
     deletionPendingFlag = snap.exists();
+    deletionCheckUnknown = false;
+    clearTimeout(deletionRetryTimer); deletionRetryTimer = null;
+    if (lastError && lastError.short === "Account status not confirmed") clearError();
   } catch {
     deletionPendingFlag = !!(deletionNote() && deletionNote().uid === uid);
+    deletionCheckUnknown = !deletionPendingFlag;
+    if (deletionCheckUnknown) {
+      setError("Account status not confirmed", "The account check has not finished. It will retry automatically; a timeout does not confirm that the account is active.");
+      if (!deletionRetryTimer) {
+        const checkingUid = uid;
+        deletionRetryTimer = setTimeout(async () => {
+          deletionRetryTimer = null;
+          if (!uid || uid !== checkingUid || !fb) return;
+          if (await checkPendingDeletion()) emit({ deletionDetected: true });
+        }, 15000);
+      }
+    }
   }
   return deletionPendingFlag;
 }

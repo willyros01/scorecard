@@ -1212,6 +1212,22 @@ await check("INV10", "same-account fresh invitation preserves the existing admin
   if (!result.ok || result.role !== "admin") throw new Error(JSON.stringify(result));
 });
 
+
+await check("ERR1", "a failed deletion precheck preserves the real error for Send a report; no deletion request is written", async () => {
+  const a = await tokenPerson("gError", "Error Player", "error-token@example.com");
+  for (const code of ["failed-precondition", "permission-denied", "unavailable"]) {
+    const result = await a.page.evaluate(async code => {
+      globalThis.__scorecardGroupCheckError = code;
+      const db = await import("/store.js");
+      const result = await db.deleteMyAccount({password:"invited-pass-1"});
+      delete globalThis.__scorecardGroupCheckError;
+      return {result, error:db.status().error};
+    }, code);
+    if (result.result.ok || result.result.reason !== "CHECK" || !result.result.message.includes(code) || !result.error.full.includes(code)) throw new Error(JSON.stringify(result));
+    if (await getDoc(`accountDeletions/${a.uid}`)) throw new Error("request written after failed precheck");
+  }
+});
+
 await browser.close();
 server.kill();
 console.log(`\nRESULT: ${passed} passed, ${failed} failed`);

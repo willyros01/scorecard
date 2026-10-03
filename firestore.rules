@@ -354,7 +354,7 @@ service cloud.firestore {
     function tokenPath(a, token) {
       return /databases/$(database)/documents/associations/$(a)/invitationTokens/$(token);
     }
-    function memberPath(a) {
+    function inviteMemberPath(a) {
       return /databases/$(database)/documents/associations/$(a)/members/$(request.auth.uid);
     }
     function pendingInvite(a, token) {
@@ -365,7 +365,7 @@ service cloud.firestore {
     }
     function manualGolferClaim(golferId) {
       let a = request.resource.data.get('claimedIn', '');
-      let m = get(memberPath(a)).data;
+      let m = get(inviteMemberPath(a)).data;
       return a != publicId() && m.role == 'member'
         && m.get('invitationToken', '') == ''
         && m.joinCode == association(a).joinCode
@@ -374,7 +374,7 @@ service cloud.firestore {
     }
     function joinedWithToken(a, token) {
       let t = get(tokenPath(a, token)).data;
-      let m = getAfter(memberPath(a)).data;
+      let m = getAfter(inviteMemberPath(a)).data;
       return pendingInvite(a, token)
         && m.uid == request.auth.uid && m.invitationToken == token
         && m.get('golferId', null) == t.golferId
@@ -522,7 +522,8 @@ service cloud.firestore {
       /* Independent secrets. Used records are permanent, contain no acceptor
          UID/email, and are never reopened by account deletion or resend. */
       match /invitationTokens/{token} {
-        allow get: if signedIn();
+        allow get: if signedIn() && (isAdmin(assocId) || resource.data.state != 'pending'
+          || get(/databases/$(database)/documents/associations/$(assocId)/invitationSlots/$(resource.data.slot)).data.token == token);
         allow list: if isAdmin(assocId);
         allow create: if isAdmin(assocId) && assocId != publicId()
           && token.matches('^[a-f0-9]{64}$')
@@ -621,8 +622,8 @@ service cloud.firestore {
         allow read: if isMember(assocId);
         /* Phase C: in the PUBLIC group only its admins add golfers. */
         allow create, update: if (signedIn() && !deleting()
-            && getAfter(memberPath(assocId)).data.golferId == golferId
-            && joinedWithToken(assocId, getAfter(memberPath(assocId)).data.invitationToken))
+            && getAfter(inviteMemberPath(assocId)).data.golferId == golferId
+            && joinedWithToken(assocId, getAfter(inviteMemberPath(assocId)).data.invitationToken))
           || (isMember(assocId)
           && (assocId != publicId() || isAdmin(assocId)))
           /* beta.4: an automatically approved applicant puts their own golfer

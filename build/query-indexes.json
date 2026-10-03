@@ -1,0 +1,421 @@
+{
+  "queries": [
+    {
+      "signature": "78289365ad07bb7fa3cefe9956ed370dc931c9ca27205049cc1c436b7741993c",
+      "collectionId": "rounds",
+      "parent": "associations/__scorecard_index_probe__",
+      "structuredQuery": {
+        "from": [
+          {
+            "collectionId": "rounds"
+          }
+        ],
+        "limit": 1,
+        "where": {
+          "fieldFilter": {
+            "field": {
+              "fieldPath": "golferId"
+            },
+            "op": "EQUAL",
+            "value": {
+              "stringValue": "__scorecard_index_probe__"
+            }
+          }
+        }
+      }
+    },
+    {
+      "signature": "17059b36b90b8ea942d439e00fa73cc2abb74c6632e298eb8b37b75ee68f98ef",
+      "collectionId": "golfers",
+      "parent": "",
+      "structuredQuery": {
+        "from": [
+          {
+            "collectionId": "golfers"
+          }
+        ],
+        "limit": 1,
+        "where": {
+          "fieldFilter": {
+            "field": {
+              "fieldPath": "linkedUid"
+            },
+            "op": "EQUAL",
+            "value": {
+              "stringValue": "__scorecard_index_probe__"
+            }
+          }
+        }
+      }
+    },
+    {
+      "signature": "480f75a82e4a6ce33520e6fab8ca27ca06c8eb07fc706ac3db8d7b1d2caa4262",
+      "collectionId": "rounds",
+      "parent": "associations/__scorecard_index_probe__",
+      "structuredQuery": {
+        "from": [
+          {
+            "collectionId": "rounds"
+          }
+        ],
+        "limit": 1,
+        "orderBy": [
+          {
+            "field": {
+              "fieldPath": "date"
+            },
+            "direction": "DESCENDING"
+          }
+        ]
+      }
+    },
+    {
+      "signature": "b3e7b056560268960453909ca6813b3904179bc1d4fee874126edf9c15470025",
+      "collectionId": "rounds",
+      "parent": "associations/__scorecard_index_probe__",
+      "structuredQuery": {
+        "from": [
+          {
+            "collectionId": "rounds"
+          }
+        ],
+        "limit": 1,
+        "where": {
+          "fieldFilter": {
+            "field": {
+              "fieldPath": "golferId"
+            },
+            "op": "EQUAL",
+            "value": {
+              "stringValue": "__scorecard_index_probe__"
+            }
+          }
+        }
+      }
+    },
+    {
+      "signature": "63b9b2b47af245fc0a8146e0cb1545692619a7147299b7ae8ca5df6d16bbabd3",
+      "collectionId": "publicApplications",
+      "parent": "",
+      "structuredQuery": {
+        "from": [
+          {
+            "collectionId": "publicApplications"
+          }
+        ],
+        "limit": 1,
+        "where": {
+          "fieldFilter": {
+            "field": {
+              "fieldPath": "status"
+            },
+            "op": "IN",
+            "value": {
+              "arrayValue": {
+                "values": [
+                  {
+                    "stringValue": "__scorecard_index_probe__"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "signature": "b1b8c4becb7d9862b9661ab4ae8f7db43b4aef85652850afd220a9188a63175b",
+      "collectionId": "groupRequests",
+      "parent": "",
+      "structuredQuery": {
+        "from": [
+          {
+            "collectionId": "groupRequests"
+          }
+        ],
+        "limit": 1,
+        "where": {
+          "fieldFilter": {
+            "field": {
+              "fieldPath": "status"
+            },
+            "op": "IN",
+            "value": {
+              "arrayValue": {
+                "values": [
+                  {
+                    "stringValue": "__scorecard_index_probe__"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "signature": "d4768f532d11958103082029990b19f4375cc89914e01147b3de87bb3dbb0a78",
+      "collectionId": "rounds",
+      "parent": "",
+      "structuredQuery": {
+        "from": [
+          {
+            "collectionId": "rounds",
+            "allDescendants": true
+          }
+        ],
+        "limit": 1,
+        "where": {
+          "fieldFilter": {
+            "field": {
+              "fieldPath": "date"
+            },
+            "op": "GREATER_THAN_OR_EQUAL",
+            "value": {
+              "stringValue": "9999-12-31"
+            }
+          }
+        }
+      }
+    },
+    {
+      "signature": "eaf1bf4dacf0e5dd51db7aa34d26c764f3db63486fed10d7e6c7b5e1d581cc99",
+      "collectionId": "games",
+      "parent": "associations/__scorecard_index_probe__",
+      "structuredQuery": {
+        "from": [
+          {
+            "collectionId": "games"
+          }
+        ],
+        "limit": 1,
+        "orderBy": [
+          {
+            "field": {
+              "fieldPath": "date"
+            },
+            "direction": "DESCENDING"
+          }
+        ]
+      }
+    },
+    {
+      "signature": "f4740ed85e154702c92ab40ce60964636389b53d73fb5d7106ee7c6efa5f55fe",
+      "collectionId": "games",
+      "parent": "associations/__scorecard_index_probe__",
+      "structuredQuery": {
+        "from": [
+          {
+            "collectionId": "games"
+          }
+        ],
+        "limit": 1,
+        "where": {
+          "fieldFilter": {
+            "field": {
+              "fieldPath": "createdBy"
+            },
+            "op": "EQUAL",
+            "value": {
+              "stringValue": "__scorecard_index_probe__"
+            }
+          }
+        }
+      }
+    },
+    {
+      "signature": "13fa4f4f393bb59de8310a8e22f5c0eb97552956a9a6c1810002888372f35ac1",
+      "collectionId": "games",
+      "parent": "associations/__scorecard_index_probe__",
+      "structuredQuery": {
+        "from": [
+          {
+            "collectionId": "games"
+          }
+        ],
+        "limit": 1,
+        "where": {
+          "fieldFilter": {
+            "field": {
+              "fieldPath": "participantGolferIds"
+            },
+            "op": "ARRAY_CONTAINS",
+            "value": {
+              "stringValue": "__scorecard_index_probe__"
+            }
+          }
+        }
+      }
+    },
+    {
+      "signature": "eba96966835483d83e8c4633eecb906f4d430ee7f783c1ad6a63393bcee7872c",
+      "collectionId": "members",
+      "parent": "",
+      "structuredQuery": {
+        "from": [
+          {
+            "collectionId": "members",
+            "allDescendants": true
+          }
+        ],
+        "limit": 1,
+        "where": {
+          "fieldFilter": {
+            "field": {
+              "fieldPath": "uid"
+            },
+            "op": "EQUAL",
+            "value": {
+              "stringValue": "__scorecard_index_probe__"
+            }
+          }
+        }
+      }
+    },
+    {
+      "signature": "894fda4bc73e367b23a815bb4b15464670d626202cca8b14ef18220fb9993505",
+      "collectionId": "rounds",
+      "parent": "associations/__scorecard_index_probe__",
+      "structuredQuery": {
+        "from": [
+          {
+            "collectionId": "rounds"
+          }
+        ],
+        "limit": 1,
+        "where": {
+          "fieldFilter": {
+            "field": {
+              "fieldPath": "gameId"
+            },
+            "op": "EQUAL",
+            "value": {
+              "stringValue": "__scorecard_index_probe__"
+            }
+          }
+        }
+      }
+    },
+    {
+      "signature": "e8e3081500c1e4f85f3443c5a55d25151f934427838b25e9ebd615a4d3bb892d",
+      "collectionId": "associations",
+      "parent": "",
+      "structuredQuery": {
+        "from": [
+          {
+            "collectionId": "associations"
+          }
+        ],
+        "limit": 1,
+        "where": {
+          "fieldFilter": {
+            "field": {
+              "fieldPath": "ownerUid"
+            },
+            "op": "EQUAL",
+            "value": {
+              "stringValue": "__scorecard_index_probe__"
+            }
+          }
+        }
+      }
+    },
+    {
+      "signature": "eba96966835483d83e8c4633eecb906f4d430ee7f783c1ad6a63393bcee7872c",
+      "collectionId": "members",
+      "parent": "",
+      "structuredQuery": {
+        "from": [
+          {
+            "collectionId": "members",
+            "allDescendants": true
+          }
+        ],
+        "limit": 1,
+        "where": {
+          "fieldFilter": {
+            "field": {
+              "fieldPath": "uid"
+            },
+            "op": "EQUAL",
+            "value": {
+              "stringValue": "__scorecard_index_probe__"
+            }
+          }
+        }
+      }
+    },
+    {
+      "signature": "329c522fc98aabe69b9b6954ea4e9f86fcf9bb571a4ebe4f8254c87d943f0e8e",
+      "collectionId": "golfers",
+      "parent": "",
+      "structuredQuery": {
+        "from": [
+          {
+            "collectionId": "golfers"
+          }
+        ],
+        "limit": 1,
+        "where": {
+          "fieldFilter": {
+            "field": {
+              "fieldPath": "linkedUid"
+            },
+            "op": "EQUAL",
+            "value": {
+              "stringValue": "__scorecard_index_probe__"
+            }
+          }
+        }
+      }
+    },
+    {
+      "signature": "9dcae89399159f0c977346bbaafe2419993e8425857399d3ec9dd6f9371a07dc",
+      "collectionId": "invites",
+      "parent": "associations/__scorecard_index_probe__",
+      "structuredQuery": {
+        "from": [
+          {
+            "collectionId": "invites"
+          }
+        ],
+        "limit": 1,
+        "where": {
+          "fieldFilter": {
+            "field": {
+              "fieldPath": "acceptedBy"
+            },
+            "op": "EQUAL",
+            "value": {
+              "stringValue": "__scorecard_index_probe__"
+            }
+          }
+        }
+      }
+    },
+    {
+      "signature": "329c522fc98aabe69b9b6954ea4e9f86fcf9bb571a4ebe4f8254c87d943f0e8e",
+      "collectionId": "golfers",
+      "parent": "",
+      "structuredQuery": {
+        "from": [
+          {
+            "collectionId": "golfers"
+          }
+        ],
+        "limit": 1,
+        "where": {
+          "fieldFilter": {
+            "field": {
+              "fieldPath": "linkedUid"
+            },
+            "op": "EQUAL",
+            "value": {
+              "stringValue": "__scorecard_index_probe__"
+            }
+          }
+        }
+      }
+    }
+  ]
+}
