@@ -1,9 +1,10 @@
-The Scorecard 2.30.0-beta.12 — debugging baseline.
+The Scorecard 2.30.0-beta.13: clearer invitation wording and roster-tool cleanup.
 
-This build uses the restored beta.11 application code at commit 61f974b3dab44adefcb367b1297fc8cb6f00395c. Only the version/date and these TestFlight notes changed. No invitation fix or Firebase rule change is included. This is not the temporary beta.9 build 17.
+1. Send a golfer invitation and use Send again. Both messages must say: “This invitation link is for one-time use only. Once you join, it cannot be used again.”
+2. Send a non-playing admin invitation and approve a private-group request. Their invitation messages must show the same one-time-use notice.
+3. Accept a fresh invitation, sign out, and reopen its link. Sign out must show the ordinary Sign in screen; the accepted link must remain invalid.
+4. Admin → Settings must not show Rebuild the roster. Manage must not offer it on an empty roster. Check and tidy the data and Clean up unused groups remain available.
+5. Public-group approval retry: an interrupted approval must finish with the same golfer and create only one account. This verifies the corrected E4c database-result check.
+6. Normal regression: sign in as member, admin and owner; check permitted groups, own rounds and handicap, rankings, games, round entry, applications and approval.
 
-Known reported issue: an invitation sent with Send again can open the ordinary Sign in screen in the iOS app. This remains under investigation; passing automated checks does not establish that the device invitation flow works.
-
-Check both Send invitation and Send again from the real app, then open each newly received link on iPhone. Record the sender and recipient app versions, intended golfer, actual invitation screen, and whether joining succeeds. Keep full invitation URLs private.
-
-Also check ordinary sign-in, sign-out, groups, own rounds and handicap, ranking, games, and the permitted member/admin/owner actions. Use Send a report for any failure.
+No Firebase rule, index or data change is required for beta.13. Report problems with Send a report in the app.

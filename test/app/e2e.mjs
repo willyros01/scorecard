@@ -444,6 +444,10 @@ await check("E12", "an admin invites regular members only: no Admin choice on th
   await waitForText(ada, /Invite Jay Unjoined/);
   if (await ada.locator('[name="invite-role"][value="admin"]').count()) throw new Error("the admin choice is offered to an admin");
   await ada.locator('[data-invite="send"]').click();
+  await waitForText(ada, /one-time use only/);
+  const memberMessage = await ada.evaluate(() => (document.querySelector("pre.msg") || {}).innerText || "");
+  if (!memberMessage.includes("This invitation link is for one-time use only. Once you join, it cannot be used again."))
+    throw new Error("member invitation does not explain one-time use");
   /* Go-live fix 1: sending writes the invitation record the invitee is greeted from. */
   const end = Date.now() + 15000;
   let inv = null;
@@ -523,10 +527,16 @@ await check("E16", "Willy approves: the group is created with him as owner, the 
   const to = await wil.evaluate(() => (document.querySelector("[data-to]") || {}).dataset ? document.querySelector("[data-to]").dataset.to : "");
   if (to !== ORG.email) throw new Error(`the email is addressed to "${to}"`);
   const msg = await wil.evaluate(() => (document.querySelector("pre.msg") || {}).innerText || "");
+  if (!msg.includes("This invitation link is for one-time use only. Once you join, it cannot be used again."))
+    throw new Error("admin invitation does not explain one-time use");
   const found = /join=([A-Za-z0-9._-]+)&as=admin/.exec(msg);
   if (!found || !found[1].startsWith(`${r.groupId}.`)) throw new Error(`no admin invitation link in: ${msg.slice(0, 300)}`);
   adminLink = `${APP}&join=${found[1]}&as=admin&v=2`;
   await wil.locator('[data-close="1"]').first().click().catch(() => {});
+  await subtab(wil, "settings");
+  if (await wil.locator('[data-tool="rebuild"]').count()) throw new Error("Admin Settings still offers Rebuild the roster");
+  await tab(wil, "manage");
+  if (await wil.locator('[data-tool="rebuild"]').count()) throw new Error("Manage still offers Rebuild the roster on an empty roster");
   if (wil.errors.length) throw new Error(wil.errors.join(" | "));
 });
 
@@ -1308,4 +1318,3 @@ await browser.close();
 server.kill();
 console.log(`\nRESULT: ${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
-
