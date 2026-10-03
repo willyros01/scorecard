@@ -1885,6 +1885,7 @@ export async function signOutEverywhere() {
      collections this account can no longer read, which produces permission
      errors on the way out and a half-empty screen on the way back in. */
   stopWatching();
+  clearJoinLink();
 
   if (fb) { try { await fb.mod.auth.signOut(fb.auth); } catch {} }
   try {
@@ -2030,29 +2031,80 @@ export function noteInvitation(golferId, role, golfer = null) {
   flush();
 }
 
-export function inviteLink(role = "member", golferId = null) {
+/* beta.10: independent, one-use invitation secrets. No email is collected.
+   The slot pointer replaces any previously sent link for this golfer/role.
+   Publishing the link waits for Firebase: an offline queue is not permission. */
+export async function inviteLink(role = "member", golferId = null) {
   const group = currentAssociationDoc();
-  if (!group) return "";
-  /* Phase D: the admin code is the owner's secret, fetched by ensureAdminCode. */
-  const code = role === "admin" ? (adminCodeFor === group.id ? adminCodeCache : "") : group.joinCode;
-  if (!code) return "";
-  /* A named invitation carries the golfer, so the person joining never types
-     their name and cannot misspell it into a second record with a split
-     handicap. It also links them to their EXISTING roster entry, rounds and
-     index included. */
-  const named = golferId ? `.${golferId}` : "";
-  /* The role travels in the link as its own parameter.
-   *
-   * It cannot be worked out on arrival: somebody who has not joined yet is not
-   * a member, so they cannot read the group document to see which code they
-   * hold. The app was falling back to "guest", then presenting an ADMIN code
-   * while asking for the guest role — and the rules rightly refused it.
-   *
-   * Carrying the role here is safe because it is a claim, not a grant: the
-   * rules still check the code against the group, so a link edited to say
-   * admin while holding the guest code is refused. */
-  const as = role === "admin" ? "&as=admin" : "";
-  return `${platform.joinBase()}?join=${group.id}.${code}${named}${as}`;
+  if (!group || group.id === PUBLIC_ID || !fb || !uid) return "";
+  if (role === "admin" && !isOwner()) throw new Error("Only the owner invites admins.");
+  if (!canManage()) throw new Error("Only group admins send invitations.");
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  const token = Array.from(bytes, b => b.toString(16).padStart(2, "0")).join("");
+  const slot = golferId || `open-${role}`;
+  let golfer = null;
+  if (golferId) golfer = await getDoc_(golferId);
+  const name = golfer ? String(golfer.name || "").slice(0, 120) : "";
+  const index = golfer ? model.effectiveIndex(golfer).index : null;
+  await commitTogether([
+    { op: "set", merge: false, path: ["associations", group.id, "invitationTokens", token],
+      data: { slot, golferId: golferId || null, role, name, handicapIndex: index == null ? null : index,
+        groupName: String(group.name || "").slice(0, 120), state: "pending", sentBy: uid, sentAt: { __serverTimestamp: true } } },
+    { op: "set", merge: false, path: ["associations", group.id, "invitationSlots", slot], data: { token } },
+  ], "prepare one-time invitation");
+  return `${platform.joinBase()}?join=${group.id}.${token}${golferId ? `.${golferId}` : ""}${role === "admin" ? "&as=admin" : ""}&v=2`;
+}
+
+/* A token is deliberately unreadable by list to invitees; only its random
+   address grants a single read. Membership and role still come from rules. */
+let loadedInvitation = null;
+export async function loadInvitation(link) {
+  if (!link || !link.token || !fb || !uid) return null;
+  const { getDocFromServer } = fb.mod.store;
+  const snap = await getDocFromServer(ref("associations", link.associationId, "invitationTokens", link.token));
+  if (!snap.exists()) return null;
+  const d = snap.data();
+  // Slot reads are admin-only. The slot is checked by security rules at acceptance.
+  if (d.state !== "pending") return null;
+  loadedInvitation = { ...d, associationId: link.associationId, token: link.token };
+  return loadedInvitation;
+}
+
+/* The entire join is atomic. A race, interrupted request, or refused golfer
+   link leaves no partial membership and does not spend the invitation. */
+export async function acceptTokenInvite({ associationId, token, displayName = "" }) {
+  const { runTransaction, doc, serverTimestamp } = fb.mod.store;
+  if (!fb || !uid || isAnonymousSession()) throw new Error("Sign in first.");
+  const db = fb.db;
+  const tokenRef = doc(db, "associations", associationId, "invitationTokens", token);
+  const memberRef = doc(db, "associations", associationId, "members", uid);
+  let result;
+  await runTransaction(db, async tx => {
+    const inv = await tx.get(tokenRef);
+    if (!inv.exists() || inv.data().state !== "pending") { const e = new Error("This invitation was used or cancelled. Ask for a fresh link."); e.code = "join/used"; throw e; }
+    const d = inv.data();
+    const member = await tx.get(memberRef);
+    const old = member.exists() ? member.data() : null;
+    if (old && old.golferId && old.golferId !== d.golferId) { const e = new Error("You already play in this group as another golfer."); e.code = "join/other-golfer"; throw e; }
+    const name = d.name || displayName.trim();
+    if (!name) throw new Error("Type your name.");
+    const role = old ? old.role : d.role;
+    if (old) tx.update(memberRef, { invitationToken: token, ...(d.golferId ? { golferId: d.golferId } : {}) });
+    else tx.set(memberRef, { uid, displayName: name, role, golferId: d.golferId, invitationToken: token, joinedAt: serverTimestamp() });
+    tx.update(tokenRef, { state: "used", usedAt: serverTimestamp() }); // no accepted account id retained
+    tx.set(doc(db, "userGroups", uid, "groups", associationId), { assocId: associationId, name: d.groupName || "Group", at: Date.now() });
+    if (d.golferId) {
+      tx.update(doc(db, "golfers", d.golferId), { linkedUid: uid, claimedIn: associationId, claimedToken: token });
+      tx.set(doc(db, "associations", associationId, "roster", d.golferId), { golferId: d.golferId, addedAt: Date.now() });
+    }
+    result = { ok: true, role, already: !!old, name: d.groupName || "Group", golferId: d.golferId };
+  });
+  assocId = associationId;
+  rememberAssociation(associationId);
+  rememberGroup(associationId, result.name);
+  clearError();
+  return result;
 }
 
 /* The admin invitation secret (Phase D). The owner only — the rules let
@@ -2112,10 +2164,13 @@ export function readJoinLink() {
     const params = new URLSearchParams(platform.linkQuery());
     return {
       associationId: parts[0],
-      code: parts[1],
-      golferId: parts.length > 2 ? parts.slice(2).join(".") : null,
+      code: params.get("v") === "2" ? "" : parts[1],
+      token: params.get("v") === "2" ? parts[1] : null,
+      golferId: params.get("v") === "2" && loadedInvitation && loadedInvitation.token === parts[1]
+        ? loadedInvitation.golferId : parts.length > 2 ? parts.slice(2).join(".") : null,
       /* Verified against the group by the rules, never trusted on its own. */
-      role: params.get("as") === "admin" ? "admin" : "member",
+      role: params.get("v") === "2" && loadedInvitation && loadedInvitation.token === parts[1]
+        ? loadedInvitation.role : params.get("as") === "admin" ? "admin" : "member",
     };
   } catch { return null; }
 }
@@ -2254,6 +2309,7 @@ export async function acceptNamedInvite({ associationId, code, golferId, role })
 /* Called only AFTER the join has succeeded — it strips the whole query string,
    including the role, so anything that still needs it must read it first. */
 export const clearJoinLink = () => {
+  loadedInvitation = null;
   try { history.replaceState(null, "", location.pathname); } catch {}
   platform.clearLinkQuery();
 };
@@ -2475,7 +2531,7 @@ export async function linkGolferForMember(displayName) {
     outbox.enqueue({
       type: "update",
       path: ["golfers", golfer.id],
-      data: { linkedUid: uid },
+      data: { linkedUid: uid, claimedIn: assocId },
       opId: `golfer-link-${golfer.id}`,
     });
     flush();
@@ -3110,7 +3166,13 @@ export async function deleteMyAccount({ password = "", onStep = () => {} } = {})
     step("Checking your groups");
     let owned, groups;
     try { owned = await ownedGroupIds(); groups = await myGroupIdsFromServer(); }
-    catch (e) { return { ok: false, reason: "OFFLINE", message: "Your groups couldn't be checked. Connect to the internet and try again. Nothing was changed." }; }
+    catch (e) {
+      const code = String((e && e.code) || "unknown");
+      const detail = String((e && e.message) || e || "No detail was given.");
+      setError("Your groups could not be checked", `Checking your groups: ${code}: ${detail}`);
+      return { ok: false, reason: "CHECK", step: "Checking your groups", code,
+        message: `Your groups could not be checked (${code}). ${detail} Nothing was changed.` };
+    }
     if (owned.length) return { ok: false, reason: "OWNER", message: "You own a group. Delete the group first (Admin → Delete this group), then delete your account." };
 
     /* 2. Anything waiting to upload goes first. */
@@ -3266,7 +3328,7 @@ export function claimGolfer(golferId) {
   outbox.enqueue({
     type: "update",
     path: ["golfers", golferId],
-    data: { linkedUid: uid },
+    data: { linkedUid: uid, claimedIn: assocId },
     opId: `golfer-claim-${golferId}`,
   });
   flush();
@@ -3394,3 +3456,4 @@ export async function setGameRounds({ gameId, addRoundIds = [], removeRoundIds =
   await commitTogether(writes, "set game line-up");
   return { changed: writes.length };
 }
+

@@ -21,7 +21,12 @@ defaults:
     shell: bash
 
 jobs:
+  required-tests:
+    uses: ./.github/workflows/release-checks.yml
+    permissions:
+      contents: read
   build:
+    needs: required-tests
     runs-on: macos-26
     timeout-minutes: 90
     steps:
@@ -70,3 +75,4 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: bash .github/scripts/save-logs.sh testflight "${{ steps.build.outcome }}" build.log xcodebuild.log audit-report.txt
+

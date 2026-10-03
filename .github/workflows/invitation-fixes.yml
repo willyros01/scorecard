@@ -1,0 +1,9 @@
+name: Invitation fixes full verification
+on:
+  push:
+    branches: [fix-invitations-beta10]
+permissions:
+  contents: read
+jobs:
+  verify:
+    uses: ./.github/workflows/release-checks.yml
