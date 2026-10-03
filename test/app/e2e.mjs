@@ -1272,6 +1272,24 @@ await check("ERR1", "a failed deletion precheck preserves the real error for Sen
   }
 });
 
+
+await check("ERR2", "the real deletion screen offers a report containing the error code and reason, without the password", async () => {
+  const a = await tokenPerson("gReport", "Report Player", "report-token@example.com");
+  const r = await acceptToken(a.page, await freshInvitation("gReport"));
+  if (!r.ok) throw new Error(JSON.stringify(r));
+  await a.page.reload({waitUntil:"load"}); await a.page.locator('[data-tab="summary"]').waitFor();
+  await a.page.evaluate(()=>{globalThis.__scorecardGroupCheckError="failed-precondition";});
+  await a.page.locator('[data-act="delete-account"]').first().click();
+  await a.page.fill('[name="delete-password"]',a.password);
+  await a.page.locator('[data-del="go"]').click();
+  await a.page.locator('[data-del="report"]').waitFor();
+  await a.page.locator('[data-del="report"]').click();
+  const report = await a.page.locator('[data-problem="send"]').evaluate(el=>el.closest('.sheet-body').parentElement.dataset.report);
+  if (!report.includes('failed-precondition') || !report.includes('Checking your groups') || report.includes(a.password)) throw new Error("report missing real error or includes password");
+  if (await getDoc(`accountDeletions/${a.uid}`)) throw new Error("precheck wrote deletion request");
+  await a.page.close();
+});
+
 await browser.close();
 server.kill();
 console.log(`\nRESULT: ${passed} passed, ${failed} failed`);

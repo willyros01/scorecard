@@ -3781,9 +3781,10 @@ function openPasswordSheet({ heading, because, allowLater = false } = {}) {
 
 /* ================= Delete my account (Change 7) ================= */
 
-function openDeleteAccount({ resume = false, problem = "" } = {}) {
+function openDeleteAccount({ resume = false, problem = "", reportable = false } = {}) {
   const needsPassword = db.hasPassword() && !(db.currentEmail() || "").startsWith("delete-");
   const blockers = db.deletionBlockers();
+  sheetEl.dataset.deletionError = reportable ? problem : "";
   sheetEl.hidden = false;
   sheetEl.dataset.report = "";
   sheetEl.innerHTML = `<div class="sheet-body">
@@ -3801,6 +3802,7 @@ function openDeleteAccount({ resume = false, problem = "" } = {}) {
       <input class="field" name="delete-password" type="password" autocomplete="current-password" placeholder="To confirm it's you">` : ""}
     <div class="inline-actions stacked">
       <button class="btn danger" data-del="go">${resume ? "Try again" : "Delete my account"}</button>
+      ${reportable ? `<button class="btn ghost" data-del="report">Send a report</button>` : ""}
       ${resume ? "" : `<button class="btn ghost" data-close="1">Keep it</button>`}
     </div>
   </div>`;
@@ -3861,6 +3863,9 @@ sheetEl.addEventListener("click", async (e) => {
 sheetEl.addEventListener("click", async (e) => {
   const button = e.target.closest("[data-del]");
   if (!button) return;
+  if (button.dataset.del === "report") {
+    return openProblem({ title: "Your account deletion check failed", detail: sheetEl.dataset.deletionError, advice: "Nothing was changed. This report includes the real reason the check failed." });
+  }
   if (button.dataset.del === "dismiss") { db.dismissAbandoned(); return openDeleteAccount(); }
   if (button.dataset.del !== "go") return;
   const password = ((sheetEl.querySelector('[name="delete-password"]') || {}).value) || "";
@@ -3883,7 +3888,8 @@ sheetEl.addEventListener("click", async (e) => {
       <div class="inline-actions stacked"><button class="btn" data-del="restart">Done</button></div></div>`;
     return;
   }
-  openDeleteAccount({ resume: db.deletionPending() || resume, problem: (result && result.message) || "Something went wrong. Nothing was reported as deleted." });
+  if (result && result.reason === "CHECK") note(`deletion check failed: ${result.message}`);
+  openDeleteAccount({ resume: db.deletionPending() || resume, problem: (result && result.message) || "Something went wrong. Nothing was reported as deleted.", reportable: !!(result && result.reason === "CHECK") });
 });
 sheetEl.addEventListener("click", (e) => {
   if (e.target.closest('[data-del="restart"]')) location.reload();
@@ -5466,7 +5472,7 @@ view.addEventListener("click", async (e) => {
           <h2>Group code</h2><button class="rowbtn" data-close="1">Close</button></div>
         <p class="hint">For somebody who cannot receive a link. Read it out — it is six characters.</p>
         <div class="codebox">${esc(association.joinCode)}</div>
-        <p class="hint">The invitation link is easier and carries this code inside it.</p>
+        <p class="hint">An invitation link is easier: it has its own one-use secret. This group code is for manual entry only.</p>
       </div>`;
       return;
     }
