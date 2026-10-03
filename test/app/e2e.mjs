@@ -2,7 +2,7 @@
  *
  * The real app, served on this test machine at http://localhost:8000 with
  * ?emulators=1, so it talks only to the emulators started by test/ops/run.sh:
- * a demo project that cannot reach any live data. Chromium only.
+ * a demo project that cannot reach any live data. Chromium and WebKit.
  *
  * E1–E9: the PUBLIC group from both sides (Phase C) — apply while signed out,
  * approve as the owner, choose a password from the email, sign in and land in
@@ -1122,7 +1122,8 @@ async function tokenPerson(key, name, email) {
   await put(`associations/G1/roster/${key}`, { golferId: key });
   const page = await newPage(); await page.goto(APP, {waitUntil:"load"});
   await waitForText(page, /Sign in/); await signIn(page, email, password);
-  await page.waitForFunction(async () => (await import("/store.js")).isSignedIn());
+  await page.waitForFunction(async expected => { const db = await import("/store.js"); return db.isSignedIn() && db.status().uid === expected; }, uid);
+  await page.waitForFunction(() => !document.querySelector('[data-act="sign-in"]'));
   return { uid, page, email, password };
 }
 async function acceptToken(page, url, displayName = "Invited Person") {
@@ -1165,7 +1166,8 @@ await check("INV4", "deleting the accepting account leaves a spent receipt; fres
   const y = await tokenPerson("gScratchToken", "Scratch Token", "token@example.com");
   if ((await acceptToken(y.page, x.url)).ok) throw new Error("deletion reactivated old invitation");
   const fresh = await freshInvitation("gToken");
-  if (!(await acceptToken(y.page, fresh)).ok) throw new Error("fresh reinvitation refused");
+  const joined = await acceptToken(y.page, fresh);
+  if (!joined.ok) throw new Error("fresh reinvitation refused: " + JSON.stringify(joined));
   if ((await getDoc("golfers/gToken")).linkedUid !== y.uid) throw new Error("new account not linked to preserved golfer");
   if (!(await getDoc("associations/G1/rounds/token-round"))) throw new Error("round history lost");
 });
@@ -1210,6 +1212,20 @@ await check("INV10", "same-account fresh invitation preserves the existing admin
   const url = await freshInvitation(null,"member");
   const result = await acceptToken(ada,url,"Ada Admin");
   if (!result.ok || result.role !== "admin") throw new Error(JSON.stringify(result));
+});
+
+
+await check("INV11", "a general member link accepts a name and creates that member's own golfer", async () => {
+  const a = await tokenPerson("gGeneralScratch", "General Scratch", "general-token@example.com");
+  const url = await freshInvitation(null, "member");
+  const r = await acceptToken(a.page, url, "General Newcomer");
+  if (!r.ok) throw new Error(JSON.stringify(r));
+  const golfer = await a.page.evaluate(async () => {
+    const db = await import("/store.js");
+    const g = await db.linkGolferForMember("General Newcomer");
+    await db.flush(); return g;
+  });
+  if (!golfer || (await getDoc(`golfers/${golfer.id}`)).linkedUid !== a.uid) throw new Error("general member did not get their own golfer");
 });
 
 

@@ -2050,7 +2050,7 @@ export async function inviteLink(role = "member", golferId = null) {
   await commitTogether([
     { op: "set", merge: false, path: ["associations", group.id, "invitationTokens", token],
       data: { slot, golferId: golferId || null, role, name, handicapIndex: index == null ? null : index,
-        groupName: String(group.name || "").slice(0, 120), state: "pending", sentBy: uid, sentAt: { __serverTimestamp: true } } },
+        groupName: String(group.name || "").slice(0, 120), state: "pending", sentAt: { __serverTimestamp: true } } },
     { op: "set", merge: false, path: ["associations", group.id, "invitationSlots", slot], data: { token } },
   ], "prepare one-time invitation");
   return `${platform.joinBase()}?join=${group.id}.${token}${golferId ? `.${golferId}` : ""}${role === "admin" ? "&as=admin" : ""}&v=2`;

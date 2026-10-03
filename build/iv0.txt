@@ -1,0 +1,189 @@
+#!/usr/bin/env bash
+# The Scorecard — ONE-TIME INVITATIONS (2.30.0-beta.10), Oct 2, 2026
+#
+# Apply:    bash iv0.txt
+# Verify:   bash iv0.txt verify
+# Rollback: bash iv0.txt rollback
+#
+# Switches to scorecard-f41b8 first; verifies the current beta.9 rules; checks
+# every registered application query against LIVE Firestore; saves the old
+# rules and activation marker; asks yes; publishes compiled invitation rules;
+# activates one-time invitations; verifies both. No user account, golfer,
+# round or group is changed. Old named/admin links retire; resend new links.
+# Existing memberships and manual regular-member code entry are preserved.
+# Recovery restores the old rules and marker. Used tokens are never deleted.
+# Apply AFTER automated tests pass. The old beta.9 app cannot send new tokens;
+# use beta.10 after this step. The web update follows the rules deployment.
+# Run in Google Cloud Shell with the project owner's Google account.
+
+# ---------------------------------------------------------------------------
+# THE GOOGLE PROJECT — defined first, before any command runs.
+# ---------------------------------------------------------------------------
+PROJECT_ID="scorecard-f41b8"
+unset CLOUDSDK_CORE_PROJECT GOOGLE_CLOUD_PROJECT
+
+set -Eeuo pipefail
+
+echo "Switching Cloud Shell to project ${PROJECT_ID} ..."
+gcloud config set project "${PROJECT_ID}" --quiet >/dev/null 2>&1 || { echo "ERROR: could not switch to project ${PROJECT_ID}. Nothing changed." >&2; exit 1; }
+CURRENT_PROJECT="$(gcloud config get-value project 2>/dev/null)"
+[[ "${CURRENT_PROJECT}" == "${PROJECT_ID}" ]] || { echo "ERROR: Cloud Shell is on '${CURRENT_PROJECT}', not ${PROJECT_ID}. Nothing changed." >&2; exit 1; }
+echo "OK: Cloud Shell is now on project ${CURRENT_PROJECT}."
+export CLOUDSDK_CORE_PROJECT="${PROJECT_ID}"
+export GOOGLE_CLOUD_PROJECT="${PROJECT_ID}"
+
+MODE="${1:-apply}"
+COMMIT="92d50a1b7c9a023ec7f2f3ceb028dafd689964af"                                            # v2 branch, tested: the new rules
+LIVE_COMMIT="1036ab02e7a0e64e029c069708f2242608e08992"      # the rules dl9.txt published (Oct 1)
+RAW="https://raw.githubusercontent.com/willyros01/scorecard"
+STATE="$(pwd)/scorecard-iv0-backup"
+MARKER_API="https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/settings/invitationLinks"
+RULES_API="https://firebaserules.googleapis.com/v1"
+
+die(){ echo "ERROR: $*" >&2; exit 1; }
+for c in gcloud curl jq python3; do command -v "$c" >/dev/null || die "$c is unavailable. Run this in Google Cloud Shell."; done
+
+ACCOUNT="$(gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -n1)"
+[[ -n "${ACCOUNT}" ]] || die "No active Google account. Sign in to Cloud Shell first."
+FOUND_ID="$(gcloud projects describe "${PROJECT_ID}" --project="${PROJECT_ID}" --format='value(projectId)' 2>/dev/null || true)"
+[[ "${FOUND_ID}" == "${PROJECT_ID}" ]] || die "Project ${PROJECT_ID} was not found, or ${ACCOUNT} cannot see it. Nothing changed."
+echo
+echo "  Google account : ${ACCOUNT}"
+echo "  Project        : ${PROJECT_ID}"
+echo
+
+token(){ gcloud auth print-access-token; }
+HDR_PROJECT="x-goog-user-project: ${PROJECT_ID}"
+get(){ curl --fail-with-body --silent --show-error -H "Authorization: Bearer $(token)" -H "${HDR_PROJECT}" "$1"; }
+send(){ curl --fail-with-body --silent --show-error -X "$1" -H "Authorization: Bearer $(token)" -H "${HDR_PROJECT}" -H 'Content-Type: application/json' --data-binary "@$3" "$2"; }
+release_ruleset(){ get "${RULES_API}/projects/${PROJECT_ID}/releases/cloud.firestore" | jq -er .rulesetName; }
+save_rules(){ get "${RULES_API}/$1" | jq -er '.source.files[]|select(.name=="firestore.rules")|.content' > "$2"; [[ -s "$2" ]] || die "Empty Firestore rules."; }
+same_rules(){ python3 - "$1" "$2" <<'PYC'
+import sys
+a=open(sys.argv[1]).read().rstrip("\n"); b=open(sys.argv[2]).read().rstrip("\n")
+sys.exit(0 if a==b else 1)
+PYC
+}
+publish_file(){
+  local body="${STATE}/ruleset.json" patch="${STATE}/release.json" ruleset
+  jq -n --rawfile rules "$1" '{source:{files:[{name:"firestore.rules",content:$rules}]}}' > "${body}" || return 1
+  # Creating the ruleset compiles it; a rules error stops here, before anything is published.
+  ruleset="$(send POST "${RULES_API}/projects/${PROJECT_ID}/rulesets" "${body}" | jq -er .name)" || return 1
+  [[ -n "${ruleset}" ]] || return 1
+  jq -n --arg name "projects/${PROJECT_ID}/releases/cloud.firestore" --arg ruleset "${ruleset}" '{release:{name:$name,rulesetName:$ruleset},updateMask:"rulesetName"}' > "${patch}" || return 1
+  send PATCH "${RULES_API}/projects/${PROJECT_ID}/releases/cloud.firestore" "${patch}" >/dev/null || return 1
+}
+marker_is_new(){
+  get "${MARKER_API}" 2>/dev/null | jq -e '.fields.version.integerValue == "2"' >/dev/null
+}
+save_marker(){
+  local status
+  status="$(curl --silent --show-error -o "${STATE}/marker-before.json" -w '%{http_code}' -H "Authorization: Bearer $(token)" -H "${HDR_PROJECT}" "${MARKER_API}")" || return 1
+  if [[ "${status}" == 404 ]]; then printf 'absent' > "${STATE}/marker-before.kind";
+  elif [[ "${status}" == 200 ]]; then jq -e '.fields' "${STATE}/marker-before.json" >/dev/null || return 1; printf 'present' > "${STATE}/marker-before.kind";
+  else echo "ERROR: Could not back up invitation activation (HTTP ${status})." >&2; return 1; fi
+}
+restore_marker(){
+  [[ -s "${STATE}/marker-before.kind" ]] || return 1
+  if [[ "$(cat "${STATE}/marker-before.kind")" == absent ]]; then
+    local status
+    status="$(curl --silent --show-error -o /dev/null -w '%{http_code}' -X DELETE -H "Authorization: Bearer $(token)" -H "${HDR_PROJECT}" "${MARKER_API}")" || return 1
+    [[ "${status}" == 200 || "${status}" == 204 || "${status}" == 404 ]]
+  else
+    jq '{fields:.fields}' "${STATE}/marker-before.json" > "${STATE}/marker-restore.json" || return 1
+    send PATCH "${MARKER_API}" "${STATE}/marker-restore.json" >/dev/null
+  fi
+}
+check_indexes(){
+  curl --fail --silent --show-error "${RAW}/${COMMIT}/build/query-indexes.json" -o "${STATE}/query-indexes.json" || return 1
+  local count=0 parent
+  while IFS= read -r probe; do
+    parent="$(jq -r .parent <<<"${probe}")"
+    jq '{structuredQuery:.structuredQuery}' <<<"${probe}" > "${STATE}/query.json"
+    # Strip results immediately: only Google's error or PASS is retained.
+    if ! send POST "https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents${parent:+/${parent}}:runQuery" "${STATE}/query.json" | jq -e 'if type == "array" then all(.[]; has("error")|not) else has("error")|not end' >/dev/null; then
+      echo "ERROR: Index probe failed for $(jq -r .collectionId <<<"${probe}"). No invitation rules were activated." >&2; return 1
+    fi
+    count=$((count+1))
+  done < <(jq -c '.queries[]' "${STATE}/query-indexes.json")
+  [[ "${count}" -eq 17 ]] || { echo "ERROR: Unexpected query inventory." >&2; return 1; }
+  echo "OK: all ${count} application query probes succeeded against LIVE Firestore."
+}
+
+# The live rules equal this file? (no exit on failure)
+live_is(){
+  local current
+  current="$(release_ruleset 2>/dev/null)" || return 1
+  get "${RULES_API}/${current}" 2>/dev/null | jq -er '.source.files[]|select(.name=="firestore.rules")|.content' > "${STATE}/rules-live-now.txt" 2>/dev/null || return 1
+  same_rules "$1" "${STATE}/rules-live-now.txt"
+}
+# The earlier rules back (tried 3 times) and a plain message. Always ends the script.
+recover(){
+  local what="$1" tries=0 back=no
+  echo
+  echo "Something failed during ${what}. Putting the earlier rules back automatically ..."
+  while (( tries < 3 )); do
+    tries=$((tries + 1))
+    if live_is "${STATE}/rules-before.txt"; then back=yes; break; fi
+    publish_file "${STATE}/rules-before.txt" || true
+    sleep 3
+  done
+  if [[ "${back}" == yes ]]; then
+    if ! restore_marker; then echo "WARNING: marker restore failed. Run bash iv0.txt rollback."; exit 1; fi
+    echo "DONE: the earlier rules and invitation activation are restored."
+    echo "Send a screenshot to Codex. When it is fixed, bash iv0.txt can simply be run again."
+  else
+    echo "WARNING: the earlier rules could not be confirmed. Run:  bash iv0.txt rollback  and send a screenshot to Codex."
+  fi
+  exit 1
+}
+
+mkdir -p "${STATE}"
+curl --fail --silent --show-error "${RAW}/${COMMIT}/firestore.rules" -o "${STATE}/rules-new.txt" || die "Cannot read the new rules from GitHub. Nothing changed."
+grep -Fq "function joinedWithToken" "${STATE}/rules-new.txt" || die "The downloaded rules are not the ones with one-time invitations. Nothing changed."
+
+if [[ "${MODE}" == apply ]]; then
+  if live_is "${STATE}/rules-new.txt" && marker_is_new; then
+    echo "OK: the rules with the one-time invitations are already live. Nothing else to do."; exit 0
+  fi
+  # 1. The published rules must be exactly the ones dl9.txt published.
+  save_rules "$(release_ruleset)" "${STATE}/rules-before.txt"
+  curl --fail --silent --show-error "${RAW}/${LIVE_COMMIT}/firestore.rules" -o "${STATE}/rules-expected.txt" || die "Cannot read the current rules from GitHub. Nothing changed."
+  same_rules "${STATE}/rules-before.txt" "${STATE}/rules-expected.txt" || die "The published rules are not the ones dl9.txt published. Nothing changed. Send a screenshot to Codex."
+  save_marker || die "Invitation activation could not be backed up. Nothing changed."
+  check_indexes || die "A live query failed. Nothing changed."
+  echo "OK: the published rules and invitation activation are saved for rollback."
+  echo
+  echo "The change: each invitation gets its own one-use secret. Resend replaces"
+  echo "the old link. Deleting an account cannot reactivate a used invitation."
+  echo "Old named/admin links retire. Existing members keep their access."
+  echo
+  read -r -p "Type yes to publish: " ANSWER
+  [[ "${ANSWER}" == "yes" ]] || die "Stopped. Nothing was changed."
+  # 2. Publish.
+  publish_file "${STATE}/rules-new.txt" || recover "publishing the rules"
+  sleep 3
+  # 3. Check (twice, as Google can take a moment).
+  live_is "${STATE}/rules-new.txt" || { sleep 10; live_is "${STATE}/rules-new.txt"; } || recover "checking the published rules"
+  printf '%s\n' '{"fields":{"version":{"integerValue":"2"}}}' > "${STATE}/marker-new.json"
+  send PATCH "${MARKER_API}" "${STATE}/marker-new.json" >/dev/null || recover "activating one-time invitations"
+  marker_is_new || recover "verifying invitation activation"
+  echo "OK: the tested rules and one-time invitations are active."
+  echo
+  echo "DONE. One-time invitations are live. Tell Codex."
+elif [[ "${MODE}" == verify ]]; then
+  live_is "${STATE}/rules-new.txt" || die "The published rules are not the ones with one-time invitations."
+  marker_is_new || die "One-time invitations are not activated."
+  check_indexes || die "A live query probe failed."
+  echo "OK: rules, invitation activation and all query indexes verified."
+elif [[ "${MODE}" == rollback ]]; then
+  [[ -s "${STATE}/rules-before.txt" ]] || die "No saved rules to go back to."
+  publish_file "${STATE}/rules-before.txt" || die "The earlier rules could not be published. Send a screenshot to Codex."
+  sleep 3
+  live_is "${STATE}/rules-before.txt" || { sleep 10; live_is "${STATE}/rules-before.txt"; } || die "Rollback of the rules did not take. Send a screenshot to Codex."
+  restore_marker || die "Rules restored, but invitation marker restore failed."
+  echo "OK: the earlier rules and activation marker are restored. Tell Codex."
+else
+  die "Unknown mode ${MODE}. Use: bash iv0.txt   or   bash iv0.txt verify   or   bash iv0.txt rollback"
+fi
+

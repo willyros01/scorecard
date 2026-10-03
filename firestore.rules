@@ -1,6 +1,6 @@
 rules_version = '2';
 
-/* LAST CHANGED FOR VERSION 2.0, PHASE D + GO-LIVE FIXES (Oct 1), PLUS PRIVATE GROUP REQUESTS (beta.3), PLUS COCKPIT AND AUTO APPLICATIONS (beta.4), PLUS THE DELETION LOCK (beta.9)
+/* LAST CHANGED FOR VERSION 2.0, PHASE D + GO-LIVE FIXES (Oct 1), PLUS PRIVATE GROUP REQUESTS (beta.3), PLUS COCKPIT AND AUTO APPLICATIONS (beta.4), PLUS THE DELETION LOCK (beta.9), PLUS ONE-TIME INVITATIONS (beta.10)
  *
  * beta.9 (Oct 2, approved by Willy): an account that has asked to be deleted
  * (accountDeletions/{uid} exists) is LOCKED. It is no longer a member of any
@@ -363,12 +363,16 @@ service cloud.firestore {
         && t.state == 'pending'
         && get(/databases/$(database)/documents/associations/$(a)/invitationSlots/$(t.slot)).data.token == token;
     }
+    function openTokenMember(a, m) {
+      let t = get(tokenPath(a, m.get('invitationToken', ''))).data;
+      return t.state == 'used' && t.role == 'member' && t.golferId == null;
+    }
     function manualGolferClaim(golferId) {
       let a = request.resource.data.get('claimedIn', '');
       let m = get(inviteMemberPath(a)).data;
       return a != publicId() && m.role == 'member'
-        && m.get('invitationToken', '') == ''
-        && m.joinCode == association(a).joinCode
+        && ((m.get('invitationToken', '') == '' && m.joinCode == association(a).joinCode)
+          || (m.get('golferId', null) == null && openTokenMember(a, m)))
         && exists(/databases/$(database)/documents/associations/$(a)/roster/$(golferId))
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['linkedUid','claimedIn']);
     }
@@ -527,9 +531,8 @@ service cloud.firestore {
         allow list: if isAdmin(assocId);
         allow create: if isAdmin(assocId) && assocId != publicId()
           && token.matches('^[a-f0-9]{64}$')
-          && request.resource.data.keys().hasOnly(['slot','golferId','role','name','handicapIndex','groupName','state','sentBy','sentAt'])
+          && request.resource.data.keys().hasOnly(['slot','golferId','role','name','handicapIndex','groupName','state','sentAt'])
           && request.resource.data.state == 'pending'
-          && request.resource.data.sentBy == request.auth.uid
           && request.resource.data.sentAt == request.time
           && request.resource.data.role in ['member','admin']
           && (request.resource.data.role == 'member' || isOwner(assocId))
