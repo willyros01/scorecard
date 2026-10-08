@@ -314,6 +314,38 @@ const sortedCourses = () => {
     .sort(byName);
 };
 
+/* Oct 8 (Willy): every course list opens with this account's favourites,
+   then the courses played most, then all courses A to Z. The favourites are
+   kept on the account, so they are the same in the iPhone app and on the
+   website. "Played most" counts the rounds this account can see here (an
+   admin's group, a member's own). The chosen course is selected once only. */
+function courseOptions(selectedId) {
+  const list = sortedCourses();
+  const favs = db.favouriteCourses();
+  const fav = list.filter((c) => favs.includes(c.id));
+  const counts = {};
+  for (const r of rounds || []) if (r && r.courseId) counts[r.courseId] = (counts[r.courseId] || 0) + 1;
+  const most = list.filter((c) => !favs.includes(c.id) && counts[c.id])
+    .sort((a, b) => counts[b.id] - counts[a.id] || byName(a, b)).slice(0, 3);
+  let chosen = false;
+  const opt = (c) => {
+    const on = !chosen && c.id === selectedId;
+    if (on) chosen = true;
+    return `<option value="${c.id}" ${on ? "selected" : ""}>${esc(c.name)}</option>`;
+  };
+  if (!fav.length && !most.length) return list.map(opt).join("");
+  return (fav.length ? `<optgroup label="\u2605 My favourites">${fav.map(opt).join("")}</optgroup>` : "")
+    + (most.length ? `<optgroup label="Played most">${most.map(opt).join("")}</optgroup>` : "")
+    + `<optgroup label="All courses">${list.map(opt).join("")}</optgroup>`;
+}
+
+/* The star under a chosen course: add it to, or take it off, my favourites. */
+function favouriteToggle(course) {
+  if (!course) return "";
+  const on = db.isFavouriteCourse(course.id);
+  return `<div class="inline-actions"><button class="btn ghost compact" data-act="fav-course" data-id="${esc(course.id)}">${on ? "\u2605 In my favourites \u2014 tap to remove" : "\u2606 Add to my favourites"}</button></div>`;
+}
+
 /* The Courses screen itself, which CAN show the hidden ones on request. */
 const allCoursesForList = () => [...courses].sort(byName);
 /* The people on this group's roster, resolved from the global golfer list. */
@@ -1473,8 +1505,9 @@ function enterInSteps({ course, tee, golfer, ags, diff, ch, ready2, pickableGame
         <p class="step-ask">Where did they play?</p>
         <select class="field big" name="courseId">
           <option value="">Choose the course…</option>
-          ${sortedCourses().map((c) => `<option value="${c.id}" ${c.id === form.courseId ? "selected" : ""}>${esc(c.name)}</option>`).join("")}
+          ${courseOptions(form.courseId)}
         </select>
+        ${favouriteToggle(course)}
         ${course ? `<p class="step-ask" style="margin-top:1.2rem">From which tees?</p>
           <div class="tee-grid">
             ${course.tees.map((t) => `<button class="tee-choice ${t.id === form.teeId ? "picked" : ""}" data-tee="${t.id}">
@@ -1644,8 +1677,9 @@ function screenEnter() {
     <div>
       <div class="eyebrow">Course</div>
       <select class="field" name="courseId"><option value="">Select…</option>
-        ${sortedCourses().map((c) => `<option value="${c.id}" ${c.id === form.courseId ? "selected" : ""}>${esc(c.name)}</option>`).join("")}
+        ${courseOptions(form.courseId)}
       </select>
+      ${favouriteToggle(course)}
     </div>
 
     ${course ? `<div>
@@ -1880,7 +1914,7 @@ function screenHistory() {
     <select class="field" name="f-year"><option value="">All years</option>
       ${years.map((y) => `<option ${y === filter.year ? "selected" : ""}>${y}</option>`).join("")}</select>
     <select class="field" name="f-course"><option value="">All courses</option>
-      ${sortedCourses().map((c) => `<option value="${c.id}" ${c.id === filter.courseId ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select>
+      ${courseOptions(filter.courseId)}</select>
   </div>
   ${chips ? `<div class="pills">${chips}<button class="linkbtn" data-act="clear-filters">Clear</button></div>` : ""}
   ${filter.golferId ? trendChart(rounds.filter((r) => r.golferId === filter.golferId)) : ""}
@@ -2119,7 +2153,7 @@ function gameEditor() {
     ` : `<button class="linkbtn" data-act="make-multiday" style="margin-top:0.4rem">Runs over more than one day</button>`}
     <label class="lbl">Course</label>
     <select class="field" name="g-course"><option value="">Select…</option>
-      ${sortedCourses().map((c) => `<option value="${c.id}" ${c.id === d.courseId ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select>
+      ${courseOptions(d.courseId)}</select>
     <label class="lbl">Name (optional)</label>
     <input class="field" name="g-name" value="${esc(d.name)}" placeholder="Saturday medal">
     <p class="hint" id="game-hint">${d.courseId ? "" : "Pick the course to enable Save."}</p>
@@ -2283,7 +2317,7 @@ function gameDetail(gameId) {
       <p class="hint">Leave the last day empty for a one-day game. Widening the range lets more rounds be added; it never removes any already in the game.</p>
       <label class="lbl">Course</label>
       <select class="field" name="edit-game-course">
-        ${sortedCourses().map((c) => `<option value="${c.id}" ${c.id === game.courseId ? "selected" : ""}>${esc(c.name)}</option>`).join("")}
+        ${courseOptions(game.courseId)}
       </select>
       <div class="inline-actions stacked">
         <button class="btn" data-act="save-game-edit">Save the changes</button>
@@ -4911,6 +4945,12 @@ view.addEventListener("click", async (e) => {
       return render();
     }
     case "accept-invite": return acceptInvite();
+    case "fav-course": {
+      const course = courses.find((c) => c.id === d.id);
+      const on = db.toggleFavouriteCourse(d.id);
+      flashMsg(on ? `${(course && course.name) || "That course"} is in your favourites, on every device.` : `${(course && course.name) || "That course"} is no longer a favourite.`);
+      return render();
+    }
     case "not-me": {
       if ((db.readJoinLink() || {}).token) {
         db.clearJoinLink(); invitedGolfer = null;
@@ -6543,6 +6583,8 @@ function scheduleDirectoryRefresh() {
 
 async function start(assocId) {
   db.setAssociation(assocId);
+  /* Oct 8: this account's favourite courses (the same on every device). */
+  db.loadFavouriteCourses().then(() => render()).catch(() => {});
   const member = await db.loadMembership(assocId);
   if (!member) return;
   association = await db.loadAssociation(assocId);

@@ -36,6 +36,7 @@ async function check(id, what, fn) {
 /* ---- the emulators, directly ---- */
 const value = (v) => v === null ? { nullValue: null }
   : Array.isArray(v) ? { arrayValue: { values: v.map(value) } }
+  : typeof v === "object" ? { mapValue: { fields: Object.fromEntries(Object.entries(v).map(([k, x]) => [k, value(x)])) } }
   : typeof v === "number" ? { doubleValue: v }
   : typeof v === "boolean" ? { booleanValue: v }
   : { stringValue: String(v) };
@@ -1314,6 +1315,52 @@ await check("ERR2", "the real deletion screen offers a report containing the err
   if (!report.includes('failed-precondition') || !report.includes('Checking your groups') || report.includes(a.password)) throw new Error("report missing real error or includes password");
   if (await getDoc(`accountDeletions/${a.uid}`)) throw new Error("precheck wrote deletion request");
   await a.page.close();
+});
+
+/* E33 (Willy, Oct 8): favourite courses. Starred on the website, they head
+   the course list in the iPhone app for the same account (and the reverse),
+   because they are kept on the account. */
+await check("E33", "favourite courses: starred on the web, first in the app's course list for the same account, and removed again", async () => {
+  const LOU = { email: "lou@example.com", password: "lou-pass-1" };   // in G1 since E32
+  LOU.uid = (await accountByEmail(LOU.email)).localId;
+  const tee = { id: "t1", name: "White", rating: 70.1, slope: 125, par: 72 };
+  await put("courses/cA", { id: "cA", name: "Alder Creek", tees: [tee], createdBy: W.uid });
+  await put("courses/cZ", { id: "cZ", name: "Zephyr Links", tees: [tee], createdBy: W.uid });
+  const web = await newPage();
+  await web.goto(APP, { waitUntil: "load" });
+  await waitForText(web, /Sign in/);
+  await signIn(web, LOU.email, LOU.password);
+  await web.waitForSelector('select[name="courseId"] option[value="cZ"]', { state: "attached", timeout: 30000 });
+  await web.selectOption('select[name="courseId"]', "cZ");
+  await web.locator('[data-act="fav-course"]').first().click();
+  const end = Date.now() + 20000;
+  let pref = null;
+  while (Date.now() < end && !((pref = await getDocQuick(`users/${LOU.uid}/prefs/courses`)) && JSON.stringify(pref).includes("cZ"))) await web.waitForTimeout(400);
+  if (!pref || !JSON.stringify(pref).includes("cZ")) throw new Error(`not saved on the account: ${JSON.stringify(pref)}`);
+  /* The same account in the iPhone app (another device). */
+  const ctx = await browser.newContext();
+  await ctx.addInitScript(() => { window.Capacitor = { isNativePlatform: () => true, Plugins: {} }; });
+  const app = await ctx.newPage();
+  await app.goto(APP, { waitUntil: "load" });
+  await waitForText(app, /Sign in/);
+  await signIn(app, LOU.email, LOU.password);
+  await app.waitForSelector('select[name="courseId"] option[value="cZ"]', { state: "attached", timeout: 30000 });
+  const end2 = Date.now() + 15000;
+  let first = "";
+  while (Date.now() < end2) {
+    first = await app.evaluate(() => { const g = document.querySelector('select[name="courseId"] optgroup'); return g ? `${g.label}|${[...g.querySelectorAll("option")].map((o) => o.value).join(",")}` : ""; });
+    if (/favourites\|cZ/.test(first)) break;
+    await app.waitForTimeout(400);
+  }
+  if (!/favourites\|cZ/.test(first)) throw new Error(`the app's course list does not start with the favourite: "${first}"`);
+  /* Taken off in the app: gone from the account. */
+  await app.selectOption('select[name="courseId"]', "cZ");
+  await app.locator('[data-act="fav-course"]').first().click();
+  const end3 = Date.now() + 20000;
+  while (Date.now() < end3 && JSON.stringify(await getDocQuick(`users/${LOU.uid}/prefs/courses`) || {}).includes("cZ")) await app.waitForTimeout(400);
+  if (JSON.stringify(await getDocQuick(`users/${LOU.uid}/prefs/courses`) || {}).includes("cZ")) throw new Error("removing it in the app did not reach the account");
+  if (web.errors.length) throw new Error(web.errors.join(" | "));
+  await ctx.close();
 });
 
 await browser.close();

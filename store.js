@@ -1436,6 +1436,57 @@ export async function stampLastSeen() {
    lasting record (users/{uid}/terms/accepted). Written once per version, then
    it counts only once the server has confirmed the write (a batch commit
    resolves only then), and it is read back to be sure. */
+/* ---------------- favourite courses (Willy, Oct 8) ----------------
+ *
+ * Each account's own favourite courses, kept on the account itself
+ * (users/{uid}/prefs/courses), so the same list appears on every device —
+ * the iPhone app and the website alike. Saved through the outbox like every
+ * other change: it counts once it has reached the database, and a change made
+ * without a signal is sent when the signal returns. This device keeps a copy
+ * so the list shows at once, also offline. Removed with the account when it
+ * is deleted (the completion job clears users/{uid}).
+ * NOTE for any future clean-up of old version 1 data under users/{uid}:
+ * KEEP users/{uid}/prefs (and users/{uid}/terms). */
+const favKey = () => `golf:v2:favCourses:${uid}`;
+let favCourses = [];
+export const favouriteCourses = () => favCourses.slice();
+export const isFavouriteCourse = (id) => favCourses.includes(id);
+export async function loadFavouriteCourses() {
+  favCourses = [];
+  if (!fb || !uid) return favCourses;
+  try { favCourses = JSON.parse(localStorage.getItem(favKey()) || "[]").filter((x) => typeof x === "string"); } catch {}
+  try {
+    const snap = await fb.mod.store.getDoc(ref("users", uid, "prefs", "courses"));
+    /* A change still waiting in the outbox is newer than the database. */
+    const queued = (JSON.parse(localStorage.getItem("golf:v2:outbox") || "[]") || [])
+      .some((o) => o && o.path && o.path.join("/") === `users/${uid}/prefs/courses`);
+    if (snap.exists() && !queued) {
+      const list = (snap.data() || {}).favourites;
+      if (Array.isArray(list)) {
+        favCourses = list.filter((x) => typeof x === "string");
+        try { localStorage.setItem(favKey(), JSON.stringify(favCourses)); } catch {}
+      }
+    }
+  } catch { /* offline: this device's copy is shown */ }
+  emit();
+  return favCourses;
+}
+export function toggleFavouriteCourse(courseId) {
+  if (!uid || !courseId) return false;
+  const on = !favCourses.includes(courseId);
+  favCourses = on ? [...favCourses, courseId] : favCourses.filter((x) => x !== courseId);
+  try { localStorage.setItem(favKey(), JSON.stringify(favCourses)); } catch {}
+  outbox.enqueueOrMerge({
+    type: "set", path: ["users", uid, "prefs", "courses"],
+    data: { favourites: favCourses.slice(), at: Date.now() },
+  });
+  /* Each change carries the whole list; queued changes are sent in order,
+     so the last one wins. */
+  flush();
+  emit();
+  return on;
+}
+
 export async function recordTermsAcceptance({ version, appVersion, deviceAcceptedAt }) {
   if (!fb || !uid) return false;
   const { getDoc } = fb.mod.store;
