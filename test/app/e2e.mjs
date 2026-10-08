@@ -1317,10 +1317,10 @@ await check("ERR2", "the real deletion screen offers a report containing the err
   await a.page.close();
 });
 
-/* E33 (Willy, Oct 8): favourite courses. Starred on the website, they head
+/* E34 (Willy, Oct 8): favourite courses. Starred on the website, they head
    the course list in the iPhone app for the same account (and the reverse),
    because they are kept on the account. */
-await check("E33", "favourite courses: starred on the web, first in the app's course list for the same account, and removed again", async () => {
+await check("E34", "favourite courses: starred on the web, first in the app's course list for the same account, and removed again", async () => {
   const LOU = { email: "lou@example.com", password: "lou-pass-1" };   // in G1 since E32
   LOU.uid = (await accountByEmail(LOU.email)).localId;
   const tee = { id: "t1", name: "White", rating: 70.1, slope: 125, par: 72 };

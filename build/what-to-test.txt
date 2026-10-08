@@ -1,10 +1,10 @@
-The Scorecard 2.30.0-beta.13: clearer invitation wording and roster-tool cleanup.
+The Scorecard 2.30.0-beta.14: favourite courses.
 
-1. Send a golfer invitation and use Send again. Both messages must say: “This invitation link is for one-time use only. Once you join, it cannot be used again.”
-2. Send a non-playing admin invitation and approve a private-group request. Their invitation messages must show the same one-time-use notice.
-3. Accept a fresh invitation, sign out, and reopen its link. Sign out must show the ordinary Sign in screen; the accepted link must remain invalid.
-4. Admin → Settings must not show Rebuild the roster. Manage must not offer it on an empty roster. Check and tidy the data and Clean up unused groups remain available.
-5. Public-group approval retry: an interrupted approval must finish with the same golfer and create only one account. This verifies the corrected E4c database-result check.
-6. Normal regression: sign in as member, admin and owner; check permitted groups, own rounds and handicap, rankings, games, round entry, applications and approval.
+1. On Enter, choose a course, then tap "Add to my favourites" under it. The button changes to "In my favourites - tap to remove".
+2. Open the course list again: it starts with "My favourites", then "Played most" (the courses with the most rounds you can see), then "All courses" A to Z.
+3. Sign in with the same account on the website (or another device): the same favourites head the list.
+4. Remove a favourite in the app: it disappears from the website's list too.
+5. The same grouped list appears in Games (new game and edit game) and in the History filter.
+6. Without a signal, a favourite change shows at once and is saved when the signal returns.
 
-No Firebase rule, index or data change is required for beta.13. Report problems with Send a report in the app.
+No Firebase rule, index or data change is required. Report problems with Send a report in the app.

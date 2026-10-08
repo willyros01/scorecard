@@ -2,6 +2,10 @@
 
 Written so that anyone (Claude, ChatGPT or a person) can continue the work. Read it fully before changing anything.
 
+## 2.30.0-beta.14 — favourite courses (8 October 2026)
+
+Willy asked for a favourites / frequently used section in the course selection, in sync between web and iOS. Course lists start with My favourites, then Played most, then All courses; the star sits under the chosen course on Enter. Kept on the account at users/{uid}/prefs/courses through the outbox, so every device matches. **Any future version 1 clean-up under users/{uid} must keep prefs and terms.** Test E34. No Firebase change. See build/RELEASE-beta14.md.
+
 ## 2.30.0-beta.13 — invitation wording and roster-tool cleanup (3 October 2026)
 
 Willy approved this build after confirming beta.12 invitation behavior on an iPhone: a fresh link opened the invitation sign-in screen, joining worked, sign-out returned to the ordinary Sign in screen, and the consumed link was refused.
