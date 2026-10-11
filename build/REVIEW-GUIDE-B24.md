@@ -14,7 +14,7 @@
 - Open the **installed iOS Build 24** supplied for review. The invitation may contain "Step 1 — download from the App Store"; because the app is not publicly released during pre-release review, **skip the storefront download** and open the invitation's **Step 2 — join here** link instead.
 - The invitation is **one-time use**. Once accepted, always sign back in using the same review email and Scorecard password rather than reusing the link.
 - The Admin invitation is **named "Apple Tester"** and grants the **admin** role in **Apple Test Group**. You may see **"Yes, that's me — join"** when accepting it.
-- A group administrator can create an invitation for a regular golfer through **Manage → Golfers in this group → Invite**. The public group instead uses an application process; stay in Apple Test Group for invitation tests.
+- **The Apple reviewer creates their own Regular User test account(s) as part of the required test.** After joining as Admin, use **Manage → Golfers in this group → Type a name → Add golfer → Invite** for each new test golfer. The reviewer sends each one-time invitation to a different reviewer-controlled email/account. The invited user then opens the link and creates their own email/password login. **No Regular User invitations or accounts need to be prepared by the developer in advance.** The public group instead uses an application process; stay in Apple Test Group for invitation tests.
 - Maintain two independent test sign-ins (Admin and Regular User). Use separate devices if practical, or sign out and sign in with a second test email. Keep credentials securely available when switching.
 - All edits use **fictional test records only**. Avoid deleting the entire group or altering live golfer records.
 - Every numbered test has an **Expected result** and **Result: ☐ Pass ☐ Fail ☐ Not tested**. Record the actual screen, exact error and device model for any failure.
@@ -97,6 +97,8 @@
 
 ## PART B — Administrator exploration and invitation creation
 
+**REQUIRED ONBOARDING TEST: The Apple Admin reviewer must create and invite at least one Regular User, preferably two if testing membership differences.** This is part of the review, not a prerequisite requiring developer-created member accounts. First add a golfer record, then generate a one-time invitation, then complete member account creation using a separate reviewer-controlled email.
+
 ### B01. Verify Admin navigation
 **Tap:** Open **Enter**, **History**, **Summary**, **Games**, **Manage** and **Admin** in turn.  
 **Expected:** All six tabs are visible and usable with no crash.  
@@ -129,24 +131,26 @@
 **Expected:** "Invite" means not invited; "Re-send" means invited but not joined; "Joined ✓" means joined.  
 **Result:** ☐ Pass ☐ Fail ☐ Not tested
 
-### B05. Add a regular golfer record
+### B05. Admin creates regular golfer(s) for Apple testing
 **Tap:**
 1. Under the roster, find **Type a name**.
 2. Enter **Review Golfer**.
 3. Tap **Add golfer**.
 4. Locate the new row.
+5. Optionally repeat with **Review Golfer 2** to test invitations to multiple regular users; each invited user must use a separate review email/account.
 
-**Expected:** Exactly one Review Golfer appears. No sign-in has yet been created for that golfer.  
+**Expected:** Exactly one row per newly added golfer appears. **Adding a golfer record does not create their sign-in account**; each invited Regular User creates their own login when accepting their personal invitation.  
 **Result:** ☐ Pass ☐ Fail ☐ Not tested
 
-### B06. Create the Regular User invitation
+### B06. Admin generates and sends the Regular User invitation(s)
 **Tap:**
 1. On the **Review Golfer** row, tap **Invite**.
 2. Read the invitation text, including the app-download step and the personal join link.
 3. Use the Share / Copy action to send that invitation to a different reviewer-controlled email/device.
-4. Return to Manage.
+4. Repeat the invitation operation for Review Golfer 2 if the optional second member is being tested, using a **different invitation and different email/account**.
+5. Return to Manage.
 
-**Expected:** A personal **member invitation** is created for Review Golfer; the roster displays **Re-send** until the person joins. Do not post the link publicly.  
+**Expected:** The Apple Admin reviewer can generate **one personal member invitation for each test golfer**, without asking the developer to prepare member accounts. The roster displays **Re-send** until each person joins. Do not post the link publicly.  
 **Result:** ☐ Pass ☐ Fail ☐ Not tested
 
 ### B07. Re-send an outstanding invitation
@@ -275,14 +279,14 @@
 ## PART C — Regular User invitation and account
 
 ### C01. Finish Regular User invitation on a different account
-**Start:** B06 invitation was sent privately.  
+**Start:** The Apple Admin reviewer completed B05–B06 and privately sent the member invitation. **The Regular User account does not exist until the recipient completes this step.**  
 **Tap:**
-1. Open that invitation on the second test email/device.
+1. Open the member invitation **generated by the Apple Admin reviewer** on a second reviewer-controlled email/device.
 2. Use the **Step 2 join link** in Apple's installed Build 24.
 3. Tap **Create account** with a **different email/password** from the Admin.
 4. After signing in, confirm **Review Golfer** and tap **Yes, that's me — join**.
 
-**Expected:** The review golfer joins as a normal member. The named golfer's scores/history follow that golfer without creating a duplicate.  
+**Expected:** The reviewer has now created a **new Regular User test account** from the Admin-generated invitation. The review golfer joins as a normal member; the named golfer's scores/history follow the record without duplication. If a second golfer was invited, repeat C01 using a distinct account.  
 **Result:** ☐ Pass ☐ Fail ☐ Not tested
 
 ### C02. Verify Regular User tabs and permissions
