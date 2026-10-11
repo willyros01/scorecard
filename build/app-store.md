@@ -1,152 +1,166 @@
-# The Scorecard — App Store paperwork (DRAFT)
+# The Scorecard — App Store submission package
+**Release candidate:** Version **2.30.0**, **Build 24**  
+**Selected by the product owner:** 11 October 2026  
+**Branch / code SHA:** `v2` / `af33720c2820758456aa7bdf3c32a76d1333e36d`  
+**GitHub workflow:** https://github.com/willyros01/scorecard/actions/runs/38154644288 (**success**)  
+**Submission state:** PREPARATION. GitHub success is not proof of App Store Connect processing, selection, or acceptance.
 
-Draft for App Store Connect, written from the migration spec (section "App Store Connect"),
-the app's `build/ios/PrivacyInfo.xcprivacy`, and the live privacy page. Nothing here has been
-entered into App Store Connect. Items marked **CONFIRM** need your decision or a Phase 4 device
-check before submission.
+> APP REVIEW ROLES: **Administrator + Regular User ONLY.** No Owner login or Owner tasks. No one-time invitation, account password, or reviewer email belongs in this public repository. Add them privately in App Store Connect review information.
 
-## 1. App record (create first — spec: "before any build")
+## 1. Product information to enter or verify in App Store Connect
 
-| Field | Value |
+| Field | Proposed value / action |
 |---|---|
-| Platform | iOS (iPhone and iPad) |
-| Name | The Scorecard: Golf Handicaps (created Sep 29; "The Scorecard" was taken). The home-screen name stays "The Scorecard" |
+| Platform | iOS — iPhone + iPad |
+| Public name | The Scorecard: Golf Handicaps (existing app record; verify exact spelling in App Store Connect) |
+| Home-screen name | The Scorecard |
+| App Apple ID | `6817462903` — recorded in `build/RELEASE-2.30.0.md`; verify in App Store Connect |
+| Bundle | `io.github.willyros01.scorecard` |
+| Version | **2.30.0** |
+| Build for review | **24** (select this processed Apple build; do NOT select 23 or another build) |
+| SKU | `scorecard-ios` (existing draft — verify) |
 | Primary language | English (U.S.) |
-| Bundle ID | io.github.willyros01.scorecard |
-| SKU | scorecard-ios |
-| User access | Full access |
-
-If Apple says the name is taken, fallback names (all ≤ 30 characters): **The Scorecard: Golf Handicaps**, **The Scorecard – Golf Groups**.
-
-## 2. App information
-
-| Field | Value |
-|---|---|
-| Subtitle (≤ 30) | Golf handicaps for your group (29) |
-| Category | Primary: Sports. Secondary: none |
-| Content rights | Yes, the app shows third-party content: course and tee data looked up from golfcourseapi.com. Each group owner supplies their own licensed key. Question to GolfCourseAPI sent Sep 28; answer "Yes, I have the necessary rights" unless their reply says otherwise. |
-| Age rating | Answer **None / No** to every question (no violence, gambling, contests, mature themes, medical, unrestricted web access, user-generated content shown to strangers). Expected result: 4+. |
-| Price | Free (confirmed by Willy, Sep 28; to be revisited if Firestore costs start) |
-| Privacy Policy URL | https://www.cuberoot-systems.com/scorecard/privacy/ |
+| Category | Sports |
+| Price | Free — verify pricing & agreements |
+| Distribution | **Public, searchable App Store listing** — NOT unlisted |
+| Release control | Manual release after Apple approval |
+| Subtitle | Golf handicaps for your group |
+| Privacy Policy | https://www.cuberoot-systems.com/scorecard/privacy/ |
 | Support URL | https://www.cuberoot-systems.com/scorecard/support/ |
-| Marketing URL | leave empty |
-| Copyright | 2026 Wilfredo Rosales |
+| User Quick Start | https://www.cuberoot-systems.com/scorecard/quick-start/ |
+| User Guide | https://www.cuberoot-systems.com/scorecard/guide/ |
+| Code of Conduct | https://www.cuberoot-systems.com/scorecard/conduct/ |
+| Copyright | 2026 Wilfredo Rosales — verify registered legal seller name |
+| Review contact | Developer's own App Store Connect contact details (not in public GitHub) |
 
-## 3. Version 2.22.0 — store text
+**Do not submit until:** the Apple processing state of Build 24 is confirmed and Build 24 is selected on the version page; metadata and ratings are complete; Apple reviewer account access is operational; all permissions and policies match the actual app.
 
-**Promotional text** (≤ 170, can change without review):
+## 2. Copy-ready public listing text (2.30.0)
 
-> Post the scores after a round and everyone's handicap updates itself. One scorecard for your whole group, on iPhone, iPad and the web.
+### Promotional text
+Track golf scores, follow your handicap and share games with your golf group — simple, clear and ready for your next round.
 
-**Description** (≤ 4000):
+### Description
+The Scorecard helps golfers and golf groups record rounds, track handicaps and organise games — all in one easy-to-use iPhone and iPad app.
 
-> The Scorecard is a golf handicap tracker your group shares. Somebody posts the scores after a round, and everyone's handicap keeps itself up to date.
->
-> FOR YOUR GROUP
-> • One shared roster, history and set of handicaps for everyone in the group
-> • Invite people with a link — they tap it and they're in
-> • Several groups, and tournaments over more than one day
-> • Owners and admins can correct scores and manage the roster
->
-> HANDICAPS, WORKED OUT PROPERLY
-> • Handicap indexes calculated the World Handicap System way from each golfer's recent rounds
-> • Course handicaps from the course and tee you played
-> • Look up courses and tees by name
->
-> WORKS ON THE COURSE
-> • Post a round with no signal — it uploads once you're back online
-> • Your group, rounds and handicaps stay readable offline
->
-> SHARE AND KEEP
-> • Share results by WhatsApp, email, text message or copy
-> • Save a backup of your group's rounds to Files or iCloud Drive
->
-> ONE ACCOUNT EVERYWHERE
-> The app and the website at willyros01.github.io/scorecard use the same account and the same data. Sign in with your email and Scorecard password and your groups are there.
->
-> No adverts. No tracking. Delete your account at any time from the foot of any screen.
+**YOUR GOLF, CLEARLY RECORDED**
+• Record a round by choosing your course, tees and score.
+• Review your own rounds and follow how your handicap changes.
+• Browse group handicap indexes, rankings and game results.
+• Keep playing when connectivity is limited; saved changes sync when a connection returns.
 
-**Keywords** (≤ 100, comma-separated, no spaces needed):
+**BUILT FOR GROUPS**
+• Join the public golf community or accept an invitation to a private group.
+• Group administrators can maintain golfers and courses, send personal invitations and correct group scores.
+• Create single-day or multi-day golf games, with leaderboards and shared results.
+• Keep group history organised with a roster and filters.
 
-> golf,handicap,scorecard,WHS,index,group,league,society,rounds,scores,tournament,course,tee
+**HANDICAP TRACKING**
+• Handicap calculations use the World Handicap System approach.
+• Golf course rating, slope and tee selection are used in round calculations.
+• Administrators can give a golfer a starting index until enough rounds have been entered.
 
-**What's New** (first release): leave as the default for version 1, or: "The Scorecard is now an app for iPhone and iPad."
+**YOUR ACCOUNT AND PRIVACY**
+• Email-and-password sign-in.
+• No advertising or advertising tracking.
+• Delete your account in the app using the "Delete my account" link. Shared golf history is retained as explained in the privacy policy.
 
-**Screenshots** — required sizes: 6.9-inch iPhone (1320×2868) and 13-inch iPad (2064×2752). Suggested five: the group's handicap list, posting a round, History, an invitation's join screen, the offline "showing saved copy" status. Take them from the TestFlight build in Phase 4 with the demo group (no real names).
+The Scorecard is for people who enjoy golf together, from casual groups to organised outings.
 
-## 4. App privacy (the "nutrition label")
+### Keywords
+golf,handicap,scorecard,WHS,index,group,league,rounds,scores,tournament,course,tees
 
-Spec: the label is recalculated from the finished app during Phase 4 (device check **P1**, Web
-Inspector traffic survey); the label, `PrivacyInfo.xcprivacy` and the privacy page must agree.
-This draft is the current `PrivacyInfo.xcprivacy`, answer by answer. **CONFIRM after P1.**
+### What's New (first public version)
+The Scorecard arrives on iPhone and iPad: enter rounds, track handicap indexes, manage golf groups and share game results.
 
-**Do you or your third-party partners collect data from this app?** Yes.
-
-| Apple data type | Collected | Linked to the user | Used for tracking | Purpose | Where it comes from |
-|---|---|---|---|---|---|
-| Contact Info → Email Address | Yes | Yes | No | App Functionality | Email-and-password sign-in (Firebase Authentication) |
-| Contact Info → Name | Yes | Yes | No | App Functionality | Golfer name shown to the group |
-| Identifiers → User ID | Yes | Yes | No | App Functionality | Firebase account ID |
-| User Content → Other User Content | Yes | Yes | No | App Functionality | Rounds, scores, games, group membership |
-| Diagnostics → Other Diagnostic Data | Yes | No | No | App Functionality | Bug report details, only when the user sends one (Formspree) |
-
-Not collected (answer No): Health & Fitness, Financial Info, Location, Sensitive Info, Contacts,
-Browsing History, Search History (course-search text goes to golfcourseapi.com only to answer that
-search, in real time), Purchases, Usage Data, Crash Data, Performance Data, Photos or Videos,
-Audio, Gameplay Content, Customer Support, Device ID, Advertising Data.
-
-**Tracking:** No. The app does not track users (`NSPrivacyTracking` false, no tracking domains).
-
-## 5. App Review information
+## 3. Apple App Review information (paste only after credentials are ready)
 
 **Sign-in required:** Yes.
 
-**Demo account** (spec: an admin, not the owner, in a demo group whose owner is a separate test
-account, so the reviewer can try Delete my account without meeting the owner refusal):
+**Private review setup:** The reviewer receives a one-time **Admin invitation** to an active *private* demonstration group maintained by a different group account. The reviewer can create **Regular User** invitations from Manage → Golfers in this group after adding a demonstration golfer. The reviewer is **not** an Owner and should not be asked to test Owner controls. A separate regular-user login is recommended to ensure that both roles remain accessible throughout review.
 
-| | |
-|---|---|
-| User name | *reviewer email — created in Phase 4* |
-| Password | *created in Phase 4* |
+**Apple review attachment:** `build/REVIEW-GUIDE-B24.md` (no secrets). May be provided as a PDF attachment or private URL when the actual reviewer access is arranged. The complete account credentials or one-time invitation must be entered only into App Store Connect, **never in GitHub or public Cuberoot pages**.
 
-Before each submission: re-create the reviewer account if a reviewer deleted it, and re-invite it
-to the demo group as admin.
+**Reviewer notes template:**
 
-**Notes for the reviewer** (≤ 4000):
-
-> The Scorecard keeps golf scores and handicaps for a private group of golfers. There is no public content and no purchases.
+> The Scorecard version 2.30.0, build 24, is a golf score and handicap app. The review is for Administrator and Regular User roles only. This review uses a private demo group with fictional golfers, courses and rounds.
 >
-> To review:
-> 1. Open the app and tap Sign in. Use the demo account above. You are an admin of the group "Demo Golf Society", which already has golfers, courses and rounds.
-> 2. Post a round: tap Enter, choose a golfer, the course and tee, type a score, and tap Post round. The round appears in History.
-> 3. See the handicap: the golfer's handicap index updates to include the new round.
-> 4. Delete the account: at the foot of any screen tap "Delete my account", read what remains, and confirm with the demo password. The app shows "Your account has been deleted" and the account no longer exists. The golfer's name and rounds stay with the group so the other golfers' shared history stays correct; this is stated in the privacy policy.
+> FIRST: Open the Admin invitation included in the confidential review information. It is one-time use. Create a Scorecard account with a valid email address and a new Scorecard password, or use the separate Admin test credentials provided. Confirm the invitation to join as an administrator. A public release does not require an Owner login.
 >
-> Sign-in is an email and a password for this app only. There is no third-party or social sign-in, so Sign in with Apple is not required (Guideline 4.8).
+> ADMIN: Tap Manage → Golfers in this group. Add a demonstration golfer and tap Invite beside that golfer; send the invitation to a different review email/account. Tap Enter to post a round; verify in History and Summary. Use Games to create a sample game and review its leaderboard. Open Admin → Cockpit and Members to inspect the group's status and member list. Settings is intentionally unavailable to this Admin role.
 >
-> The app works offline: rounds posted without a signal upload once the device is back online.
+> REGULAR USER: Sign out of the Admin account, open the member invitation on a separate test account, finish joining, and verify Enter, My rounds, Summary and Games. Manage and Admin are intentionally hidden for regular members. If switching between accounts on one device, save the Admin sign-in details before signing out.
 >
-> Contact: Wilfredo Rosales, willyros01@gmail.com
+> END: A reviewer may delete the regular user's account and then finally the Admin account using the Delete my account link located at the foot of any signed-in screen above the bottom tab bar. Enter the correct Scorecard password and confirm. Shared golfer names, scores and handicap history remain; the personal account and memberships are removed. The demo group must not be owned by either reviewer account.
+>
+> For comprehensive steps, see the provided Reviewer Test Guide. No purchases or subscriptions are required. Support: https://www.cuberoot-systems.com/scorecard/support/
 
-**Contact information:** Wilfredo Rosales · willyros01@gmail.com · phone: given by Willy on Sep 28 — typed only into App Store Connect, never stored in this public repo.
+**NOT YET FILLED:** admin invitation, admin test email/password, regular-user test email/password, demo group identifier, reviewer contact phone. Do not replace these placeholders in a publicly readable GitHub file.
 
-## 5a. Unlisted distribution (decided by Willy, Sep 28)
+## 4. Apple review access checklist
 
-Version 1 is released **unlisted**: on the App Store, reachable only by direct link. Add this line at the top of the reviewer notes, then, after submitting for review, send Apple's unlisted-app request form (https://developer.apple.com/contact/request/unlisted-app/):
+- [ ] Build 24 appears processed in App Store Connect as version 2.30.0.
+- [ ] Active **private** demo group with existing fictional golfer(s), course(s), tee(s), round(s), and game(s).
+- [ ] Demo group remains available after both review accounts are deleted.
+- [ ] One-time Admin invitation is valid and unused when submitted.
+- [ ] Admin account can be created and can join without Owner rights.
+- [ ] A second reviewer-controlled email can receive a regular user's invitation. Ideally prepare both durable login credentials privately in advance; Apple prefers working test credentials for each role.
+- [ ] Email/password setup and sign-in tested on Build 24 on real iPhone and iPad.
+- [ ] Sign-out and sign-in again after invitation consumed works; a consumed invitation must not be needed again.
+- [ ] Final **Delete my account** scenario succeeds for a non-Owner account.
+- [ ] Prepared test data excludes real personal information.
 
-> This app is for invited members of private golf groups and is requested for unlisted distribution. Nobody can use a group without an invitation from its owner.
+## 5. App Privacy — draft pending final verification
 
-The app is listed publicly only after Version 2.0 (see the migration spec).
+The current source manifest `build/ios/PrivacyInfo.xcprivacy` declares no tracking; it describes Email Address, Name, User ID, Other User Content and Other Diagnostic Data as collected to provide app functionality. Diagnostics may be submitted voluntarily via bug reporting. Treat this as a *draft disclosure*, not independently verified network behavior.
 
-## 6. Export compliance
+- [ ] Verify the actual network/service inventory for Build 24, including Firebase Auth/Firestore, bug reports (Formspree) and golfcourseapi.com.
+- [ ] Verify each required Apple data type, purpose and user linkage; check whether diagnostic/support data disclosures need adjustment.
+- [ ] Reconcile App Store privacy answers, actual manifest, and https://www.cuberoot-systems.com/scorecard/privacy/.
+- [ ] Confirm whether any analytics or additional SDK collects data before answering 'No tracking'.
 
-Set in the build: `ITSAppUsesNonExemptEncryption` = NO (audit check A7). App Store Connect does not
-ask the encryption questions for these builds.
+## 6. Other compliance / metadata gates
 
-## 7. Still needed before submission
+- [ ] Complete the **current** Apple age rating questionnaire accurately. Do not blindly select "No" for all categories; Scorecard includes user-entered names and group data and reporting/moderation.
+- [ ] Confirm golfcourseapi.com data use, commercial/content rights and required attributions with the provider; don't claim licensed content rights solely on speculation.
+- [ ] Confirm app encryption/export compliance from the final Build 24 bundle; `ITSAppUsesNonExemptEncryption = NO` in a prior spec is not sufficient without package inspection.
+- [ ] Verify final app icon, app name, legal agreement, seller name, contact, pricing/availability, tax/banking and territories.
+- [ ] Verify DSA trader status and required contact information if applicable to planned regions.
+- [ ] Confirm no undisclosed purchases/subscriptions, social sign-in or advertising.
+- [ ] Validate public Privacy, Support, Quick Start and User Guide pages on iPhone/iPad.
 
-1. The App Store Connect app record (section 1) — also unblocks the first TestFlight build.
-2. Demo group "Demo Golf Society" with a separate owner test account and the reviewer admin account (Phase 4).
-3. P1 traffic survey, then final privacy answers (section 4).
-4. Screenshots from the TestFlight build.
-5. GolfCourseAPI's reply to the Sep 28 question (content rights).
+## 7. Required screenshot plan
+
+**Use genuine in-app captures from Build 24**, with fictional data, and no personal credentials or account tokens. Do not substitute diagrams from the public guides for App Store screenshots.
+
+iPhone (current Apple requirement: Dynamic Island medium or higher as accepted in Connect), and **iPad 13-inch** where supported. At least one image per required size; up to ten per size. Use current specifications in App Store Connect.
+
+1. Summary / own handicap index and seasonal results.
+2. Enter / select course and tee with large controls.
+3. My rounds / filterable history.
+4. Games / event result or leaderboard.
+5. Admin → Manage / golfer roster and invitation controls.
+
+No screenshot should expose a real person, group, account email, or invitation link.
+
+## 8. Submission order — prevent wrong-build mistakes
+
+1. Open the existing App Store Connect record for Apple ID `6817462903`.
+2. Select version **2.30.0** and attach **Build 24** (check number again before submission).
+3. Enter listing text, category, age rating, content rights, privacy responses, regional availability, support/privacy links, review contact.
+4. Upload iPhone and iPad screenshots (true Build 24 captures).
+5. Privately provide the Admin invitation and durable reviewer account credentials in App Review Information. Never put live credentials in repository files.
+6. Attach or link the role-based reviewer test guide.
+7. Confirm manual release / publicly searchable distribution.
+8. **Only then** submit for Apple review. A successful upload to TestFlight is *not* submission to App Review.
+9. Respond to Apple review questions, retain Build 24 as candidate; any subsequent build requires a new explicit selection.
+
+## 9. Source / maintenance
+
+GitHub checks for Build 24 succeeded on 2026-10-11; this is not a guarantee that all on-device scenarios pass. This file supersedes the older 2.22.0/unlisted draft. Owner-only instructions are excluded from Apple review. Owner guide material belongs only in the passphrase-protected Cuberoot documentation library.
+
+Apple references:
+- https://developer.apple.com/help/app-review/before-submitting-for-review/complete-review
+- https://developer.apple.com/help/app-store-connect/manage-submissions-to-app-review/submit-an-app
+- https://developer.apple.com/help/app-store-connect/reference/app-information/screenshot-specifications
+- https://developer.apple.com/help/app-store-connect/manage-app-information/manage-app-privacy
