@@ -77,7 +77,7 @@ The Scorecard arrives on iPhone and iPad: enter rounds, track handicap indexes, 
 
 **Sign-in required:** Yes.
 
-**Private review setup:** The reviewer receives a one-time **Admin invitation** to an active *private* demonstration group maintained by a different group account. The reviewer can create **Regular User** invitations from Manage → Golfers in this group after adding a demonstration golfer. The reviewer is **not** an Owner and should not be asked to test Owner controls. A separate regular-user login is recommended to ensure that both roles remain accessible throughout review.
+**Private review setup:** The one-time **Admin invitation has been received privately** on 11 October 2026 for **Apple Test Group**, named golfer **Apple Tester**, role **Admin**. The invitation has NOT been opened or used by ChatGPT. A separate account maintains the group. The reviewer can create **Regular User** invitations from Manage → Golfers in this group after adding a demonstration golfer. The reviewer is **not** an Owner and should not be asked to test Owner controls. A separate regular-user login is recommended to ensure that both roles remain accessible throughout review.
 
 **Apple review attachment:** `build/REVIEW-GUIDE-B24.md` (no secrets). May be provided as a PDF attachment or private URL when the actual reviewer access is arranged. The complete account credentials or one-time invitation must be entered only into App Store Connect, **never in GitHub or public Cuberoot pages**.
 
@@ -95,14 +95,15 @@ The Scorecard arrives on iPhone and iPad: enter rounds, track handicap indexes, 
 >
 > For comprehensive steps, see the provided Reviewer Test Guide. No purchases or subscriptions are required. Support: https://www.cuberoot-systems.com/scorecard/support/
 
-**NOT YET FILLED:** admin invitation, admin test email/password, regular-user test email/password, demo group identifier, reviewer contact phone. Do not replace these placeholders in a publicly readable GitHub file.
+**CONFIDENTIAL ACCESS STATUS:** Admin invitation received privately; demo group = Apple Test Group; named Admin = Apple Tester. Still need to verify invitation validity at review time, repeatable Admin and Regular User demo login credentials, reviewer contact, and actual App Store Connect Build 24 processing/selection. Never put the invitation or credentials in GitHub.
 
 ## 4. Apple review access checklist
 
 - [ ] Build 24 appears processed in App Store Connect as version 2.30.0.
 - [ ] Active **private** demo group with existing fictional golfer(s), course(s), tee(s), round(s), and game(s).
 - [ ] Demo group remains available after both review accounts are deleted.
-- [ ] One-time Admin invitation is valid and unused when submitted.
+- [x] One-time Admin invitation received privately for **Apple Test Group**; not opened by ChatGPT.
+- [ ] Confirm the one-time invitation remains valid and unused at Apple review time.
 - [ ] Admin account can be created and can join without Owner rights.
 - [ ] A second reviewer-controlled email can receive a regular user's invitation. Ideally prepare both durable login credentials privately in advance; Apple prefers working test credentials for each role.
 - [ ] Email/password setup and sign-in tested on Build 24 on real iPhone and iPad.
