@@ -4,7 +4,7 @@ Written so that anyone (Claude, ChatGPT or a person) can continue the work. Read
 
 ## 2.30.0 — App Store release build (11 October 2026)
 
-Same code as beta.14, version label 2.30.0 with no beta. Built for App Store review (TestFlight build starts by itself from the v2 push). User guides and App Store Connect setup: ChatGPT. Web (main) stays on beta.14 until Willy decides. Invitation App Store link waits for the app's Apple ID. See build/RELEASE-2.30.0.md.
+Same code as beta.14, version label 2.30.0 with no beta. Built for App Store review (TestFlight build starts by itself from the v2 push). User guides and App Store Connect setup: ChatGPT. Web (main) stays on beta.14 until Willy decides. Second build the same day adds the App Store step (Apple ID 6817462903) to every invitation; keep the web off this version until Apple releases the app. See build/RELEASE-2.30.0.md.
 
 ## 2.30.0-beta.14 — favourite courses (8 October 2026)
 

@@ -6,11 +6,11 @@ Asked for by Willy on 11 October 2026: a build for App Store review without the 
 
 - version.js: 2.30.0 (was 2.30.0-beta.14). The app code is otherwise identical to beta.14.
 - build/what-to-test.txt: notes for this build.
+- Build 2 (same day, Apple ID 6817462903 from Willy): every invitation (member, named, admin, approved private group) starts with Step 1 — download from the App Store, https://apps.apple.com/app/id6817462903 — then Step 2, the join link. The link works only once Apple releases the app, so the web must not get this version before then.
 
 ## Not in this build (Willy, 11 October)
 
 - User guides and the App Store Connect setup are handled by ChatGPT.
-- The App Store link in invitation messages waits for the app's Apple ID.
 - The web (main) stays on beta.14 until Willy says otherwise.
 
 ## Deployment

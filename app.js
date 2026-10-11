@@ -5,6 +5,9 @@ import * as platform from "./platform.js";
 
 const VERSION = (typeof self !== "undefined" && self.APP_VERSION) || "dev";
 const ONE_TIME_INVITATION_NOTICE = "This invitation link is for one-time use only. Once you join, it cannot be used again.";
+/* 2.30.0 (Willy, Oct 1 and 11): every invitation starts by sending iPhone and iPad users to the App Store. */
+const APP_STORE_URL = "https://apps.apple.com/app/id6817462903";
+const APP_STORE_STEP = `Step 1 — on an iPhone or iPad, download The Scorecard from the App Store first: ${APP_STORE_URL}`;
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -1066,7 +1069,9 @@ async function approveRequestHere(key) {
       "",
       `Your request for a private group on The Scorecard is approved. Your group "${req.groupName}" is ready, and you are invited to run it as its admin.`,
       "",
-      `Join here: ${link}`,
+      APP_STORE_STEP,
+      "",
+      `Step 2 — join here: ${link}`,
       "",
       "Tap the link, create your account (your email and a password), and you join your group as its admin. From the Admin area you then send invitation links to your golfers.",
       "",
@@ -5436,7 +5441,7 @@ view.addEventListener("click", async (e) => {
 
     case "share-invite": {
       busy("Preparing the invitation");
-      try { return openShare(`Join our golf scorecard:\n${await db.inviteLink("member")}\n\nCreate an account or sign in.\n\n${ONE_TIME_INVITATION_NOTICE}`, "Invitation"); }
+      try { return openShare(`Join our golf scorecard.\n\n${APP_STORE_STEP}\n\nStep 2 — join here: ${await db.inviteLink("member")}\n\nCreate an account or sign in.\n\n${ONE_TIME_INVITATION_NOTICE}`, "Invitation"); }
       catch (err) { openProblem({ title: "Could not prepare the invitation", detail: String(err.message || err), advice: "Try again when connected." }); }
       finally { idleAll(); }
       return;
@@ -5491,7 +5496,7 @@ view.addEventListener("click", async (e) => {
         const guide = platform.guideUrl();
         openShare([
           `${association ? association.name : "Our golf group"} — you are invited to help run the group.`,
-          "", `Join here: ${link}`, "", `How it works, in one page: ${guide}`, "",
+          "", APP_STORE_STEP, "", `Step 2 — join here: ${link}`, "", `How it works, in one page: ${guide}`, "",
           "This makes you an admin: you can add courses, manage the roster and post rounds for anybody. You are not added as a player, so no handicap is kept for you.",
           "You will be asked to set a password as you join.",
           ONE_TIME_INVITATION_NOTICE,
@@ -5741,7 +5746,9 @@ sheetEl.addEventListener("click", async (e) => {
           ? `${named.name} — you are invited to keep your handicap with ${association ? association.name : "our golf group"}.`
           : `${association ? association.name : "Our golf group"} — you are invited to keep your handicap with us.`,
         "",
-        `Join here: ${link}`,
+        APP_STORE_STEP,
+        "",
+        `Step 2 — join here: ${link}`,
         "",
         `How it works, in one page: ${guide}`,
         "",

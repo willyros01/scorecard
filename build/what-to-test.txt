@@ -1,9 +1,10 @@
 The Scorecard 2.30.0: the App Store release build.
 
-This is the same app as 2.30.0-beta.14 with the beta label removed. Nothing else changed.
+This is the same app as 2.30.0-beta.14 with the beta label removed, and every invitation now starts with the App Store step.
 
 1. Open the foot of any screen: the version reads v2.30.0, with no "beta".
 2. Sign in, post a round, and check History and the handicap list as usual.
 3. Send a report: the version line reads 2.30.0.
+4. Send an invitation: it starts with Step 1, download The Scorecard from the App Store (the link opens once Apple releases the app), then Step 2, the join link.
 
 No Firebase rule, index or data change is required. Report problems with Send a report in the app.
