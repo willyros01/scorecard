@@ -2,6 +2,10 @@
 
 Written so that anyone (Claude, ChatGPT or a person) can continue the work. Read it fully before changing anything.
 
+## 2.30.0 — App Store release build (11 October 2026)
+
+Same code as beta.14, version label 2.30.0 with no beta. Built for App Store review (TestFlight build starts by itself from the v2 push). User guides and App Store Connect setup: ChatGPT. Web (main) stays on beta.14 until Willy decides. Invitation App Store link waits for the app's Apple ID. See build/RELEASE-2.30.0.md.
+
 ## 2.30.0-beta.14 — favourite courses (8 October 2026)
 
 Willy asked for a favourites / frequently used section in the course selection, in sync between web and iOS. Course lists start with My favourites, then Played most, then All courses; the star sits under the chosen course on Enter. Kept on the account at users/{uid}/prefs/courses through the outbox, so every device matches. **Any future version 1 clean-up under users/{uid} must keep prefs and terms.** Test E34. No Firebase change. See build/RELEASE-beta14.md.

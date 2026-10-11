@@ -1,10 +1,9 @@
-The Scorecard 2.30.0-beta.14: favourite courses.
+The Scorecard 2.30.0: the App Store release build.
 
-1. On Enter, choose a course, then tap "Add to my favourites" under it. The button changes to "In my favourites - tap to remove".
-2. Open the course list again: it starts with "My favourites", then "Played most" (the courses with the most rounds you can see), then "All courses" A to Z.
-3. Sign in with the same account on the website (or another device): the same favourites head the list.
-4. Remove a favourite in the app: it disappears from the website's list too.
-5. The same grouped list appears in Games (new game and edit game) and in the History filter.
-6. Without a signal, a favourite change shows at once and is saved when the signal returns.
+This is the same app as 2.30.0-beta.14 with the beta label removed. Nothing else changed.
+
+1. Open the foot of any screen: the version reads v2.30.0, with no "beta".
+2. Sign in, post a round, and check History and the handicap list as usual.
+3. Send a report: the version line reads 2.30.0.
 
 No Firebase rule, index or data change is required. Report problems with Send a report in the app.
