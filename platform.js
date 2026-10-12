@@ -8,11 +8,35 @@
  * Nothing here is ever needed by the web app to work: if Capacitor is absent,
  * isApp() is false and every branch below is the browser branch. */
 
-const Cap = (typeof window !== "undefined" && window.Capacitor) || null;
+// Read the live bridge, not a snapshot captured while app.js is importing.
+// Fire OS can expose native plugins after the first module evaluation.
+const liveCap = () => (typeof window !== "undefined" && window.Capacitor) || null;
 
-export const isApp = () => !!(Cap && typeof Cap.isNativePlatform === "function" && Cap.isNativePlatform());
-export const isAndroid = () => isApp() && typeof Cap.getPlatform === "function" && Cap.getPlatform() === "android";
-const plugin = (name) => (isApp() && Cap.Plugins && Cap.Plugins[name]) || null;
+// A native Android WebView normally serves its packaged files on localhost.
+// If the bridge is temporarily absent, FAIL CLOSED: show a native-save error
+// instead of accidentally invoking the browser/iOS Share flow.
+const androidNativeHost = () => {
+  if (typeof window === "undefined" || typeof navigator === "undefined") return false;
+  const here = window.location;
+  return !!(here && here.hostname === "localhost" &&
+    (here.protocol === "http:" || here.protocol === "https:") &&
+    /Android/i.test(navigator.userAgent || ""));
+};
+
+export const isAndroid = () => {
+  const cap = liveCap();
+  if (cap && cap.Plugins && cap.Plugins.ScorecardAndroid) return true;
+  if (cap && typeof cap.getPlatform === "function" && cap.getPlatform() === "android") return true;
+  return androidNativeHost();
+};
+export const isApp = () => {
+  const cap = liveCap();
+  return isAndroid() || !!(cap && typeof cap.isNativePlatform === "function" && cap.isNativePlatform());
+};
+const plugin = (name) => {
+  const cap = liveCap();
+  return (cap && isApp() && cap.Plugins && cap.Plugins[name]) || null;
+};
 
 /* ---------------- addresses (Change 1) ---------------- */
 
