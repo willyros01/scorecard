@@ -76,6 +76,7 @@ Date: 2026-10-12. Source version: 2.30.0. Base branch: `v2` at commit `994bd9a7c
 - **Change boundaries maintained:** Only `scorecard/android` docs/build source and `Cuberoot/main` publication files changed; Scorecard `main`, `v2`, `ios` and live Firebase remained unchanged.
 
 ## Fire HD 8 device acceptance — login and existing records
+- **PASS (user-confirmed 2026-10-12):** External links from Scorecard Android version 2.30.1 open correctly in the Fire HD 8 browser.
 - **PASS (user-confirmed 2026-10-12):** A++ large text on Fire HD 8 is readable on all tested screens, with no overlapping buttons or cut-off information.
 - **PASS (user-confirmed 2026-10-12):** The user's handicap index and group rankings display correctly on Scorecard Android Fire HD 8.
 - **PASS (user-confirmed 2026-10-12):** The Scorecard Android APK installed and opened on Fire HD 8; user reports appearance looks very good.
@@ -85,12 +86,12 @@ Date: 2026-10-12. Source version: 2.30.0. Base branch: `v2` at commit `994bd9a7c
 
 ## Fire HD 8 BACKUP failure and repair — 2026-10-12
 - **PASS (user-confirmed):** On Scorecard Android 2.30.1 on Fire HD 8, backup now works after installing the updated APK over the existing app. This closes the previously reported backup failure; the user has not separately reported whether the file was inspected in Downloads.
-- **PASS (user-confirmed):** Fire HD 8 now reports Scorecard version 2.30.1 after installing the updated Android APK over the existing installation. **Direct Downloads backup retest remains pending.**
+- **PASS (user-confirmed):** Fire HD 8 now reports Scorecard version 2.30.1 after installing the updated Android APK over the existing installation. **User later confirmed the backup works; inspecting the saved file was not separately confirmed.**
 - **BACKUP SAVE FAIL (user-confirmed):** On initial Android APK build `38316868374`, choosing **Save it somewhere** opened Android Share and did not provide a local file save option. **The previous backup test was not a PASS.**
 - Investigation of `app.js` and `platform.js`: Share can be reached if Android native detection fails. Previous adapter captured `window.Capacitor` once at module initialization and required both `isNativePlatform` and `getPlatform` to succeed before using the Android Downloads plugin.
 - **Android-only repair:** dynamically query the live Capacitor bridge; use the registered `ScorecardAndroid` plugin as definitive Android evidence; recognize packaged Android localhost WebView and fail closed if the native plugin is missing. The actual backup sheet now labels the button **Save backup to Downloads**, reports the exact saved filename, and visibly reports errors without invoking Share.
 - Add deterministic tests of real backup sheet and `saveBackup()` handlers as well as delayed bridge/missing `getPlatform`/misreported platform/no-plugin cases and untouched iOS Share behavior. See `build/RELEASE-ANDROID-2.30.1.md`.
-- **Device verification PENDING:** after the new signed APK is automatically published, install the update over the existing Fire HD 8 app (do NOT uninstall), then tap **Save backup to Downloads**. Confirm no Share chooser and a nonempty `scorecard-*.txt` in Downloads. Existing passing login/history/handicap/rankings/A++ tests should not regress.
+- **Device verification (user-confirmed PASS):** On updated Fire HD 8 version 2.30.1, the user reported backup works. An independent file existence/content check in Downloads was not separately confirmed. Previously passed login, history, handicap, rankings and A++ tests remain recorded.
 
 
 ## Fire HD 8 backup repair APK published — 2026-10-12
@@ -99,4 +100,4 @@ Date: 2026-10-12. Source version: 2.30.0. Base branch: `v2` at commit `994bd9a7c
 - **Cuberoot automatic publisher `38321106608` SUCCESS:** exact artifact downloaded, verified and published to `downloads/scorecard.apk` with identical source SHA, artifact ID, APK hash and signer SHA in `downloads/scorecard-build.json`.
 - **Cuberoot Pages build and deploy `38321200343` SUCCESS** after public guide updated to version 2.30.1-android.1 and website availability changed to Android test APK available.
 - **Replacement download:** `https://www.cuberoot-systems.com/downloads/scorecard.apk?build=38320762144`
-- **Real device backup retest PENDING:** install APK over existing Fire HD 8 Scorecard app, do not uninstall. Open Backup -> **Save backup to Downloads**; verify no Share sheet, confirmed exact filename and a non-empty saved TXT file in Fire Downloads. On failure, note exact on-screen error; do not claim backup passes until user confirms.
+- **Real-device backup retest PASS (user-confirmed):** After installing the updated Scorecard 2.30.1 APK over the existing Fire HD 8 app, the user reports the backup works. Exact file location/content inspection was not separately verified.
