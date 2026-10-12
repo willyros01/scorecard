@@ -7,7 +7,8 @@ const VERSION = (typeof self !== "undefined" && self.APP_VERSION) || "dev";
 const ONE_TIME_INVITATION_NOTICE = "This invitation link is for one-time use only. Once you join, it cannot be used again.";
 /* 2.30.0 (Willy, Oct 1 and 11): every invitation starts by sending iPhone and iPad users to the App Store. */
 const APP_STORE_URL = "https://apps.apple.com/app/id6817462903";
-const APP_STORE_STEP = `Step 1 — on an iPhone or iPad, download The Scorecard from the App Store first: ${APP_STORE_URL}`;
+const APP_STORE_STEP = `Step 1 — on an iPhone or iPad, download The Scorecard from the App Store first: ${APP_STORE_URL}` +
+  (platform.isAndroid() ? "\nAndroid or Fire tablet: install the Android test APK from https://www.cuberoot-systems.com/downloads/scorecard.apk (available after Android release)." : "");
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -3380,7 +3381,9 @@ async function saveBackup() {
     try {
       await platform.saveFile(name, text, sheetEl.dataset.title || "Scorecard backup");
       sheetEl.hidden = true;
-      flashMsg("Choose Save to Files, then pick iCloud Drive or any folder you like.");
+      flashMsg(platform.isAndroid()
+        ? "Backup saved to Downloads on this device. Keep an extra copy somewhere safe."
+        : "Choose Save to Files, then pick iCloud Drive or any folder you like.");
       render();
     } catch (e) {
       if (e && /cancel/i.test(String(e.message || e))) return;   /* they closed the share sheet */
