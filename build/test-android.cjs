@@ -23,7 +23,8 @@ function harness(os,hasNative=true,failed=false,opts={}){
   };
   const Cap={isNativePlatform:()=>os!=='web',getPlatform:()=>opts.platformReported||os,Plugins};
   if (opts.noGetPlatform) delete Cap.getPlatform;
-  const ctx={window:{Capacitor:opts.injectLater?null:(os==='web'?null:Cap),
+  const ctx={window:{__SCORECARD_NATIVE_ANDROID__:opts.nativeFlag===true,
+    Capacitor:opts.injectLater?null:(os==='web'?null:Cap),
       location:opts.androidHost?{hostname:'localhost',protocol:'http:'}:undefined},
     navigator:{userAgent:opts.androidHost?'Mozilla/5.0 (Linux; Android 11; Fire HD 8)':'Browser'},
     localStorage:{getItem:()=>null,setItem:()=>{}},URL,Date,Promise,Set};
@@ -121,6 +122,15 @@ async function run(){
   await h.api.saveFile('sc.txt','SAMPLE_BACKUP_JSON');
   assert.equal(h.calls.shares.length,0);
   console.log('PASS: late Capacitor bridge injection cannot strand native app on web Share');
+  h=harness('android',false,false,{injectLater:true,nativeFlag:true});
+  assert.equal(h.api.isAndroid(),true,'Packaged native flag must identify Android without Capacitor');
+  await assert.rejects(()=>h.api.saveFile('sc.txt','SAMPLE_BACKUP_JSON'),/Downloads service is unavailable/);
+  assert.equal(h.calls.shares.length,0);
+  console.log('PASS: deterministic Android APK identity never falls back to Share when bridge is absent');
+  assert(fs.readFileSync('build/android-build.sh','utf8').includes('window.__SCORECARD_NATIVE_ANDROID__=true;'));
+  assert(!fs.readFileSync('index.html','utf8').includes('window.__SCORECARD_NATIVE_ANDROID__=true;'),
+    'Web/iOS source bootstrap must not contain Android-only marker');
+  console.log('PASS: Android-only packaging marker leaves web and iOS entry point untouched');
   h=harness('android',false,false,{injectLater:true,androidHost:true});
   assert.equal(h.api.isAndroid(),true,'Native Android localhost must fail closed');
   await assert.rejects(()=>h.api.saveFile('sc.txt','SAMPLE_BACKUP_JSON'),/Downloads service is unavailable/);
