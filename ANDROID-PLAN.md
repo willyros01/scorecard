@@ -56,3 +56,9 @@ Date: 2026-10-12. Source version: 2.30.0. Base branch: `v2` at commit `994bd9a7c
 - Android platform adapters, manifest App Links, icons, regression tests, pinned build scripts, CI reporting, permanent key and signing workflow prepared.
 - Cuberoot automatic Scorecard APK publisher, gated download button and Android quick guide prepared.
 - APK signing secrets and real-device functional acceptance **pending**. Never say Android is production-ready until the signed APK succeeds and device tests pass.
+
+## Automated pre-signing validation result — 2026-10-12
+- GitHub Actions Scorecard Android workflow run **38316868374**, check job completed SUCCESSFULLY. The real source tests passed: Android native Downloads and Fire OS browser adapter, iOS Share/web fallback, generated Android App Links manifest, launcher assets, and shell-script syntax.
+- Shared Scorecard verification **V1–V6 all passed**: exact package-lock, pinned approved dependency versions, deterministic offline Firebase bundle, no imported remote code in 19 packaged files, matching Capacitor versions, and complete Firebase module exports.
+- Signed APK build job intentionally reports FAILURE at **Require permanent Android signing secrets** until the user creates `SCORECARD_ANDROID_KEYSTORE_BASE64` and `SCORECARD_ANDROID_PASSWORD` under GitHub Actions secrets. Do NOT weaken/bypass this gate.
+- Cuberoot Pages deployment of the public Scorecard Android guide and verified-download UI passed; `downloads/scorecard.apk` must not be advertised until a verified signed build is published. Device tests still outstanding.
