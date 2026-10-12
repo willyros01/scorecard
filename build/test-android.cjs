@@ -17,7 +17,7 @@ function harness(os,hasNative=true,failed=false,opts={}){
     Share:{share:async data=>{calls.shares.push(data);}},
     AppLauncher:{openUrl:async data=>{calls.external.push(data);}}
   };
-  if(hasNative)Plugins.ScorecardAndroid={
+  if(hasNative && os==='android')Plugins.ScorecardAndroid={
     saveToDownloads:async data=>{calls.downloads.push(data);if(failed)throw Error('Downloads unavailable');return {saved:true,location:'Downloads',fileName:data.fileName};},
     openExternal:async data=>{calls.external.push(data);if(failed)throw Error('Silk unavailable');return {};}
   };
