@@ -76,6 +76,7 @@ Date: 2026-10-12. Source version: 2.30.0. Base branch: `v2` at commit `994bd9a7c
 - **Change boundaries maintained:** Only `scorecard/android` docs/build source and `Cuberoot/main` publication files changed; Scorecard `main`, `v2`, `ios` and live Firebase remained unchanged.
 
 ## Fire HD 8 device acceptance — login and existing records
+- **PASS (user-confirmed 2026-10-12):** The user's handicap index and group rankings display correctly on Scorecard Android Fire HD 8.
 - **PASS (user-confirmed 2026-10-12):** The Scorecard Android APK installed and opened on Fire HD 8; user reports appearance looks very good.
 - **PASS (user-confirmed 2026-10-12):** Sign-in with their existing Scorecard account works; their golf group and existing records are visible.
 - **PASS (user-confirmed 2026-10-12):** History opens on Scorecard Android Fire HD 8, and the selected existing round shows the correct date, course and score.
