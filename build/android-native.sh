@@ -182,4 +182,10 @@ if perm not in s:
     assert '<application' in s
     s=s.replace('<application',perm+'\n    <application',1)
     p.write_text(s)
+# Add Android App Links for Scorecard one-use invitation links. Existing iOS AASA untouched.
+link='''<intent-filter android:autoVerify="true">\n                <action android:name="android.intent.action.VIEW" />\n                <category android:name="android.intent.category.DEFAULT" />\n                <category android:name="android.intent.category.BROWSABLE" />\n                <data android:scheme="https" android:host="www.cuberoot-systems.com" android:pathPrefix="/scorecard/join/" />\n            </intent-filter>\n        '''
+if link not in s:
+    assert '</activity>' in s, "Unexpected Android activity manifest layout"
+    s=s.replace('</activity>',link+'</activity>',1)
+    p.write_text(s)
 PY
