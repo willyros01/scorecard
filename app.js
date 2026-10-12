@@ -3340,6 +3340,7 @@ const backupFilename = () =>
 function openBackupSheet() {
   const data = backupData();
   const text = JSON.stringify(data, null, 1);
+  const saveOnAndroid = platform.isAndroid();
   sheetEl.hidden = false;
   sheetEl.dataset.text = text;
   sheetEl.dataset.title = `Scorecard backup — ${data.group || "group"}`;
@@ -3349,8 +3350,9 @@ function openBackupSheet() {
       <h2>Backup ready</h2><button class="rowbtn" data-close="1">Close</button></div>
     <p class="hint">${rounds.length} round${rounds.length === 1 ? "" : "s"}, ${golfers.length} golfer${golfers.length === 1 ? "" : "s"}, ${courses.length} course${courses.length === 1 ? "" : "s"}. Where should it go?</p>
     <div class="inline-actions stacked">
-      <button class="btn" data-send="save">Save it somewhere</button>
+      <button class="btn" data-send="save">${saveOnAndroid ? "Save backup to Downloads" : "Save it somewhere"}</button>
     </div>
+    <p class="hint" data-backup-status role="status" aria-live="polite" style="font-size:1.05rem;font-weight:700;" hidden></p>
     <div class="share-grid" style="margin-top:0.7rem">
       <button class="btn ghost" data-send="email">Email it to me</button>
       <button class="btn ghost" data-send="whatsapp">WhatsApp</button>
@@ -3359,7 +3361,9 @@ function openBackupSheet() {
       <button class="btn ghost" data-send="copy">Copy the text</button>
       ${platform.canShare() ? `<button class="btn ghost" data-send="native">More apps…</button>` : ""}
     </div>
-    <p class="hint">Save it somewhere lets you choose the folder — iCloud Drive, Google Drive, Dropbox or anywhere else on the device. A file kept off the phone is the one that survives losing the phone.</p>
+    <p class="hint">${saveOnAndroid
+      ? "On your Fire or Android tablet, Save backup to Downloads saves a TXT file directly in Downloads without opening Share. Keep another copy somewhere safe."
+      : "Save it somewhere lets you choose the folder — iCloud Drive, Google Drive, Dropbox or anywhere else on the device. A file kept off the phone is the one that survives losing the phone."}</p>
   </div>`;
 }
 
@@ -3373,21 +3377,41 @@ function openBackupSheet() {
 async function saveBackup() {
   const text = sheetEl.dataset.text || "";
   const name = sheetEl.dataset.filename || "scorecard-backup.txt";
+  const android = platform.isAndroid();
+  const backupStatus = sheetEl.querySelector("[data-backup-status]");
 
-  /* Inside the iPhone app: write the file, confirm it is really written, then
-     open the share sheet with it. The sheet stays open with a clear message if
-     the write fails — nothing is reported as saved that wasn't. */
-  if (platform.isApp()) {
+  // On Android a missing bridge is an ERROR, never permission to fall through
+  // to the web or iOS Share route. Keep failure visible inside the backup sheet.
+  if (android && backupStatus) {
+    backupStatus.hidden = false;
+    backupStatus.textContent = "Saving backup to Downloads…";
+  }
+  if (android && !text) {
+    if (backupStatus) backupStatus.textContent = "Backup was NOT saved: the backup contains no data.";
+    return;
+  }
+
+  /* Android: native verified Downloads write. iOS: unchanged Save-to-Files Share. */
+  if (android || platform.isApp()) {
     try {
-      await platform.saveFile(name, text, sheetEl.dataset.title || "Scorecard backup");
+      const saved = await platform.saveFile(name, text, sheetEl.dataset.title || "Scorecard backup");
+      if (android && (!saved || saved.saved !== true || saved.location !== "Downloads")) {
+        throw new Error("Android did not confirm the Downloads file.");
+      }
       sheetEl.hidden = true;
-      flashMsg(platform.isAndroid()
-        ? "Backup saved to Downloads on this device. Keep an extra copy somewhere safe."
+      flashMsg(android
+        ? "Backup saved to Downloads: " + saved.fileName + ". Keep an extra copy somewhere safe."
         : "Choose Save to Files, then pick iCloud Drive or any folder you like.");
       render();
     } catch (e) {
-      if (e && /cancel/i.test(String(e.message || e))) return;   /* they closed the share sheet */
-      flashMsg("The backup was NOT saved: " + ((e && e.message) || "the file could not be written") + ". Try Email or Copy instead.");
+      if (!android && e && /cancel/i.test(String(e.message || e))) return;
+      const message = "Backup was NOT saved: " + ((e && e.message) || "the file could not be written") + ".";
+      if (android && backupStatus) {
+        backupStatus.hidden = false;
+        backupStatus.textContent = message + " You can use Email or Copy, or retry Downloads.";
+      } else {
+        flashMsg(message + " Try Email or Copy instead.");
+      }
     }
     return;
   }
