@@ -76,6 +76,7 @@ Date: 2026-10-12. Source version: 2.30.0. Base branch: `v2` at commit `994bd9a7c
 - **Change boundaries maintained:** Only `scorecard/android` docs/build source and `Cuberoot/main` publication files changed; Scorecard `main`, `v2`, `ios` and live Firebase remained unchanged.
 
 ## Fire HD 8 device acceptance — login and existing records
+- **PASS (user-confirmed 2026-10-12):** Scorecard Android 2.30.1 on Fire HD 8 displays the group Members/Players list with member names and handicap indexes correctly. This verifies visible existing member data, not editing members, role enforcement, or handicap calculation.
 - **PASS (user-confirmed 2026-10-12):** Scorecard Android 2.30.1 on Fire HD 8 displayed the New Round entry screen correctly, including course, date, and score-entry fields. The user did not save or submit a round. This verifies screen display only, not score submission or calculations.
 - **PASS (user-confirmed 2026-10-12):** Fire HD 8 Scorecard Android 2.30.1 successfully reconnected after Wi-Fi was restored and the app reopened. Golf group, History, and rankings all remained visible and correct. This verifies post-offline reconnection and read continuity, not offline edits or queued-write synchronization.
 - **PASS (user-confirmed 2026-10-12):** On Scorecard Android 2.30.1, an existing History round remained readable on Fire HD 8 after Wi-Fi was turned off. This verifies offline read of previously available data only, NOT offline score changes, queued writes, or later synchronization.
