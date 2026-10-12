@@ -84,6 +84,7 @@ Date: 2026-10-12. Source version: 2.30.0. Base branch: `v2` at commit `994bd9a7c
 - These confirmations cover startup/visual appearance, sign-in and initial read of existing records only. They do **not** yet prove posting a new round, permissions, offline queue, backup export, invitations, handicap calculations, or other user flows. Continue functional acceptance separately without changing production data unnecessarily.
 
 ## Fire HD 8 BACKUP failure and repair — 2026-10-12
+- **PASS (user-confirmed):** On Scorecard Android 2.30.1 on Fire HD 8, backup now works after installing the updated APK over the existing app. This closes the previously reported backup failure; the user has not separately reported whether the file was inspected in Downloads.
 - **PASS (user-confirmed):** Fire HD 8 now reports Scorecard version 2.30.1 after installing the updated Android APK over the existing installation. **Direct Downloads backup retest remains pending.**
 - **BACKUP SAVE FAIL (user-confirmed):** On initial Android APK build `38316868374`, choosing **Save it somewhere** opened Android Share and did not provide a local file save option. **The previous backup test was not a PASS.**
 - Investigation of `app.js` and `platform.js`: Share can be reached if Android native detection fails. Previous adapter captured `window.Capacitor` once at module initialization and required both `isNativePlatform` and `getPlatform` to succeed before using the Android Downloads plugin.
