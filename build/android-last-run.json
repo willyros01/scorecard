@@ -1,29 +1,27 @@
 {
   "workflow": "Scorecard Android APK test build",
   "branch": "android",
-  "run_id": 38320146790,
+  "run_id": 38320202124,
   "run_attempt": "1",
-  "run_url": "https://github.com/willyros01/scorecard/actions/runs/38320146790",
-  "source_sha": "51965aca8749da51c0d01ad25baf9b5f418f13ff",
-  "outcome": "skipped",
+  "run_url": "https://github.com/willyros01/scorecard/actions/runs/38320202124",
+  "source_sha": "81f8b4d8f00da5f840e14ec8632c8b5400b5f3ad",
+  "outcome": "cancelled",
   "artifact_name": null,
   "publication": {
     "destination": "https://www.cuberoot-systems.com/downloads/scorecard.apk",
     "state": "not-requested",
     "mechanism": "Cuberoot publisher polls this verified build report"
   },
-  "reported_at": "2026-10-12T23:04:11.839Z",
+  "reported_at": "2026-10-12T23:06:33.883Z",
   "jobs": [
     {
       "name": "Android adapter and launcher checks",
-      "conclusion": "failure",
-      "failed_steps": [
-        "Check Android adapter and full JavaScript syntax"
-      ]
+      "conclusion": "success",
+      "failed_steps": []
     },
     {
       "name": "apk",
-      "conclusion": "skipped",
+      "conclusion": "cancelled",
       "failed_steps": []
     }
   ]
