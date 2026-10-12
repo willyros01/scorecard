@@ -1,18 +1,18 @@
 {
   "workflow": "Scorecard Android APK test build",
   "branch": "android",
-  "run_id": 38316303808,
+  "run_id": 38316328257,
   "run_attempt": "1",
-  "run_url": "https://github.com/willyros01/scorecard/actions/runs/38316303808",
-  "source_sha": "91e74921c184d92221eee7f377f8ba423f7a7433",
-  "outcome": "cancelled",
+  "run_url": "https://github.com/willyros01/scorecard/actions/runs/38316328257",
+  "source_sha": "ee05148856082fb4f67846d5ffbf1c9f8ee92c4d",
+  "outcome": "failure",
   "artifact_name": null,
   "publication": {
     "destination": "https://www.cuberoot-systems.com/downloads/scorecard.apk",
     "state": "not-requested",
     "mechanism": "Cuberoot publisher polls this verified build report"
   },
-  "reported_at": "2026-10-12T22:23:02.601Z",
+  "reported_at": "2026-10-12T22:23:30.395Z",
   "jobs": [
     {
       "name": "Android adapter and launcher checks",
@@ -21,8 +21,10 @@
     },
     {
       "name": "apk",
-      "conclusion": "cancelled",
-      "failed_steps": []
+      "conclusion": "failure",
+      "failed_steps": [
+        "Require permanent Android signing secrets"
+      ]
     }
   ]
 }
