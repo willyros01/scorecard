@@ -32,7 +32,7 @@ assert re.search(r'(?m)^\s*versionCode\s+\d+\s*$',s), 'Unexpected Gradle version
 n=int(os.environ['SCORECARD_ANDROID_BUILD'])
 assert 1<=n<=2100000000
 s=re.sub(r'(?m)^(\s*versionCode\s+)\d+(\s*)$',lambda m:m.group(1)+str(n)+m.group(2),s,count=1)
-version=re.search(r'APP_VERSION\s*=\s*"(\d+\.\d+\.\d+)"',pathlib.Path('version.js').read_text())
+version=re.search(r'APP_VERSION\s*=\s*"(\d+\.\d+\.\d+)(?:-[A-Za-z0-9.-]+)?"',pathlib.Path('version.js').read_text())
 assert version, 'Scorecard version.js lacks release version'
 s=re.sub(r'(?m)^(\s*versionName\s+)"[^"]+"',lambda m:m.group(1)+'"'+version.group(1)+'"',s,count=1)
 file.write_text(s)
