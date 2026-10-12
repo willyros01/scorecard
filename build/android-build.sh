@@ -18,6 +18,22 @@ done < build/www-files.txt
 test -s www/index.html
 test -s www/firebase-config.js
 test -s www/vendor/firebase/firebase-10.12.0.js
+# Build-only identity. The source index.html for web and iOS is never changed.
+# Ensures Android never falls back into iOS Share when Capacitor is injected late.
+python3 - <<'PY'
+from pathlib import Path
+p = Path('www/index.html')
+s = p.read_text()
+needle = '<script type="module" src="./app.js"></script>'
+assert s.count(needle) == 1, 'Expected one Scorecard app bootstrap script'
+assert '__SCORECARD_NATIVE_ANDROID__' not in s, 'Unexpected native marker in source HTML'
+s = s.replace(needle, '<script>window.__SCORECARD_NATIVE_ANDROID__=true;</script>\n  ' + needle, 1)
+old = 'var inApp = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());'
+assert s.count(old) == 1, 'Expected web service-worker guard'
+s = s.replace(old, 'var inApp = window.__SCORECARD_NATIVE_ANDROID__ === true || !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());', 1)
+p.write_text(s)
+print('PASS: Scorecard packaged APK identifies Android before app load and never registers browser service worker')
+PY
 npx cap add android
 npx cap sync android
 bash build/android-native.sh
