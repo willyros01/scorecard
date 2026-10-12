@@ -11,6 +11,7 @@
 const Cap = (typeof window !== "undefined" && window.Capacitor) || null;
 
 export const isApp = () => !!(Cap && typeof Cap.isNativePlatform === "function" && Cap.isNativePlatform());
+export const isAndroid = () => isApp() && typeof Cap.getPlatform === "function" && Cap.getPlatform() === "android";
 const plugin = (name) => (isApp() && Cap.Plugins && Cap.Plugins[name]) || null;
 
 /* ---------------- addresses (Change 1) ---------------- */
@@ -141,6 +142,17 @@ export async function copy(text) {
    folder. Resolves only once the file has been written and read back — a save
    is never reported before it has happened. */
 export async function saveFile(name, text, title) {
+  if (isAndroid()) {
+    // Android saves backups directly to public Downloads, NEVER to Share.
+    // A failed or unavailable native adapter must not claim success.
+    const Android = plugin("ScorecardAndroid");
+    if (!Android || typeof Android.saveToDownloads !== "function")
+      throw new Error("The Android Downloads service is unavailable.");
+    const safeName = String(name || "scorecard-backup.txt").replace(/[^A-Za-z0-9._-]/g, "-");
+    const result = await Android.saveToDownloads({ fileName: safeName, data: String(text) });
+    if (!result || !result.saved) throw new Error("The backup was not written.");
+    return { saved: true, location: "Downloads", fileName: result.fileName || safeName };
+  }
   const Filesystem = plugin("Filesystem");
   const Share = plugin("Share");
   if (!Filesystem || !Share) throw new Error("File saving is not available here.");
@@ -156,6 +168,11 @@ export async function saveFile(name, text, title) {
    how: "tab" opens a new window in a browser (WhatsApp), "self" changes the
    page address (mailto:, sms:) — exactly what the web app did before. */
 export async function openExternal(url, how = "self") {
+  if (isAndroid()) {
+    const Android = plugin("ScorecardAndroid");
+    if (!Android || typeof Android.openExternal !== "function") throw new Error("Android external browser service is unavailable.");
+    return Android.openExternal({ url: String(url) });
+  }
   const Launcher = plugin("AppLauncher");
   if (Launcher) return Launcher.openUrl({ url });
   if (how === "tab") { window.open(url, "_blank"); return; }
