@@ -78,4 +78,5 @@ Date: 2026-10-12. Source version: 2.30.0. Base branch: `v2` at commit `994bd9a7c
 ## Fire HD 8 device acceptance — login and existing records
 - **PASS (user-confirmed 2026-10-12):** The Scorecard Android APK installed and opened on Fire HD 8; user reports appearance looks very good.
 - **PASS (user-confirmed 2026-10-12):** Sign-in with their existing Scorecard account works; their golf group and existing records are visible.
-- These confirmations cover startup/visual appearance, sign-in and initial read of existing records only. They do **not** yet prove posting a round, permissions, offline queue, backup export, invitations, calculations, or other user flows. Continue functional acceptance separately without changing production data unnecessarily.
+- **PASS (user-confirmed 2026-10-12):** History opens on Scorecard Android Fire HD 8, and the selected existing round shows the correct date, course and score.
+- These confirmations cover startup/visual appearance, sign-in and initial read of existing records only. They do **not** yet prove posting a new round, permissions, offline queue, backup export, invitations, handicap calculations, or other user flows. Continue functional acceptance separately without changing production data unnecessarily.
