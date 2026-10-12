@@ -79,6 +79,8 @@ jobs:
           assert root.find('.//uses-permission') is not None
           print('PASS: Scorecard Android App Link and Downloads manifest generated')
           PY
+      - name: Run Scorecard V1-V6 shared application checks
+        run: bash build/verify.sh
 
   apk:
     needs: [check]
