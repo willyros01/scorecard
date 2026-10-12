@@ -76,6 +76,7 @@ Date: 2026-10-12. Source version: 2.30.0. Base branch: `v2` at commit `994bd9a7c
 - **Change boundaries maintained:** Only `scorecard/android` docs/build source and `Cuberoot/main` publication files changed; Scorecard `main`, `v2`, `ios` and live Firebase remained unchanged.
 
 ## Fire HD 8 device acceptance — login and existing records
+- **PASS (user-confirmed 2026-10-12):** Scorecard Android 2.30.1 on Fire HD 8 displays an existing round correctly in portrait and landscape orientations; text, controls, and scores remain readable, and the current round remains visible after rotation. This is a user-observed screen-rotation test, not a device-wide orientation audit.
 - **PASS (user-confirmed 2026-10-12):** Scorecard Android 2.30.1 on Fire HD 8 resumes correctly after pressing the tablet's Home button, waiting briefly, and returning to the app; the previously open existing round remains visible. This verifies background/resume screen preservation, not a cold start after process termination.
 - **PASS (user-confirmed 2026-10-12):** On Scorecard Android 2.30.1 on Fire HD 8, pressing Back from an external link in the Fire browser returned to Scorecard with the previous app screen intact. This confirms browser-return navigation; other deep-link and invitation flows remain untested.
 - **PASS (user-confirmed 2026-10-12):** Scorecard Android 2.30.1 on Fire HD 8 retains Dark Mode selection after fully closing and reopening the app. This confirms local Appearance preference persistence across app restart; it does not test persistence after reinstall.
