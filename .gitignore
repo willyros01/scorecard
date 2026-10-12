@@ -2,3 +2,7 @@ node_modules/
 /web-test-site
 /www/
 /ios/
+/android/
+/sc-key.p12
+/sc-pass.txt
+/sc-key64.txt
