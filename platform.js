@@ -24,6 +24,9 @@ const androidNativeHost = () => {
 };
 
 export const isAndroid = () => {
+  // This marker is inserted ONLY into the Android APK's packaged index.html.
+  // It is independent of Capacitor injection timing or Fire OS user-agent.
+  if (typeof window !== "undefined" && window.__SCORECARD_NATIVE_ANDROID__ === true) return true;
   const cap = liveCap();
   if (cap && cap.Plugins && cap.Plugins.ScorecardAndroid) return true;
   if (cap && typeof cap.getPlatform === "function" && cap.getPlatform() === "android") return true;
