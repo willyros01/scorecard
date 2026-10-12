@@ -2,29 +2,28 @@
   "workflow": "Scorecard Android APK test build",
   "branch": "android",
   "run_id": 38316868374,
-  "run_attempt": "1",
+  "run_attempt": "2",
   "run_url": "https://github.com/willyros01/scorecard/actions/runs/38316868374",
   "source_sha": "cafc8ed3d5053f1190672d7575180a6ce0bc08da",
-  "outcome": "failure",
-  "artifact_name": null,
+  "outcome": "success",
+  "artifact_name": "scorecard-android-test-apk",
   "publication": {
     "destination": "https://www.cuberoot-systems.com/downloads/scorecard.apk",
-    "state": "not-requested",
+    "state": "queued-for-cuberoot-publisher",
     "mechanism": "Cuberoot publisher polls this verified build report"
   },
-  "reported_at": "2026-10-12T22:29:04.426Z",
+  "reported_at": "2026-10-12T22:43:01.513Z",
   "jobs": [
     {
-      "name": "Android adapter and launcher checks",
+      "name": "apk",
       "conclusion": "success",
       "failed_steps": []
     },
     {
-      "name": "apk",
-      "conclusion": "failure",
-      "failed_steps": [
-        "Require permanent Android signing secrets"
-      ]
+      "name": "Android adapter and launcher checks",
+      "conclusion": "success",
+      "failed_steps": []
     }
-  ]
+  ],
+  "artifact_id": 11776788439
 }
