@@ -77,7 +77,7 @@ async function actualBackupScenario(android, fail=false) {
 }
 async function run(){
   assert(app.includes('platform.isAndroid()'), 'Android-specific truthfulness missing');
-  assert(app.includes('Backup saved to Downloads on this device.'), 'Android backup confirmation missing');
+  assert(app.includes('Backup saved to Downloads:'), 'Android backup confirmation missing');
   let h=harness('android');
   const result=await h.api.saveFile('sc-backup.txt','SAMPLE_BACKUP_JSON','Scorecard backup');
   assert.equal(result.saved,true);assert.equal(result.location,'Downloads');
