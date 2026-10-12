@@ -20,3 +20,8 @@
 - Android-only app version: `2.30.1-android.1`. Monotonic Android versionCode comes from GitHub Actions build run number, so install the updated APK **over** the previous app.
 - Scope: only `scorecard/android` files; no changes to Scorecard `main`, `v2`, `ios`, Firebase backend/rules/data, or Fairpot and Cloud Files.
 - Real Fire HD 8 device retest is REQUIRED: tap **Save backup to Downloads**, verify **no Share chooser** and a non-empty `scorecard-*.txt` file in Downloads. Do not declare backup PASS based only on CI.
+
+## Final deterministic Android identity safeguard
+- The Android build injects `window.__SCORECARD_NATIVE_ANDROID__=true` into **only the packaged `www/index.html`**, before `app.js` executes. Its native service-worker guard is set to true for the APK. The original `index.html` in source/web/iOS is unchanged.
+- `platform.js` reads the marker first and always routes Android backup to `ScorecardAndroid.saveToDownloads`; it can never unintentionally enter the iOS/web Share fallback merely because Capacitor initialization is delayed.
+- Regression tests also simulate missing Capacitor after packaged Android marker injection; the result must be an explicit no-save error, never Share.
