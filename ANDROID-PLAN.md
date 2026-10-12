@@ -1,0 +1,58 @@
+# Scorecard Android — build, release and functional parity plan
+Date: 2026-10-12. Source version: 2.30.0. Base branch: `v2` at commit `994bd9a7cd4d80db84557827102cb877ab645683`.
+
+## Branch and release boundaries
+- Existing repository `willyros01/scorecard`; new branch `android` only, no new repository.
+- `main` = live website; `v2` = current iOS/App Store release source; `ios` = older iOS path. **All remain untouched.**
+- Android is a separate native shell over the same Scorecard app data logic, using `platform.js` to implement platform differences. Never blindly merge platform-native changes into web/iOS. Full functional parity is the requirement, not identical source files.
+- Firebase `scorecard-f41b8`, `firestore.rules`, indexes, users, games, rounds, notifications, and backend data remain unchanged. No account, roster, or data cleanup is authorized by Android builds.
+- Treat the existing iOS/App Store version and release automations as protected. Do not start or change TestFlight workflows during Android development.
+
+## Android functionality and adapters
+- Package ID `io.github.willyros01.scorecard`; app label `The Scorecard`. App version from the one authoritative `version.js`.
+- Android app packages the **exact same web code and pinned Firebase bundle** from `build/www-files.txt` used for iOS. The Android wrapper is ephemeral and built only in the CI runner.
+- `platform.js`: preserves native iOS and browser paths; `isAndroid()` uses the Capacitor platform. `ScorecardAndroid.saveToDownloads()` writes backup TXT/JSON/CSV directly into public Downloads on Fire OS, refusing fallback to Share on an error. Android 10+ uses MediaStore + pending/finalize; Android 9 and older uses permission-controlled Downloads.
+- `ScorecardAndroid.openExternal()` opens approved HTTPS/HTTP/mailto/SMS links with an OS VIEW Intent **without calling resolveActivity()** (the Cloud Files Fire HD 8 bug). It never embeds a Cuberoot link or Apple/Firebase credentials into a second WebView. Missing handler produces a real error.
+- Native App Links: `https://www.cuberoot-systems.com/scorecard/join/?join=...` matched in manifest; Cuberoot `.well-known/assetlinks.json` binds the host to Android package and permanent signing certificate. Existing iOS AASA left untouched. `platform.initLinks()` and `platform.onLink()` remain the single invitation processing path, preserving one-use enforcement.
+- iOS App Store installation text remains in the invite; Android/Fire installation instructions appear only for Android senders.
+- Existing A, A+, A++, appearance and responsive UI controls preserved. Real tablet layout/keyboard acceptance needed before declaring parity.
+- Android launcher icons generated via `build/AndroidIcons.java` from the existing green flag / golf-ball icon design in `icon.svg`.
+
+## Build and signing
+- `build/android-build.sh` runs existing Scorecard `build/verify.sh` checks V1-V6: pinned npm lock, exact versions, byte-identical Firebase bundle, no imported remote code, Capacitor consistency, and Firebase exports. It also runs isolated `build/test-android.cjs` native adapter regression tests.
+- To keep the existing `package.json`, `package-lock.json`, and `build/approved-versions.json` intact, Android CI installs **exact** `@capacitor/android@8.5.2` transiently with `--no-save --package-lock=false` AFTER the main V1–V6 verification. Packaging uses `npx cap add android`, `npx cap sync android`; it must use the app's existing Firebase bundle, not a new source of truth.
+- Android Gradle `versionCode` comes from monotonic GitHub `GITHUB_RUN_NUMBER` for update compatibility; `versionName` is parsed from `version.js`.
+- Permanent private RSA PKCS12 signing key alias `scorecard`. Keystore generated outside the Git repository; **NEVER commit, print, email, or publish it**.
+- The owner must set two GitHub Actions repository secrets in **scorecard**:
+  - `SCORECARD_ANDROID_KEYSTORE_BASE64` — contents of private `sc-key64.txt`.
+  - `SCORECARD_ANDROID_PASSWORD` — contents of private `sc-pass.txt`.
+- Private key backup archive `sc-key.zip` contains `sc-key.p12`, `sc-pass.txt`, `sc-key64.txt`, `README.txt`. It is **NOT encrypted** and must be stored privately in two safe places; no public GitHub upload.
+- Certificate SHA256: `40744e5063932de66831717aeb3deea647e681d96e11f7c96434c30cdfef5386` (colons can be inserted every two hex digits for device verification).
+- `build/android-sign.sh` decodes the GitHub Action secret only on the ephemeral runner, requires alias/password, configures stable debug APK signing, and fails closed if unavailable. `apksigner` verifies final certificate against `keytool`.
+- The APK is a **test/debug build**, not a Google Play production release. Play Store launch separately approved.
+
+## Automated build and Cuberoot APK publication
+- `.github/workflows/android-apk.yml` runs on Android branch changes, checks adapter/icons/scripts, and builds only when signing secrets are valid. Result written `build/android-last-run.json` from a dedicated report job, with exact build SHA, artifact and success/failure.
+- `willyros01/Cuberoot/main` holds an independent `.github/workflows/publish-scorecard-apk.yml` and `build/publish-scorecard.sh` polling for a confirmed successful artifact. It downloads and verifies the *exact built APK* and never rebuilds or resigns it.
+- Publisher creates `downloads/scorecard.apk`, `downloads/scorecard.apk.sha256`, `downloads/scorecard-build.json`. It refuses a signer change once an APK has been published. Failed builds never replace the previous APK. GitHub Pages deployment must pass.
+- The public Scorecard app card adds a **same-domain Android download** only when the APK and verified metadata exist, adding `?build=<run_id>` to prevent Silk's stale APK caching. It never shows the GitHub repo URL.
+- The public large-print user guide is at `guides/the-scorecard/android-quick-start.html`, indexed in Cuberoot's existing `guides/index.json` and Scorecard docs page. Existing web/iOS guides remain intact.
+
+## Required Fire HD 8 / Android acceptance (not yet device-tested)
+1. Install signed APK from Cuberoot, check icon, starting screen, version label, text size A/A+/A++, day/night and portrait/landscape.
+2. Sign in with an existing controlled test account. Confirm account recovery and logout; cold start and background return must not cause hangs or duplicate accounts.
+3. Check member/admin/owner access with authorized test accounts only; verify regular user privacy: own rounds, games participated, group directory name/index only. Never exercise production administrative changes to pass an automated test.
+4. Enter a *test* round with known scores; verify History, handicap calculation, group rankings and relevant game leaderboard. If using real Firebase, agree on test records before writing.
+5. Disable Wi-Fi, queue a test operation, reconnect, prove exactly-once synchronized write and no duplicate rounds; preserve data on restart.
+6. Create an invitation using a disposable test token and verify Cuberoot Android App Link opens correct join screen; do not consume a real outstanding invitation. One-use enforcement and login-after-logout.
+7. Open user guide, privacy, support, and report-email links; confirm Fire Silk and email app launch without a false “no external browser” error.
+8. Export backup to Downloads: verify a non-empty file on the device, valid JSON data inside TXT, and no Share chooser; test import only with a SAFE disposable data set after reviewing replace/merge semantics.
+9. Install a **later APK signed with the same key** over the existing installation without uninstalling, verify account state, preferences and history.
+10. Compare Scorecard Android release artifact metadata/signing SHA and Cuberoot deployed APK checksums; log real device PASS/FAIL in this document.
+11. Test Firebase email/password accounts and authorized domain/redirect behavior in Android WebView, one-time invitations, offline queue, App Links and any app review acceptance items. Source presence is not a pass.
+
+## Status as of 2026-10-12
+- Branch `android` created from `v2`; no web/iOS/Firebase source or backend changed.
+- Android platform adapters, manifest App Links, icons, regression tests, pinned build scripts, CI reporting, permanent key and signing workflow prepared.
+- Cuberoot automatic Scorecard APK publisher, gated download button and Android quick guide prepared.
+- APK signing secrets and real-device functional acceptance **pending**. Never say Android is production-ready until the signed APK succeeds and device tests pass.
