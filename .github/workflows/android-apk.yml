@@ -61,6 +61,24 @@ jobs:
           bash -n build/android-build.sh
           bash -n build/android-native.sh
           bash -n build/android-sign.sh
+      - name: Test generated native adapter and Android App Links manifest
+        run: |
+          mkdir -p android/app/src/main
+          cat > android/app/src/main/AndroidManifest.xml <<'XML'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android"><application><activity android:name=".MainActivity"></activity></application></manifest>
+          XML
+          bash build/android-native.sh
+          python3 - <<'PY'
+          from xml.etree import ElementTree as ET
+          p='android/app/src/main/AndroidManifest.xml'
+          root=ET.parse(p).getroot()
+          ns='{http://schemas.android.com/apk/res/android}'
+          intents=root.findall('.//intent-filter')
+          assert intents, 'Android invitation link filter missing'
+          assert any(data.attrib.get(ns+'host')=='www.cuberoot-systems.com' and data.attrib.get(ns+'pathPrefix')=='/scorecard/join/' for it in intents for data in it.findall('data')), 'Wrong Android App Link'
+          assert root.find('.//uses-permission') is not None
+          print('PASS: Scorecard Android App Link and Downloads manifest generated')
+          PY
 
   apk:
     needs: [check]
