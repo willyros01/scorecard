@@ -1,3 +1,13 @@
+## 2026-10-15 — Current Scorecard Android acceptance/status summary
+
+**Owner-confirmed physical Fire HD 8 acceptance on 12 October:** `scorecard/android` version **2.30.1**, signed build **38320762144**, working installation/in-place update, regular sign-in/sign-out, restored group/history and ranking/index views, large text, portrait/landscape, Home/resume, online reconnect, and downloaded/opened/inspected backup TXT. Admin cockpit, role/member management visibility and Owner-only controls were checked without changing another member's role. Owner concluded this Android version was working for regular use.
+
+**Unverified/not certified:** posting/editing/deleting scores and recalculation, offline queued writes, invitation/deep link flows, mutation of live member/role permissions, exhaustive Android phone models and App Store/Play release. Do not claim all regression cases passed. **No repeat of already accepted device checks unless a subsequent build changes their functionality.**
+
+**Separation:** Android adapter changes are isolated to `android`; `v2` is the current iOS/App Store build-24 source, `main` is protected web, `ios` is an older iOS snapshot. Preserve Firebase `scorecard-f41b8`, rules/indexes, production records, signed APK identity and same-origin Cuberoot distribution. The owner's current development freeze allows documentation/testing records only until a specific build is authorized.
+
+---
+
 # Scorecard Android — build, release and functional parity plan
 Date: 2026-10-12. Source version: 2.30.0. Base branch: `v2` at commit `994bd9a7cd4d80db84557827102cb877ab645683`.
 
