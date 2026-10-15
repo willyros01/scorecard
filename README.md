@@ -1,3 +1,9 @@
+## Scorecard Android — current device-accepted release (2026-10-15)
+
+Branch `android` contains the owner-accepted **2.30.1** Fire HD 8 APK (signed GitHub run **38320762144**). The native backup-to-Downloads repair and saved backup file were owner-verified on device, along with regular and Owner/Admin navigation/role-control visibility. See `ANDROID-PLAN.md` and `build/RELEASE-ANDROID-2.30.1.md` for evidence and the still-untested flows. Do **not** describe this Android acceptance as approval of the separate iOS `v2` **2.30.0 / Apple Build 24** App Store submission. Existing `main` web and older `ios` branches are protected; no code, Firebase, APK or signing changes were made for this documentation pass.
+
+---
+
 # The Scorecard — Version 2
 
 ## Release procedure — follow this every time
