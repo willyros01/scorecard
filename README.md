@@ -1,3 +1,9 @@
+## Historical iOS branch notice — 2026-10-15
+
+This `ios` branch is an **earlier iOS migration snapshot**. Current Scorecard App Store source/review documentation is on `v2` (**2.30.0 / Apple Build 24**), not this historical branch. The accepted Fire HD 8 Android 2.30.1 port belongs to `android`. Do not build, merge or promote this historical branch merely because this README was refreshed. No code or Firebase changes are authorized; retain the older instructions below as historical background.
+
+---
+
 # The Scorecard — Version 2
 
 ## Release procedure — follow this every time
