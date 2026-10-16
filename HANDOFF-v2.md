@@ -11,9 +11,10 @@ Source: "The Marker — Design and Build Plan — Revised", section "Related Sco
 - Deleting a course must preserve every posted round, score and handicap calculation (rounds already freeze course name, rating, slope and par).
 - The Marker has no course deletion and must not silently recreate a course deleted here.
 - Hand-entered course and tee details stay acceptable for official rounds, subject to the existing posting requirements.
-- DECIDED by Willy (16 Oct): a delete applies to ALL groups. Purpose: the course may hold wrong information and must not be used by anyone until corrected. So it is a withdrawal: the course stays in Firestore marked deleted (who, when, why), vanishes from every course list (Scorecard and The Marker), and an administrator restores it once corrected.
-- The Marker's worker refuses a card played on a deleted course, with the reason; the card stays on the phone and can be posted after the restore.
-- DECIDED by Willy (16 Oct): NO recalculation. Rounds already posted keep their frozen rating and slope and stay as they are when the course is corrected and restored.
+- DECIDED by Willy (16 Oct): a delete applies to ALL groups. Purpose: the course may hold wrong information. So it is a withdrawal: the course stays in Firestore only because posted rounds point to it, marked `withdrawn: true` with `withdrawnBy`, `withdrawnAt`, `withdrawnReason`, and vanishes from every course list (or shows as withdrawn).
+- DECIDED by Willy (16 Oct, 4:21 pm, supersedes "restore"): a withdrawn course is NEVER used, edited or restored again. The rules must refuse any update to a course whose `withdrawn` is true. Any number of withdrawn versions of the same course may exist. A replacement is a NEW course: entered by hand, or corrected details from the golf course database.
+- Field name matters: The Marker's worker (live, willyros01/marker) recognises a withdrawn course by `withdrawn == true`, refuses cards carrying the withdrawn details (same name, rating and slope), and accepts hand-entered or corrected details as a new course.
+- DECIDED by Willy (16 Oct): NO recalculation. Rounds already posted keep their frozen rating and slope and stay as they are.
 
 ## 2.30.0 — App Store release build (11 October 2026)
 
