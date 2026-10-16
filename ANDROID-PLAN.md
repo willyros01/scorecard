@@ -1,6 +1,6 @@
 ## NEXT BUILD after the development freeze — course deletion (Willy, 16 Oct 2026)
 
-Approved by Willy on 16 Oct 2026, for all three versions (web, iPhone, Android); build only once he lifts the freeze. Full spec in HANDOFF-v2.md on the v2 branch (same heading): admin-only course deletion enforced by the rules, posted rounds and handicaps preserved, The Marker must not recreate a deleted course, hand-entered courses still acceptable. Decided by Willy (16 Oct): a delete applies to all groups and withdraws the course (kept, marked deleted) until an administrator corrects and restores it. Open: whether restoring offers to recalculate rounds already posted on it.
+Approved by Willy on 16 Oct 2026, for all three versions (web, iPhone, Android); build only once he lifts the freeze. Full spec in HANDOFF-v2.md on the v2 branch (same heading): admin-only course deletion enforced by the rules, posted rounds and handicaps preserved, The Marker must not recreate a deleted course, hand-entered courses still acceptable. Decided by Willy (16 Oct): a delete applies to all groups and withdraws the course (kept, marked deleted) until an administrator corrects and restores it. No recalculation on restore: posted rounds stay as they are (Willy, 16 Oct).
 
 ---
 
