@@ -1,9 +1,9 @@
 kind:    checks
 result:  bootstrap=success verify=success web=success
 branch:  v2
-commit:  db88f853990b948883cdcc943fed952327a08ec5
-run:     104 (id 37090877819)
-time:    2026-10-03T02:47:03Z
+commit:  9d149f666a580b9b3eb479b64aaa8072b1534e58
+run:     134 (id 38962742836)
+time:    2026-10-16T20:32:31Z
 
 --- last lines of bootstrap.log ---
 
@@ -13,7 +13,7 @@ OK    V2 every package is exactly the approved version
 
   vendor/firebase/firebase-10.12.0.js  384.2kb
 
-⚡ Done in 58ms
+⚡ Done in 56ms
 OK    V3 the committed bundle is identical to a fresh build
 OK    V4 no remote code in the 19 packaged files
 OK    V5 Capacitor core, cli and ios are 8.5.2
