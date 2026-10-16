@@ -2,6 +2,10 @@
 
 Approved by Willy on 16 Oct 2026, for all three versions (web, iPhone, Android); build only once he lifts the freeze. Full spec in HANDOFF-v2.md on the v2 branch (same heading): admin-only course deletion enforced by the rules, posted rounds and handicaps preserved, The Marker must not recreate a deleted course, hand-entered courses still acceptable. Decided by Willy (16 Oct): a delete applies to all groups and withdraws the course for good: kept only because posted rounds point to it, marked `withdrawn: true`, never used, edited or restored again (a replacement is a new course). No recalculation: posted rounds stay as they are (Willy, 16 Oct).
 
+## NEXT BUILD after the development freeze — verified scorecard pictures (Willy, 16 Oct 2026)
+
+Decided by Willy, for all three versions; build only once he lifts the freeze. Full spec in HANDOFF-v2.md on the v2 branch (same heading). In short: course details from a verified picture of the club's scorecard replace the golf course database's version; a differing rating/slope automatically recalculates posted rounds' differentials and every affected golfer's index; game results stay as played and corrected rounds show * with an explanation; only signed-in accounts' pictures count; database figures contradicted = correction, verified figures contradicted = re-rating (no recalculation); every correction recorded and undoable.
+
 ---
 
 ## 2026-10-15 — Current Scorecard Android acceptance/status summary
