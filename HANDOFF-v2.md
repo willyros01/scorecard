@@ -16,6 +16,21 @@ Source: "The Marker — Design and Build Plan — Revised", section "Related Sco
 - Field name matters: The Marker's worker (live, willyros01/marker) recognises a withdrawn course by `withdrawn == true`, refuses cards carrying the withdrawn details (same name, rating and slope), and accepts hand-entered or corrected details as a new course.
 - DECIDED by Willy (16 Oct): NO recalculation. Rounds already posted keep their frozen rating and slope and stay as they are.
 
+## NEXT BUILD after the development freeze — verified scorecard pictures correct course data (Willy, 16 Oct 2026, 7:41 pm)
+
+Decided by Willy. Build only once he lifts the freeze, in ALL THREE versions (web main, iPhone v2, Android android). Full spec: design document "The Marker — Design and Build Plan", section "Related Scorecard decision: verified scorecard pictures correct course data".
+
+- Course details read from a picture of the club's scorecard (The Marker, Cloudflare worker) and VERIFIED replace the golf course database's version of that course/tee for everyone; the database never overwrites a verified copy again.
+- If a verified rating/slope differs from the one a posted round used: that round's differential is recalculated, and so are the 20-round window, handicapIndex, roundCount and directory entries of every affected golfer in every group. Automatic, no human step.
+- Game/tournament results stay as played (course handicaps frozen on rounds). Corrected rounds show * everywhere, with the explanation: "* Corrected after the round: the course details were wrong in the golf course database and were replaced by the club's own scorecard on <date> (rating a -> b). The handicap index uses the corrected figure; the game result stands as played."
+- Only pictures read by signed-in Scorecard accounts (member, admin, owner) can trigger this. Players without an account may use a picture for their own round only; it never replaces stored data.
+- Verified = every value of the tee read (18 pars, handicap numbers, yards, rating, slope), pars and that tee's yards add up to the card's OUT/IN totals, handicap numbers 1-18 each once, believable rating (55-85) / slope (55-155) / par, course name matches, scorer confirms; any hand change makes it a hand entry instead.
+- Correction vs re-rating: each tee records its source (database / hand entry / verified picture, with who and when). Database figures contradicted by a verified picture = correction (recalculate past rounds). Verified figures contradicted by a newer verified picture = re-rating (from that day only, no recalculation).
+- Every correction is recorded (tee, old/new figures, who, when, every round and index changed) and can be undone.
+- Supersedes part of the course-withdrawal decision: withdrawal never recalculates; a verified correction does.
+- Scorecard changes: tee source field; worker recalculation job + correction records; round correction note and * display; rules let only the worker write these fields.
+- OPEN: older courses have no source; count them as "database" (correctable) or leave them alone? Willy to decide.
+
 ## 2.30.0 — App Store release build (11 October 2026)
 
 Same code as beta.14, version label 2.30.0 with no beta. Built for App Store review (TestFlight build starts by itself from the v2 push). User guides and App Store Connect setup: ChatGPT. Web (main) stays on beta.14 until Willy decides. Second build the same day adds the App Store step (Apple ID 6817462903) to every invitation; keep the web off this version until Apple releases the app. See build/RELEASE-2.30.0.md.
