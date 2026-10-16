@@ -2,6 +2,17 @@
 
 Written so that anyone (Claude, ChatGPT or a person) can continue the work. Read it fully before changing anything.
 
+## NEXT BUILD after the development freeze — course deletion (Willy, 16 Oct 2026)
+
+Approved by Willy on 16 Oct 2026. Build only once he lifts the freeze, in ALL THREE versions: web (main), iPhone (v2), Android (android branch).
+Source: "The Marker — Design and Build Plan — Revised", section "Related Scorecard decision: course deletion".
+
+- Only Scorecard administrators may delete golf courses, enforced by the Firebase rules (today `courses` has `allow delete: if false`), not just the screen.
+- Deleting a course must preserve every posted round, score and handicap calculation (rounds already freeze course name, rating, slope and par).
+- The Marker has no course deletion and must not silently recreate a course deleted here.
+- Hand-entered course and tee details stay acceptable for official rounds, subject to the existing posting requirements.
+- OPEN, ask Willy before building: courses are shared by every group — does an admin's delete apply to all groups or only their own (like Hide, owner only today)? Recommended: a soft delete (course kept, marked deleted), so rounds keep a real course and The Marker can recognise it and not recreate it.
+
 ## 2.30.0 — App Store release build (11 October 2026)
 
 Same code as beta.14, version label 2.30.0 with no beta. Built for App Store review (TestFlight build starts by itself from the v2 push). User guides and App Store Connect setup: ChatGPT. Web (main) stays on beta.14 until Willy decides. Second build the same day adds the App Store step (Apple ID 6817462903) to every invitation; keep the web off this version until Apple releases the app. See build/RELEASE-2.30.0.md.
