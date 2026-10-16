@@ -1,3 +1,9 @@
+## NEXT BUILD after the development freeze — course deletion (Willy, 16 Oct 2026)
+
+Approved by Willy on 16 Oct 2026, for all three versions (web, iPhone, Android); build only once he lifts the freeze. Full spec in HANDOFF-v2.md on the v2 branch (same heading): admin-only course deletion enforced by the rules, posted rounds and handicaps preserved, The Marker must not recreate a deleted course, hand-entered courses still acceptable. Open question for Willy first: delete for all groups or only the admin's own; a soft delete is recommended.
+
+---
+
 ## 2026-10-15 — Current Scorecard Android acceptance/status summary
 
 **Owner-confirmed physical Fire HD 8 acceptance on 12 October:** `scorecard/android` version **2.30.1**, signed build **38320762144**, working installation/in-place update, regular sign-in/sign-out, restored group/history and ranking/index views, large text, portrait/landscape, Home/resume, online reconnect, and downloaded/opened/inspected backup TXT. Admin cockpit, role/member management visibility and Owner-only controls were checked without changing another member's role. Owner concluded this Android version was working for regular use.
