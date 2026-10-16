@@ -13,7 +13,7 @@ Source: "The Marker — Design and Build Plan — Revised", section "Related Sco
 - Hand-entered course and tee details stay acceptable for official rounds, subject to the existing posting requirements.
 - DECIDED by Willy (16 Oct): a delete applies to ALL groups. Purpose: the course may hold wrong information and must not be used by anyone until corrected. So it is a withdrawal: the course stays in Firestore marked deleted (who, when, why), vanishes from every course list (Scorecard and The Marker), and an administrator restores it once corrected.
 - The Marker's worker refuses a card played on a deleted course, with the reason; the card stays on the phone and can be posted after the restore.
-- OPEN, ask Willy before building: rounds already posted keep their frozen rating and slope; correcting the course does not change them. Should restoring a corrected course offer to recalculate the rounds played on it?
+- DECIDED by Willy (16 Oct): NO recalculation. Rounds already posted keep their frozen rating and slope and stay as they are when the course is corrected and restored.
 
 ## 2.30.0 — App Store release build (11 October 2026)
 
