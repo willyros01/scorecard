@@ -29,7 +29,8 @@ Decided by Willy. Build only once he lifts the freeze, in ALL THREE versions (we
 - Every correction is recorded (tee, old/new figures, who, when, every round and index changed) and can be undone.
 - Supersedes part of the course-withdrawal decision: withdrawal never recalculates; a verified correction does.
 - Scorecard changes: tee source field; worker recalculation job + correction records; round correction note and * display; rules let only the worker write these fields.
-- OPEN: older courses have no source; count them as "database" (correctable) or leave them alone? Willy to decide.
+- DECIDED (Willy, 16 Oct 7:48 pm): older courses with no recorded source count as "database" figures, so a verified picture can correct them and trigger the recalculation.
+- DECIDED (Willy, 16 Oct 7:48 pm): a picture is verified only when EVERY tee printed on the card is complete (18 yards adding up to that tee's OUT/IN, rating and slope read), not only the tee played.
 
 ## 2.30.0 — App Store release build (11 October 2026)
 
