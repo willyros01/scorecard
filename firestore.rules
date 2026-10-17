@@ -1,5 +1,17 @@
 rules_version = '2';
 
+/* THE MARKER ADDITIONS (Oct 16, 2026, approved by Willy). Everything marked
+ * "THE MARKER" at the end is new; the rest is exactly The Scorecard's live rules.
+ * Phones never write live Scorecard data for The Marker: they only drop a card
+ * into markerSubmissions. A Cloudflare worker (service account, outside these
+ * rules) checks it and posts it.
+ *   - markerSubmissions/{cardId}: created once by its scorer (a real account),
+ *     never changed or removed by a phone; read by its scorer.
+ *   - markerCourses/{id}: the course library with holes; read by any sign-in.
+ *   - markerConfig/{id}: the worker's address; read by any sign-in.
+ *   - markerLimits/**: search counts, worker only.
+ */
+
 /* LAST CHANGED FOR VERSION 2.0, PHASE D + GO-LIVE FIXES (Oct 1), PLUS PRIVATE GROUP REQUESTS (beta.3), PLUS COCKPIT AND AUTO APPLICATIONS (beta.4), PLUS THE DELETION LOCK (beta.9), PLUS ONE-TIME INVITATIONS (beta.10)
  *
  * beta.9 (Oct 2, approved by Willy): an account that has asked to be deleted
@@ -1177,6 +1189,37 @@ service cloud.firestore {
 
       allow delete: if false;   /* rounds reference courses; never orphan them */
     }
+
+    /* ======================= THE MARKER ======================= */
+
+    /* A finished card waiting for the worker. "Not there" answers its scorer
+       too, so the app can tell a card that never arrived from one it may not see. */
+    match /markerSubmissions/{cardId} {
+      allow get: if signedIn() && (resource == null || resource.data.scorer == request.auth.uid);
+      allow create: if signedIn() && !deleting()
+        && request.resource.data.keys().hasOnly(['scorer', 'status', 'createdAt', 'card', 'app'])
+        && request.resource.data.scorer == request.auth.uid
+        && request.resource.data.status == 'sent'
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.card is map
+        && request.resource.data.card.players is list
+        && request.resource.data.card.players.size() >= 1
+        && request.resource.data.card.players.size() <= 4;
+      allow update, delete: if false;
+    }
+
+    match /markerCourses/{courseId} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+
+    match /markerConfig/{docId} {
+      allow get: if request.auth != null;
+      allow write: if false;
+    }
+
+    match /markerLimits/{document=**} {
+      allow read, write: if false;
+    }
   }
 }
-
