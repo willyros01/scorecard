@@ -198,6 +198,11 @@ const newPage = async () => {
     /* The first of each error with where it happened, so a failure here says
        what to fix. */
     const line = String(e.message || e);
+    /* WebKit only: a page that navigates away (or is cut off on purpose)
+       reports Firestore's own closed emulator channels as an "access
+       control" fetch error. That is the browser closing the connection, not
+       the app failing. */
+    if (/Fetch API cannot load http:\/\/127\.0\.0\.1:8080\/.* due to access control checks/.test(line)) return;
     if (!page.errors.includes(line)) { page.errors.push(line); console.log(`      page error: ${String(e.stack || e).split("\n").slice(0, 8).join(" <- ")}`); }
   });
   return page;
@@ -1413,7 +1418,8 @@ await check("B25-2", "E1 rule 4: the password not saved (connection cut) — eve
   await signUp(N.email, "random-start-9x");
   await sendSignInLink(N.email);
   const nina = await newPage();
-  await nina.route("**/accounts:update**", (r) => r.abort());
+  const isUpdate = (url) => String(url).includes("accounts:update");
+  await nina.route(isUpdate, (r) => r.abort());
   await nina.goto(await latestSignInLink(N.email), { waitUntil: "load" });
   await waitForText(nina, /Create your password/);
   await nina.fill('[name="password"]', N.password);
@@ -1423,7 +1429,7 @@ await check("B25-2", "E1 rule 4: the password not saved (connection cut) — eve
   await nina.reload({ waitUntil: "load" });
   await waitForText(nina, /Create your password/);
   if (!new RegExp(N.email.replace(/\./g, "\\.")).test(await text(nina))) throw new Error("the signed-in email is not shown");
-  await nina.unroute("**/accounts:update**");
+  await nina.unroute(isUpdate);
   await nina.fill('[name="password"]', N.password);
   await nina.fill('[name="password-again"]', N.password);
   await nina.locator('[data-act="create-password"]').click();
@@ -1524,7 +1530,7 @@ await check("B25-6", "E4 rule 1: the group list cannot be loaded — never 'Star
   const page = await newPage();
   await page.goto(APP, { waitUntil: "load" });
   await waitForText(page, /Sign in/);
-  await page.route("**/127.0.0.1:8080/**", (r) => r.abort());
+  await page.route((url) => new URL(String(url)).port === "8080", (r) => r.abort());
   await signIn(page, W.email, W.password);
   await waitForText(page, /Can.t check your account right now|You.re offline/, 40000);
   if (/Start your group|Create the group|Not in a group yet/.test(await text(page))) throw new Error("a no-group screen was shown although nothing could be checked");
