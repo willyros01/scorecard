@@ -1,9 +1,9 @@
 kind:    checks
 result:  bootstrap=success verify=success web=success
 branch:  v2
-commit:  9cfa609737c4ee8b161b09e71ba955f3fe7767bc
-run:     118 (id 37106541754)
-time:    2026-10-03T07:31:37Z
+commit:  3f85ea7863900ea2bce6885e8e9d5db9d681dd0e
+run:     148 (id 39808240076)
+time:    2026-10-22T15:52:33Z
 
 --- last lines of bootstrap.log ---
 
@@ -13,7 +13,7 @@ OK    V2 every package is exactly the approved version
 
   vendor/firebase/firebase-10.12.0.js  384.2kb
 
-⚡ Done in 33ms
+⚡ Done in 50ms
 OK    V3 the committed bundle is identical to a fresh build
 OK    V4 no remote code in the 19 packaged files
 OK    V5 Capacitor core, cli and ios are 8.5.2
@@ -39,7 +39,7 @@ PASS  C6-CH  chromium: no Google sign-in anywhere on the first screen
 PASS  W3-CH  chromium: signed out, there is no "Delete my account" (nothing to delete)
 PASS  B1-CH  chromium: signed out, "I have a code" asks for the code, then for an account
 PASS  C5-CH  chromium: signed out, Become a member asks for full name and email only, with the steps and conditions
-PASS  C7-CH  chromium: signed out, Start your own group shows the request form, steps and conditions (nothing is sent)
+PASS  C7-CH  chromium: signed out, Request your own group shows the request form, steps and conditions (nothing is sent)
 PASS  W6-CH  chromium: User guide, Support and Privacy links at the foot of the screen
 PASS  C1-CH  chromium: invitation links use the Cuberoot address (Change 1)
 PASS  C1b-CH  chromium: the guide link is the Cuberoot guide
