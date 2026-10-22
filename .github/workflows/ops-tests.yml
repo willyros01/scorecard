@@ -54,7 +54,14 @@ jobs:
         run: |
           npm ci --no-audit --no-fund
           npm run -s bundle
-          npx playwright install --with-deps chromium webkit
+          # Ubuntu's package servers are sometimes very slow (22 Oct 2026: two runs
+          # stuck 30 minutes downloading WebKit's libraries). Each try is cut
+          # off after 8 minutes and tried again, up to 3 times.
+          for try in 1 2 3; do
+            timeout 480 npx playwright install --with-deps chromium webkit && break
+            echo "Browser install try $try did not finish; trying again"
+            [ "$try" = 3 ] && exit 1
+          done
       - name: Run SEC1-SEC5 and DEL1 against the emulators
         id: tests
         env:
