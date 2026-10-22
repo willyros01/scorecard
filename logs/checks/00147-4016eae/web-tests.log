@@ -5,7 +5,7 @@ PASS  C6-WK  webkit: no Google sign-in anywhere on the first screen
 PASS  W3-WK  webkit: signed out, there is no "Delete my account" (nothing to delete)
 PASS  B1-WK  webkit: signed out, "I have a code" asks for the code, then for an account
 PASS  C5-WK  webkit: signed out, Become a member asks for full name and email only, with the steps and conditions
-PASS  C7-WK  webkit: signed out, Start your own group shows the request form, steps and conditions (nothing is sent)
+PASS  C7-WK  webkit: signed out, Request your own group shows the request form, steps and conditions (nothing is sent)
 PASS  W6-WK  webkit: User guide, Support and Privacy links at the foot of the screen
 PASS  C1-WK  webkit: invitation links use the Cuberoot address (Change 1)
 PASS  C1b-WK  webkit: the guide link is the Cuberoot guide
@@ -30,7 +30,7 @@ PASS  C6-CH  chromium: no Google sign-in anywhere on the first screen
 PASS  W3-CH  chromium: signed out, there is no "Delete my account" (nothing to delete)
 PASS  B1-CH  chromium: signed out, "I have a code" asks for the code, then for an account
 PASS  C5-CH  chromium: signed out, Become a member asks for full name and email only, with the steps and conditions
-PASS  C7-CH  chromium: signed out, Start your own group shows the request form, steps and conditions (nothing is sent)
+PASS  C7-CH  chromium: signed out, Request your own group shows the request form, steps and conditions (nothing is sent)
 PASS  W6-CH  chromium: User guide, Support and Privacy links at the foot of the screen
 PASS  C1-CH  chromium: invitation links use the Cuberoot address (Change 1)
 PASS  C1b-CH  chromium: the guide link is the Cuberoot guide
