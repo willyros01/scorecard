@@ -1453,6 +1453,11 @@ async function rexDevice() {
   await waitForText(page, /Sign in/);
   await signIn(page, R1.email, R1.password);
   await page.waitForFunction(async () => (await import("/store.js")).currentAssociation() === "G1", null, { timeout: 30000 });
+  /* A real device: the sign-in is kept across a reload before a link arrives
+     (opening a link at once could beat the browser saving the sign-in). */
+  await page.waitForTimeout(1500);
+  await page.reload({ waitUntil: "load" });
+  await page.waitForFunction(async () => (await import("/store.js")).currentAssociation() === "G1", null, { timeout: 30000 });
   return page;
 }
 
@@ -1463,14 +1468,15 @@ await check("B25-3", "E2: a sign-in link for another email on a signed-in device
   const link = await latestSignInLink(NEW.email);
   const rex = await rexDevice();
   await rex.goto(link, { waitUntil: "load" });
-  await waitForText(rex, /This link is for a new person/);
+  await waitForText(rex, /This link is for a new person/).catch((e) => { throw new Error(`first opening: ${e.message}`); });
   if (!/rex@example\.com/.test(await text(rex))) throw new Error("the signed-in email is not shown");
   await rex.locator('[data-act="link-cancel"]').click();
   await rex.waitForFunction(async () => (await import("/store.js")).currentAssociation() === "G1", null, { timeout: 20000 });
   if ((await rex.evaluate(async () => (await import("/store.js")).currentEmail())) !== R1.email) throw new Error("Rex was signed out by Cancel");
   if ((await accountByEmail(NEW.email)).emailVerified) throw new Error("the link was used by Cancel");
+  await rex.waitForTimeout(1500);
   await rex.goto(link, { waitUntil: "load" });
-  await waitForText(rex, /This link is for a new person/);
+  await waitForText(rex, /This link is for a new person/).catch((e) => { throw new Error(`second opening, after Cancel: ${e.message}`); });
   await rex.locator('[data-act="link-sign-out"]').click();
   await waitForText(rex, /Create your password/);
   if ((await rex.inputValue('[name="email"]')) !== NEW.email) throw new Error("the new person's email is not filled in");
