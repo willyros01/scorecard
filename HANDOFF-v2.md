@@ -2,6 +2,36 @@
 
 Written so that anyone (Claude, ChatGPT or a person) can continue the work. Read it fully before changing anything.
 
+## NEXT BUILD after the development freeze — course deletion (Willy, 16 Oct 2026)
+
+Approved by Willy on 16 Oct 2026. Build only once he lifts the freeze, in ALL THREE versions: web (main), iPhone (v2), Android (android branch).
+Source: "The Marker — Design and Build Plan — Revised", section "Related Scorecard decision: course deletion".
+
+- Only Scorecard administrators may delete golf courses, enforced by the Firebase rules (today `courses` has `allow delete: if false`), not just the screen.
+- Deleting a course must preserve every posted round, score and handicap calculation (rounds already freeze course name, rating, slope and par).
+- The Marker has no course deletion and must not silently recreate a course deleted here.
+- Hand-entered course and tee details stay acceptable for official rounds, subject to the existing posting requirements.
+- DECIDED by Willy (16 Oct): a delete applies to ALL groups. Purpose: the course may hold wrong information. So it is a withdrawal: the course stays in Firestore only because posted rounds point to it, marked `withdrawn: true` with `withdrawnBy`, `withdrawnAt`, `withdrawnReason`, and vanishes from every course list (or shows as withdrawn).
+- DECIDED by Willy (16 Oct, 4:21 pm, supersedes "restore"): a withdrawn course is NEVER used, edited or restored again. The rules must refuse any update to a course whose `withdrawn` is true. Any number of withdrawn versions of the same course may exist. A replacement is a NEW course: entered by hand, or corrected details from the golf course database.
+- Field name matters: The Marker's worker (live, willyros01/marker) recognises a withdrawn course by `withdrawn == true`, refuses cards carrying the withdrawn details (same name, rating and slope), and accepts hand-entered or corrected details as a new course.
+- DECIDED by Willy (16 Oct): NO recalculation. Rounds already posted keep their frozen rating and slope and stay as they are.
+
+## NEXT BUILD after the development freeze — verified scorecard pictures correct course data (Willy, 16 Oct 2026, 7:41 pm)
+
+Decided by Willy. Build only once he lifts the freeze, in ALL THREE versions (web main, iPhone v2, Android android). Full spec: design document "The Marker — Design and Build Plan", section "Related Scorecard decision: verified scorecard pictures correct course data".
+
+- Course details read from a picture of the club's scorecard (The Marker, Cloudflare worker) and VERIFIED replace the golf course database's version of that course/tee for everyone; the database never overwrites a verified copy again.
+- If a verified rating/slope differs from the one a posted round used: that round's differential is recalculated, and so are the 20-round window, handicapIndex, roundCount and directory entries of every affected golfer in every group. Automatic, no human step.
+- Game/tournament results stay as played (course handicaps frozen on rounds). Corrected rounds show * everywhere, with the explanation: "* Corrected after the round: the course details were wrong in the golf course database and were replaced by the club's own scorecard on <date> (rating a -> b). The handicap index uses the corrected figure; the game result stands as played."
+- Only pictures read by signed-in Scorecard accounts (member, admin, owner) can trigger this. Players without an account may use a picture for their own round only; it never replaces stored data.
+- Verified = every value of the tee read (18 pars, handicap numbers, yards, rating, slope), pars and that tee's yards add up to the card's OUT/IN totals, handicap numbers 1-18 each once, believable rating (55-85) / slope (55-155) / par, course name matches, scorer confirms; any hand change makes it a hand entry instead.
+- Correction vs re-rating: each tee records its source (database / hand entry / verified picture, with who and when). Database figures contradicted by a verified picture = correction (recalculate past rounds). Verified figures contradicted by a newer verified picture = re-rating (from that day only, no recalculation).
+- Every correction is recorded (tee, old/new figures, who, when, every round and index changed) and can be undone.
+- Supersedes part of the course-withdrawal decision: withdrawal never recalculates; a verified correction does.
+- Scorecard changes: tee source field; worker recalculation job + correction records; round correction note and * display; rules let only the worker write these fields.
+- DECIDED (Willy, 16 Oct 7:48 pm): older courses with no recorded source count as "database" figures, so a verified picture can correct them and trigger the recalculation.
+- DECIDED (Willy, 16 Oct 7:48 pm): a picture is verified only when EVERY tee printed on the card is complete (18 yards adding up to that tee's OUT/IN, rating and slope read), not only the tee played.
+
 ## 2.30.0 — App Store release build (11 October 2026)
 
 Same code as beta.14, version label 2.30.0 with no beta. Built for App Store review (TestFlight build starts by itself from the v2 push). User guides and App Store Connect setup: ChatGPT. Web (main) stays on beta.14 until Willy decides. Second build the same day adds the App Store step (Apple ID 6817462903) to every invitation; keep the web off this version until Apple releases the app. See build/RELEASE-2.30.0.md.
@@ -224,3 +254,15 @@ Willy's test: a member deleted their own account, the deletion stopped part-way 
 - [Willy] TO DO for the Thursday Oct 8 build: (1) step 1 of deleteMyAccount must show and report the REAL error (not "Connect to the internet"); (2) put the reason in Send a report; (3) a test that lists every filtered collection-group query in the code and fails unless its index is in a repo index list that a script keeps live.
 - [Willy, Oct 2, 5:36 pm] TO DO for Thursday: invitation links one-time and personal (own secret per invitation), cancelled when used or when the account is deleted; "Send again" always makes a fresh link. Today: member links lock to the first account (reusable by it, TAKEN for others) and become usable by anyone after that account is deleted (deleteMyAccount/job remove the claim and unlink the golfer); the link carries the group join code. Admin links are already spent after one use. Propose before building.
 - [Willy, Oct 2, 8:48 pm] TO DO for Thursday: after joining through an invitation, Sign out lands on the INVITATION sign-in screen instead of the regular Sign in screen. Likely cause to check first: the app is re-handed its launch link (platform.initLinks → App.getLaunchUrl() returns the invitation URL again after signOutEverywhere's location.reload, and lastUsedKey's repeat window may not cover it), or the web address still carries ?join=. Fix so that a used invitation never reappears; add a test (join by invitation → sign out → plain Sign in screen, app mode and web).
+
+
+## NEXT BUILD after the development freeze — commit-rule fixes (Willy, 18 Oct 2026)
+
+Approved for planning by Willy on 18 Oct 2026; build only once he lifts the freeze. Full specification: Claude Doc "The Scorecard — fixes for after the freeze" (https://claude.ai/code/artifact/86482d42-634d-4f9c-9788-abd7ff4f4a65). In short, in this order: (2+3) a round edit or delete, the golfer's window/index/round count and every directory entry in ONE commit with preconditions, outbox queues it as one item (today deleteRoundAndRebuild/updateRound + rebuildGolferIndex are separate saves and the directory is refreshed ~4 s later by an admin's app); (5) load every collection as { ...d.data(), id: d.id } and never look up a course by an empty id; (1) lock the scores of rounds with enteredVia "marker" in the edit screen and in firestore.rules (gross, adjusted, differential, holes, rating, slope, par, courseHandicap, indexAtEntry unchanged) — corrections are made in The Marker (scorer 24 h, owner/admin any time); (4) deleting a game clears gameId on its rounds in the same commit, and a missing game never shows a course name (54 Golfing Buddies rounds point to deleted game msngo2mu2yqef3; one-off clean-up needs Willy's decision).
+
+
+## MOST IMPORTANT, first after the freeze — invitation opened on a device already signed in (Willy, 18 Oct 2026)
+
+Willy believed this was documented; it was not in these notes. Today: if an invitation link is opened while the app is signed in (e.g. as someone else), joining fails but the invitation is silently marked used — the invited person never gets to set their email and password, and the link is dead for them. AGREED: the app signs out FIRST (before any write), then shows the invitation screen to create email and password; the invitation is marked used only in the SAME commit that creates the account and membership — any failure writes nothing, the invitation stays valid, and the screen says so plainly. Check web, iPhone and Android; the invited person's own account already signed in (say already a member, do not consume); an invitation already lost this way must be resendable (Send again). Tests: signed in as another account → sign out → create-password screen, invitation still valid until the account exists; fault during joining → invitation still valid. Full text: Claude Doc "The Scorecard — fixes for after the freeze".
+
+- Entry-screens plan of 13 Oct 2026 (approval email, invitation on a signed-in device, recovery, deterministic first screen, wording; build 25, resubmit instead of releasing 2.30.0 — Willy's Option A) was never in these notes: it is "scorecard-approval-fix-plan.md" revision 5 (https://claude.ai/artifact/Q5BM51Z9RhwQWKWvtUjmdy), copied in full into the Claude Doc "The Scorecard — fixes for after the freeze" (https://claude.ai/code/artifact/86482d42-634d-4f9c-9788-abd7ff4f4a65), section "Most important". That doc is the master list to use after Apple approves 2.30.0 and Willy lifts the freeze.

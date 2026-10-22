@@ -1,6 +1,8 @@
 ## Scorecard Android — current device-accepted release (2026-10-15)
 
-Branch `android` contains the owner-accepted **2.30.1** Fire HD 8 APK (signed GitHub run **38320762144**). The native backup-to-Downloads repair and saved backup file were owner-verified on device, along with regular and Owner/Admin navigation/role-control visibility. See `ANDROID-PLAN.md` and `build/RELEASE-ANDROID-2.30.1.md` for evidence and the still-untested flows. Do **not** describe this Android acceptance as approval of the separate iOS `v2` **2.30.0 / Apple Build 24** App Store submission. Existing `main` web and older `ios` branches are protected; no code, Firebase, APK or signing changes were made for this documentation pass.
+Branch `android` contains the owner-accepted **2.30.1** Fire HD 8 APK (signed GitHub run **38320762144**). The native backup-to-Downloads repair and saved backup file were owner-verified on device, along with regular and Owner/Admin navigation/role-control visibility. See `ANDROID-PLAN.md` and `build/RELEASE-ANDROID-2.30.1.md` for evidence and the still-untested flows. Do **not** describe this Android acceptance as approval of the separate iOS `v2` **2.30.0 / Apple Build 27** App Store submission (Build 24 withdrawn 22 Oct 2026).
+
+**22 Oct 2026:** 2.30.2-android.1 adds the entry-screen fixes E1–E5 from `v2` (the same code as Apple Build 27, tested by Willy on TestFlight). Development frozen again from 22 Oct until explicit owner direction. Existing `main` web and older `ios` branches are protected; no code, Firebase, APK or signing changes were made for this documentation pass.
 
 ---
 
