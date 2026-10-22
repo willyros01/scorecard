@@ -1223,6 +1223,41 @@ export const isAnonymousSession = () => {
   return !!(user && user.isAnonymous);
 };
 
+/* Build 25, Fix E1/E4 (Willy, 13 and 22 Oct 2026): how this session was
+   signed in, read from the sign-in token Firebase keeps on the device (no
+   network needed). A session that came from an emailed sign-in link has not
+   had its own password confirmed by a password sign-in yet: the app shows
+   "Create your password" until it has. Returns "emailLink", "password", other
+   providers' names, or "" when it cannot be read. */
+export function signInMethod() {
+  const user = fb && fb.auth && fb.auth.currentUser;
+  if (!user || user.isAnonymous) return "";
+  try {
+    const token = user.accessToken || (user.stsTokenManager && user.stsTokenManager.accessToken) || "";
+    const part = String(token).split(".")[1] || "";
+    const json = JSON.parse(atob(part.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(part.length / 4) * 4, "=")));
+    return String((json.firebase && json.firebase.sign_in_provider) || "");
+  } catch { return ""; }
+}
+export const needsCreatePassword = () => signInMethod() === "emailLink";
+
+/* E1: "Create your password" for a session that came from a sign-in link.
+   Counts only when Firebase has saved it AND a fresh sign-in with that email
+   and password has worked — so the next start knows for certain (the session
+   is then a password session). Throws Firebase's own error otherwise; nothing
+   else is changed, and the screen stays on Create your password. */
+export async function createMyPassword(password) {
+  const user = fb && fb.auth && fb.auth.currentUser;
+  if (!user || !user.email) { const e = new Error("auth/no-current-user"); e.code = "auth/no-current-user"; throw e; }
+  const secret = String(password || "");
+  if (secret.length < 6) { const e = new Error("auth/weak-password"); e.code = "auth/weak-password"; throw e; }
+  await withTimeout(fb.mod.auth.updatePassword(user, secret), 20000, "Saving your password");
+  await withTimeout(fb.mod.auth.signInWithEmailAndPassword(fb.auth, user.email, secret), 20000, "Signing in with your new password");
+  await ensureAccountEmail();
+  emit();
+  return { ok: true, email: user.email };
+}
+
 /* After an email is attached, the token must carry it before the next read,
    or the rules still see an anonymous session. */
 async function refreshToken() {
@@ -1632,10 +1667,35 @@ export const plainName = (name) => /^[A-Za-z][A-Za-z'-]*( [A-Za-z][A-Za-z'-]*)+$
 /* Auto: the sign-in link that confirms the email. Nothing is created until it
    is tapped. */
 const APPLY_EMAIL_KEY = "golf:v2:applyEmail";
+/* Build 25 (E1, E3): the link carries the email it was sent to, so it works
+   on any device and the app can tell whose link it is. */
+function signInLinkSettings(email, approved = false) {
+  const e = encodeURIComponent(String(email || "").trim().toLowerCase());
+  const tail = `apply=1${approved ? "&approved=1" : ""}&e=${e}`;
+  const url = EMULATORS ? `${location.protocol}//${location.host}${location.pathname}?emulators=1&${tail}` : `${platform.joinBase()}?${tail}`;
+  return { url, handleCodeInApp: true };
+}
 export async function sendApplicationLink(email) {
-  const url = EMULATORS ? `${location.protocol}//${location.host}${location.pathname}?emulators=1&apply=1` : `${platform.joinBase()}?apply=1`;
-  await fb.mod.auth.sendSignInLinkToEmail(fb.auth, String(email || "").trim(), { url, handleCodeInApp: true });
+  await fb.mod.auth.sendSignInLinkToEmail(fb.auth, String(email || "").trim(), signInLinkSettings(email));
   try { localStorage.setItem(APPLY_EMAIL_KEY, String(email || "").trim()); } catch {}
+}
+/* E1: an approved applicant gets Firebase's "Sign in to The Scorecard" link
+   (the same link Auto mode uses), never the "reset your password" email. */
+export async function sendApprovalLink(email) {
+  await fb.mod.auth.sendSignInLinkToEmail(fb.auth, String(email || "").trim(), signInLinkSettings(email, true));
+}
+/* E3: "Send me a new link" — for an approved applicant whose link expired, was
+   used, or went to junk mail. Firebase sends it to that address only. */
+export const sendNewLink = (email) => sendApprovalLink(email);
+/* The email a sign-in link was sent to (from the link itself), or "". */
+export function applyLinkEmail() {
+  try { return String(new URLSearchParams(platform.linkQuery()).get("e") || "").trim().toLowerCase(); } catch { return ""; }
+}
+/* The link is no longer wanted on this device (Cancel, or after it is used). */
+export function dropApplyLink() {
+  try { localStorage.removeItem(APPLY_EMAIL_KEY); } catch {}
+  try { history.replaceState(null, "", EMULATORS ? `${location.pathname}?emulators=1` : location.pathname); } catch {}
+  platform.clearLinkQuery();
 }
 export const rememberedApplyEmail = () => { try { return localStorage.getItem(APPLY_EMAIL_KEY) || ""; } catch { return ""; } };
 export const isApplyLink = () => {
@@ -1646,16 +1706,15 @@ export const isApplyLink = () => {
    with the email confirmed), then set their chosen password. */
 export async function finishApplyLink({ email, password }) {
   const address = String(email || "").trim();
-  const cred = await fb.mod.auth.signInWithEmailLink(fb.auth, address, platform.signInLinkUrl());
-  /* The link is spent now. If the password cannot be set, carry on (they are
-     signed in) and say so: Forgot the password sets one later. */
-  let passwordFailed = false;
-  try { await fb.mod.auth.updatePassword(cred.user, password); } catch { passwordFailed = true; }
-  try { localStorage.removeItem(APPLY_EMAIL_KEY); } catch {}
-  try { history.replaceState(null, "", EMULATORS ? `${location.pathname}?emulators=1` : location.pathname); } catch {}
-  platform.clearLinkQuery();
+  await withTimeout(fb.mod.auth.signInWithEmailLink(fb.auth, address, platform.signInLinkUrl()), 20000, "Opening your link");
+  /* The link is spent now; this device is signed in from it. The password is
+     next (E1). If saving it fails, the session stays a link session, so every
+     start comes back to Create your password until it is saved. */
+  dropApplyLink();
   await refreshToken();
-  await ensureAccountEmail();
+  let passwordFailed = false;
+  try { await createMyPassword(password); } catch { passwordFailed = true; }
+  try { await ensureAccountEmail(); } catch {}
   return { ok: true, passwordFailed };
 }
 
@@ -1839,9 +1898,9 @@ export async function approveApplication({ application, golferName }) {
     throw e;   /* the claim stays: tap Approve again to retry */
   }
 
-  /* 5. The email. */
+  /* 5. The email: "Sign in to The Scorecard" with a one-time link (E1). */
   let emailFailed = false;
-  try { await fb.mod.auth.sendPasswordResetEmail(fb.auth, application.email); }
+  try { await sendApprovalLink(application.email); }
   catch { emailFailed = true; }
   return { ok: true, existingAccount, golferId, emailFailed };
 }
@@ -1854,9 +1913,9 @@ export function watchApprovals(callback) {
   return stop;
 }
 
-/* The password email again, for an approved applicant. */
+/* The sign-in link again, for an approved applicant (E1). */
 export async function resendApprovalEmail(email) {
-  await fb.mod.auth.sendPasswordResetEmail(fb.auth, String(email || "").trim());
+  await sendApprovalLink(email);
 }
 
 export async function rejectApplication(application) {
@@ -2647,6 +2706,8 @@ export async function groupsFromMemberships() {
       where("uid", "==", uid)
     ));
     noteRead(found, !found.empty);
+    /* Build 25 (E4): an empty answer from the device's own copy proves nothing. */
+    if (found.empty && found.metadata && found.metadata.fromCache) { lastGroupLookupError = "offline"; return []; }
 
     const groups = [];
     for (const d of found.docs) {
@@ -2672,7 +2733,15 @@ export async function groupsFromMemberships() {
 }
 
 
+/* Build 25, Fix E4: whether the last loadMyGroups() answer is certain — the
+   groups were read from the server, or the server confirmed there are none.
+   False after any failure, a cached-only answer or a guess. "Start your group"
+   and "Not in a group yet" are shown only when this is true. */
+let groupsKnown = false;
+export const groupsCertain = () => groupsKnown;
+
 export async function loadMyGroups() {
+  groupsKnown = false;
   if (!fb || !uid) return knownGroups();
   try {
     const { getDocs, getDoc } = fb.mod.store;
@@ -2711,7 +2780,10 @@ export async function loadMyGroups() {
        evidence — and concluding "no groups" is what offered somebody the
        create-a-group screen and nearly split their data. */
     if (!alive.length) {
+      lastGroupLookupError = "";
       const real = await groupsFromMemberships();
+      /* The membership search failed: nothing is certain. */
+      if (lastGroupLookupError) return knownGroups();
       if (real.length) {
         /* Heal the pointers so this is a one-off rather than every sign-in. */
         for (const group of real) {
@@ -2726,12 +2798,14 @@ export async function loadMyGroups() {
         }
         flush();
         try { localStorage.setItem(GROUPS_KEY, JSON.stringify(real)); } catch {}
+        groupsKnown = true;
         return real;
       }
     }
 
     if (alive.length || !listed.length) {
       try { localStorage.setItem(GROUPS_KEY, JSON.stringify(alive)); } catch {}
+      groupsKnown = true;
       return alive;
     }
     return knownGroups();

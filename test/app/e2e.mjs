@@ -83,6 +83,24 @@ async function usePasswordEmail(email, newPassword) {
   if (!done.ok) throw new Error(`resetPassword ${done.status}`);
 }
 
+/* Build 25 (E1): the sign-in link emails. */
+async function signInCodes(email) {
+  const r = await fetch(`${AUTH_ADMIN}/oobCodes`);
+  return ((await r.json()).oobCodes || []).filter((c) => c.email === email);
+}
+async function latestSignInLink(email, approved = true) {
+  const codes = (await signInCodes(email)).filter((c) => c.requestType === "EMAIL_SIGNIN");
+  if (!codes.length) throw new Error(`no sign-in link was sent to ${email}`);
+  const code = codes[codes.length - 1].oobCode;
+  return `${APP}&apply=1${approved ? "&approved=1" : ""}&e=${encodeURIComponent(email)}&apiKey=fake-api-key&mode=signIn&oobCode=${encodeURIComponent(code)}&lang=en`;
+}
+async function sendSignInLink(email) {
+  const continueUrl = `${APP}&apply=1&approved=1&e=${encodeURIComponent(email)}`;
+  const r = await fetch(`${AUTH}/accounts:sendOobCode?key=fake-api-key`, { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ requestType: "EMAIL_SIGNIN", email, continueUrl, canHandleCodeInApp: true }) });
+  if (!r.ok) throw new Error(`sendOobCode ${r.status}`);
+}
+
 /* ---- the app ---- */
 const text = (page) => page.evaluate(() => document.body.innerText);
 async function waitForText(page, re, ms = 20000) {
@@ -188,8 +206,8 @@ const newPage = async () => {
 /* E1–E2: the applicant, signed out */
 const pat = await newPage();
 await pat.goto(APP, { waitUntil: "load" });
-await check("E1", "signed out: Sign in, I have a code, Become a member or start a group; no sign-in happens by itself", async () => {
-  await waitForText(pat, /Become a member or start a group/);
+await check("E1", "signed out: Sign in, I have a code, Become a member or request a group; no sign-in happens by itself", async () => {
+  await waitForText(pat, /Become a member or request a group/);
   if (!/I have a code/.test(await text(pat))) throw new Error("no I have a code button");
   await pat.waitForTimeout(2000);
   const signedIn = await pat.evaluate(async () => (await import("/store.js")).hasUser());
@@ -329,10 +347,16 @@ await check("E4d", "two reviewers approving the same application at once: exactl
 });
 
 /* E5: the applicant chooses a password from the email and signs in */
-await check("E5", "the applicant chooses a password from the email, signs in and is in the PUBLIC group", async () => {
-  await usePasswordEmail(APPLICANT.email, APPLICANT.password);
-  await waitForText(pat, /Sign in/);
-  await signIn(pat, APPLICANT.email, APPLICANT.password);
+let applicantLink = "";
+await check("E5", "build 25 (E1): approval sends the Sign in link, not the reset email; the applicant creates a password once and is in the PUBLIC group", async () => {
+  if ((await signInCodes(APPLICANT.email)).some((c) => c.requestType === "PASSWORD_RESET")) throw new Error("the reset-password email was sent");
+  applicantLink = await latestSignInLink(APPLICANT.email);
+  await pat.goto(applicantLink, { waitUntil: "load" });
+  await waitForText(pat, /Create your password/);
+  if ((await pat.inputValue('[name="email"]')) !== APPLICANT.email) throw new Error("the email is not filled in from the link");
+  await pat.fill('[name="password"]', APPLICANT.password);
+  await pat.fill('[name="password-again"]', APPLICANT.password);
+  await pat.locator('[data-act="finish-apply"]').click();
   const uid = (await accountByEmail(APPLICANT.email)).localId;
   /* The welcome message is brief; what matters is that the app is in the group. */
   const end = Date.now() + 20000;
@@ -472,11 +496,11 @@ await check("E13", "an admin removes a regular member of their group, and has no
 const ORG = { name: "Olga Organiser", email: "olga@example.com", password: "olga-pass-1", group: "Tuesday Golfers" };
 const olga = await newPage();
 await olga.goto(APP, { waitUntil: "load" });
-await check("E15", "signed out: Start your own group sends a request (only after agreeing to the conditions)", async () => {
-  await waitForText(olga, /Become a member or start a group/);
+await check("E15", "signed out: Request your own group sends a request (only after agreeing to the conditions)", async () => {
+  await waitForText(olga, /Become a member or request a group/);
   await olga.locator('[data-act="show-choose"]').click();
   await olga.locator('[data-act="show-request"]').click();
-  await waitForText(olga, /Start your own group/);
+  await waitForText(olga, /Request your own group/);
   const fill = async () => {
     await olga.fill('[name="rq-name"]', ORG.name);
     await olga.fill('[name="rq-email"]', ORG.email);
@@ -608,7 +632,7 @@ await check("E21", "an email that already has an account is stopped on screen; n
   if (!(await getDocQuick(`accountEmails/${W.email}`))) throw new Error("the owner's email was not recorded");
   const p = await newPage();
   await p.goto(APP, { waitUntil: "load" });
-  await waitForText(p, /Become a member or start a group/);
+  await waitForText(p, /Become a member or request a group/);
   await p.locator('[data-act="show-choose"]').click();
   await p.locator('[data-act="show-apply"]').click();
   await waitForText(p, /What happens next/);
@@ -637,7 +661,7 @@ async function turnSwitch(mode) {
 async function applyAndOpenLink(name, email) {
   const p = await newPage();
   await p.goto(APP, { waitUntil: "load" });
-  await waitForText(p, /Become a member or start a group/);
+  await waitForText(p, /Become a member or request a group/);
   await p.locator('[data-act="show-choose"]').click();
   await p.locator('[data-act="show-apply"]').click();
   await waitForText(p, /You tap the link, which confirms your email/);
@@ -807,7 +831,7 @@ await check("E25", "first open shows the Terms of Use; decline locks; accept is 
   if (await fresh.locator("#termsAccept").isDisabled()) throw new Error("Accept stays off after the tick");
   await fresh.locator("#termsAccept").click();
   await fresh.waitForSelector('[data-act="sign-in"]', { timeout: 20000 });
-  /* beta.7: Become a member or start a group comes before I have a code. */
+  /* beta.7: Become a member or request a group comes before I have a code. */
   const member = await fresh.locator('[data-act="show-choose"]').boundingBox();
   const code = await fresh.locator('[data-act="enter-code"]').boundingBox();
   if (!member || !code || member.y > code.y) throw new Error("Become a member is not above I have a code");
@@ -1361,6 +1385,157 @@ await check("E34", "favourite courses: starred on the web, first in the app's co
   if (JSON.stringify(await getDocQuick(`users/${LOU.uid}/prefs/courses`) || {}).includes("cZ")) throw new Error("removing it in the app did not reach the account");
   if (web.errors.length) throw new Error(web.errors.join(" | "));
   await ctx.close();
+});
+
+/* ================= Build 25: the entry screens (E1–E5, Willy 13 and 22 Oct 2026) ================= */
+
+await check("B25-1", "E3: the same sign-in link opened again: 'This link no longer works', email filled in, and signing in there works", async () => {
+  const again = await newPage();
+  await again.goto(applicantLink, { waitUntil: "load" });
+  await waitForText(again, /Create your password/);
+  await again.fill('[name="password"]', "another-pass-9");
+  await again.fill('[name="password-again"]', "another-pass-9");
+  await again.locator('[data-act="finish-apply"]').click();
+  await waitForText(again, /This link no longer works/);
+  if ((await again.inputValue('[name="email"]')) !== APPLICANT.email) throw new Error("the email is not filled in");
+  if (!(await again.locator('[data-act="send-new-link"]').count())) throw new Error("no Send me a new link");
+  await again.fill('[name="password"]', APPLICANT.password);
+  await again.locator('[data-act="sign-in"]').first().click();
+  const end = Date.now() + 20000;
+  while (Date.now() < end && (await again.evaluate(async () => (await import("/store.js")).currentAssociation())) !== "PUBLIC") await again.waitForTimeout(300);
+  if ((await again.evaluate(async () => (await import("/store.js")).currentAssociation())) !== "PUBLIC") throw new Error("signing in did not open the group");
+  if (/Create your password/.test(await text(again))) throw new Error("asked for the password again");
+  await again.close();
+});
+
+await check("B25-2", "E1 rule 4: the password not saved (connection cut) — every start shows Create your password until it is; never Start your group", async () => {
+  const N = { email: "nina.link@example.com", password: "nina-pass-1" };
+  await signUp(N.email, "random-start-9x");
+  await sendSignInLink(N.email);
+  const nina = await newPage();
+  await nina.route("**/accounts:update**", (r) => r.abort());
+  await nina.goto(await latestSignInLink(N.email), { waitUntil: "load" });
+  await waitForText(nina, /Create your password/);
+  await nina.fill('[name="password"]', N.password);
+  await nina.fill('[name="password-again"]', N.password);
+  await nina.locator('[data-act="finish-apply"]').click();
+  await waitForText(nina, /password was not saved/);
+  await nina.reload({ waitUntil: "load" });
+  await waitForText(nina, /Create your password/);
+  if (!new RegExp(N.email.replace(/\./g, "\\.")).test(await text(nina))) throw new Error("the signed-in email is not shown");
+  await nina.unroute("**/accounts:update**");
+  await nina.fill('[name="password"]', N.password);
+  await nina.fill('[name="password-again"]', N.password);
+  await nina.locator('[data-act="create-password"]').click();
+  await waitForText(nina, /Not in a group yet/, 30000);
+  if (/Start your group|Create the group/.test(await text(nina))) throw new Error("offered to start a group");
+  await nina.reload({ waitUntil: "load" });
+  await waitForText(nina, /Not in a group yet/, 30000);
+  if (/Create your password/.test(await text(nina))) throw new Error("asked again after the password was saved");
+  if (nina.errors.length) throw new Error(nina.errors.join(" | "));
+});
+
+/* A device signed in as Rex (a regular member of G1). */
+async function rexDevice() {
+  const page = await newPage();
+  await page.goto(APP, { waitUntil: "load" });
+  await waitForText(page, /Sign in/);
+  await signIn(page, R1.email, R1.password);
+  await page.waitForFunction(async () => (await import("/store.js")).currentAssociation() === "G1", null, { timeout: 30000 });
+  return page;
+}
+
+await check("B25-3", "E2: a sign-in link for another email on a signed-in device: 'for a new person'; Cancel changes nothing; Sign out and continue opens the new person's Create your password", async () => {
+  const NEW = { email: "new.person@example.com", password: "newperson-pass-1" };
+  await signUp(NEW.email, "random-start-8x");
+  await sendSignInLink(NEW.email);
+  const link = await latestSignInLink(NEW.email);
+  const rex = await rexDevice();
+  await rex.goto(link, { waitUntil: "load" });
+  await waitForText(rex, /This link is for a new person/);
+  if (!/rex@example\.com/.test(await text(rex))) throw new Error("the signed-in email is not shown");
+  await rex.locator('[data-act="link-cancel"]').click();
+  await rex.waitForFunction(async () => (await import("/store.js")).currentAssociation() === "G1", null, { timeout: 20000 });
+  if ((await rex.evaluate(async () => (await import("/store.js")).currentEmail())) !== R1.email) throw new Error("Rex was signed out by Cancel");
+  if ((await accountByEmail(NEW.email)).emailVerified) throw new Error("the link was used by Cancel");
+  await rex.goto(link, { waitUntil: "load" });
+  await waitForText(rex, /This link is for a new person/);
+  await rex.locator('[data-act="link-sign-out"]').click();
+  await waitForText(rex, /Create your password/);
+  if ((await rex.inputValue('[name="email"]')) !== NEW.email) throw new Error("the new person's email is not filled in");
+  await rex.fill('[name="password"]', NEW.password);
+  await rex.fill('[name="password-again"]', NEW.password);
+  await rex.locator('[data-act="finish-apply"]').click();
+  await rex.waitForFunction(async (e) => (await import("/store.js")).currentEmail() === e, NEW.email, { timeout: 20000 });
+  await waitForText(rex, /Not in a group yet|Welcome|password is saved/, 30000);
+  if (rex.errors.length) throw new Error(rex.errors.join(" | "));
+  await rex.close();
+});
+
+await check("B25-4", "E2: an invitation on a signed-in device asks 'Is this invitation for you?'; No → sign out and continue → the new person creates an account; the invitation stays valid until then", async () => {
+  await put("golfers/gKim", { name: "Kim Invitee", nameKey: "kim-invitee", linkedUid: null, groups: ["G1"] });
+  await put("golferNames/kim-invitee", { golferId: "gKim", name: "Kim Invitee" });
+  await put("associations/G1/roster/gKim", { golferId: "gKim" });
+  await put("associations/G1/directory/gKim", { golferId: "gKim", displayName: "Kim Invitee", handicapIndex: null });
+  const url = await freshInvitation("gKim");
+  const token = new URL(url).searchParams.get("join").split(".")[1];
+  const local = `${APP}&${new URL(url).search.slice(1)}`;
+  const rex = await rexDevice();
+  await rex.goto(local, { waitUntil: "load" });
+  await waitForText(rex, /Is this invitation for you\?/);
+  if (/Joining as/.test(await text(rex))) throw new Error("went straight to Joining as");
+  await rex.locator('[data-act="link-not-me"]').click();
+  await waitForText(rex, /This link is for a new person/);
+  if ((await getDoc(`associations/G1/invitationTokens/${token}`)).state !== "pending") throw new Error("the invitation was used up");
+  await rex.locator('[data-act="link-sign-out"]').click();
+  await waitForText(rex, /You.re invited/);
+  await rex.fill('[name="email"]', "kim@example.com");
+  await rex.fill('[name="password"]', "kim-pass-1");
+  await rex.fill('[name="password-again"]', "kim-pass-1");
+  await rex.locator('[data-act="create-account"]').click();
+  await waitForText(rex, /Kim Invitee/);
+  if (/Is this invitation for you/.test(await text(rex))) throw new Error("asked the new person again");
+  await rex.locator('[data-act="accept-named"]').click();
+  await rex.waitForFunction(async () => (await import("/store.js")).currentAssociation() === "G1", null, { timeout: 20000 });
+  const kim = await accountByEmail("kim@example.com");
+  if ((await getDoc("golfers/gKim")).linkedUid !== kim.localId) throw new Error("Kim's golfer is not linked to her account");
+  if ((await getDoc(`associations/G1/invitationTokens/${token}`)).state !== "used") throw new Error("the invitation was not spent by Kim's join");
+  await rex.close();
+});
+
+await check("B25-5", "E2: 'Yes, it's for me' shows the invitation itself even when already in a group; Cancel elsewhere leaves Rex signed in", async () => {
+  await put("golfers/gYes", { name: "Yes Person", nameKey: "yes-person", linkedUid: null, groups: ["G1"] });
+  await put("golferNames/yes-person", { golferId: "gYes", name: "Yes Person" });
+  await put("associations/G1/roster/gYes", { golferId: "gYes" });
+  const url = await freshInvitation("gYes");
+  const rex = await rexDevice();
+  await rex.goto(`${APP}&${new URL(url).search.slice(1)}`, { waitUntil: "load" });
+  await waitForText(rex, /Is this invitation for you\?/);
+  await rex.locator('[data-act="link-for-me"]').click();
+  await waitForText(rex, /Yes Person/);
+  if (!(await rex.locator('[data-act="accept-named"]').count())) throw new Error("no join button");
+  await rex.close();
+});
+
+await check("B25-6", "E4 rule 1: the group list cannot be loaded — never 'Start your group', even for the group creator", async () => {
+  const page = await newPage();
+  await page.goto(APP, { waitUntil: "load" });
+  await waitForText(page, /Sign in/);
+  await page.route("**/127.0.0.1:8080/**", (r) => r.abort());
+  await signIn(page, W.email, W.password);
+  await waitForText(page, /Can.t check your account right now|You.re offline/, 40000);
+  if (/Start your group|Create the group|Not in a group yet/.test(await text(page))) throw new Error("a no-group screen was shown although nothing could be checked");
+  await page.close();
+});
+
+await check("B25-7", "E5: the new wording — request a group; no 'Only create a group here'", async () => {
+  const page = await newPage();
+  await page.goto(APP, { waitUntil: "load" });
+  await waitForText(page, /Become a member or request a group/);
+  await page.locator('[data-act="show-choose"]').click();
+  await waitForText(page, /Request your own group/);
+  if (/Start your own group|start a group/.test(await text(page))) throw new Error("the old wording is still shown");
+  await page.close();
 });
 
 await browser.close();
