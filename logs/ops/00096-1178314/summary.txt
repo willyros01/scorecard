@@ -1,9 +1,9 @@
 kind:    ops
 result:  success
 branch:  v2
-commit:  88549d793ae9a52f92091c0ea72bc483476df7f7
-run:     65 (id 37092813634)
-time:    2026-10-03T03:24:56Z
+commit:  11783144ee5e2658562abc10b4ebd01e5d4b8204
+run:     96 (id 39850296190)
+time:    2026-10-22T20:42:18Z
 
 --- last lines of ops-tests.log ---
 PASS  IX2 succeeds (exit 0)
