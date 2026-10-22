@@ -260,6 +260,10 @@ async function inspect() {
   const removable = [];
   const keptBack = [];
   for (const golfer of golfers) {
+    /* Already archived (by an earlier Tidy run or a merge): nothing left to do,
+       so not reported again (Willy, 22 Oct 2026 — it looked as if the fix had
+       not worked). */
+    if (golfer.archived) continue;
     const rounds = roundsByGolfer.get(golfer.id) || 0;
     const onRoster = rosterIds.has(golfer.id);
     const linked = !!golfer.linkedUid;
