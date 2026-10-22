@@ -298,7 +298,7 @@ for (const [name, type] of browsers) {
       await expectNoUser(page);
       const t = await bodyText(page);
       if (!/I have a code/.test(t)) throw new Error("no I have a code button");
-      if (!/Become a member or start a group/.test(t)) throw new Error("no Become a member or start a group button");
+      if (!/Become a member or request a group/.test(t)) throw new Error("no Become a member or request a group button");
       if (/Apply to join|Used The Scorecard in Safari/.test(t)) throw new Error("the first screen still has the old choices");
       if (/Create the group|Start your group/.test(t)) throw new Error("offered a group while signed out");
     });
@@ -320,12 +320,12 @@ for (const [name, type] of browsers) {
       await page.locator('[data-act="hide-code"]').first().click();
       await waitForText(page, /Type the group code you were given/);
       await page.locator('[data-act="hide-apply"]').first().click();
-      await waitForText(page, /Become a member or start a group/);
+      await waitForText(page, /Become a member or request a group/);
       await expectNoUser(page, 500);
     });
     await check(`C5-${tag}`, `${name}: signed out, Become a member asks for full name and email only, with the steps and conditions`, async () => {
       await page.locator('[data-act="show-choose"]').first().click();
-      await waitForText(page, /Start your own group/);
+      await waitForText(page, /Request your own group/);
       await page.locator('[data-act="show-apply"]').first().click();
       await waitForText(page, /What happens next/);
       const t0 = await bodyText(page);
@@ -337,9 +337,9 @@ for (const [name, type] of browsers) {
       await waitForText(page, /Type your full name/);
       await expectNoUser(page, 1000);
       await page.locator('[data-act="show-choose"]').first().click();
-      await waitForText(page, /Start your own group/);
+      await waitForText(page, /Request your own group/);
     });
-    await check(`C7-${tag}`, `${name}: signed out, Start your own group shows the request form, steps and conditions (nothing is sent)`, async () => {
+    await check(`C7-${tag}`, `${name}: signed out, Request your own group shows the request form, steps and conditions (nothing is sent)`, async () => {
       await page.locator('[data-act="show-request"]').first().click();
       await waitForText(page, /Tell us about your group/);
       for (const f of ["rq-name", "rq-email", "rq-group", "rq-size", "rq-where", "rq-note", "rq-agree"]) {
@@ -352,7 +352,7 @@ for (const [name, type] of browsers) {
       await expectNoUser(page, 500);
       await page.locator('[data-act="show-choose"]').first().click();
       await page.locator('[data-act="hide-apply"]').first().click();
-      await waitForText(page, /Become a member or start a group/);
+      await waitForText(page, /Become a member or request a group/);
     });
     await check(`W6-${tag}`, `${name}: User guide, Support and Privacy links at the foot of the screen`, async () => {
       const t = await bodyText(page);
@@ -443,7 +443,7 @@ for (const [name, type] of browsers) {
     await page.goto(`${BASE}/`, { waitUntil: "load" });
     let user = null;
     await check(`W5-${tag}`, `${name} (app): the first screen is Sign in with the two buttons, and nothing else to choose`, async () => {
-      await waitForText(page, /Become a member or start a group/);
+      await waitForText(page, /Become a member or request a group/);
       const t = await bodyText(page);
       if (!/I have a code/.test(t) || !/Forgot the password/.test(t)) throw new Error("a choice is missing");
       if (/Apply to join|Used The Scorecard in Safari/.test(t)) throw new Error("old choices still shown");

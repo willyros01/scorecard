@@ -241,13 +241,22 @@ let toldAboutPromotion = false;
 let editingGame = false;
 let invitedGolfer = null;
 let invitedGroupName = "";
+/* Build 25, Fixes E2–E4 (Willy, 13 and 22 Oct 2026).
+   linkAnswer: what the signed-in person said about the link waiting on this
+   device — { key, forMe: true | false }, for that link only.
+   groupState: "some" (a group is open), "none" (the server confirmed this
+   account belongs to no group) or "unknown" (it could not be checked).
+   linkProblem: a sign-in link that no longer works — { email }. */
+let linkAnswer = null;
+let groupState = "unknown";
+let linkProblem = null;
 /* Version 2.0 Phase B: which account card a signed-out (or old guest) screen
    shows — "create" or "signin". Null means the screen's own default. */
 let accountMode = null;
 const claimedOnce = new Set();   /* golfers this session has already tried to claim (screenEnter) */
 /* Version 2.0 Phase C: the PUBLIC group. */
 /* beta.3: the signed-out screens. null = the first screen (Sign in);
-   "code" = I have a code; "choose" = Become a member or start a group;
+   "code" = I have a code; "choose" = Become a member or request a group;
    "member" = the public group application; "group" = a private group request. */
 let adminTab = "cockpit";
 /* beta.5: the screen to return to after Tidy (kept for this browser tab only). */
@@ -431,6 +440,161 @@ function flashMsg(msg) {
  * Joining by invitation still needs nothing at all. A guest taps a link and
  * types a name.
  */
+/* ================= Build 25: the entry screens (Fixes E1–E5) =================
+ *
+ * Willy, 13 Oct 2026: signing in, accepting an invitation and a new person's
+ * first sign-in must be right every time — deterministic, no guessing, and
+ * safe when unsure. Willy, 22 Oct 2026: on a device where somebody is already
+ * signed in, ask first ("Is this invitation for you?") and sign out only when
+ * they say it is for somebody else (option B).
+ *
+ * The first matching rule decides, from what Firebase has actually saved:
+ *   1. a fact that could not be checked: "Can't check your account right now";
+ *   2. a link waiting, somebody else signed in: "Is this … for you?" (E2);
+ *   3. a link waiting, nobody signed in: that link's first-time screen;
+ *   4. signed in from a link, no password created yet: Create your password;
+ *   5. an approval waiting: finish joining (checkPublicApproval);
+ *   6. groups confirmed: open the group;
+ *   7. no groups confirmed: Start your group (group creators only) or
+ *      "Not in a group yet". Never after a failed load or a lost connection. */
+
+/* The link waiting on this device, if any. */
+function pendingLink() {
+  const invite = db.readJoinLink();
+  if (invite) return { kind: "invite", key: `join:${invite.associationId}.${invite.token || invite.code || ""}.${invite.golferId || ""}`, invite };
+  if (db.isApplyLink()) return { kind: "signin", key: `signin:${db.applyLinkEmail()}`, email: db.applyLinkEmail() };
+  return null;
+}
+const sameEmail = (a, b) => !!a && !!b && String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
+
+/* What a signed-in device shows before anything else, or "" for nothing. */
+function entryScreen() {
+  if (!db.hasUser() || db.isAnonymousSession()) return "";
+  const link = pendingLink();
+  if (link) {
+    const answered = linkAnswer && linkAnswer.key === link.key ? linkAnswer : null;
+    if (link.kind === "signin") {
+      /* The link names its email: another account's link is for a new person;
+         this account's own link is not needed — it is already signed in. */
+      if (link.email && !sameEmail(link.email, db.currentEmail())) return screenLinkForSomebodyElse(link);
+      if (!link.email && !answered) return screenLinkForWho(link);
+      if (answered && !answered.forMe) return screenLinkForSomebodyElse(link);
+      db.dropApplyLink();
+    } else {
+      if (!answered) return screenLinkForWho(link);
+      if (!answered.forMe) return screenLinkForSomebodyElse(link);
+      /* It is theirs: the invitation itself, even if they already have a group. */
+      return screenJoin();
+    }
+  }
+  if (db.needsCreatePassword()) return screenCreatePassword();
+  return "";
+}
+
+/* E2: rule 2, first question. */
+function screenLinkForWho(link) {
+  const what = link.kind === "invite" ? "invitation" : "link";
+  return `<div class="stack">
+    ${flashBar()}
+    <div class="card padded">
+      <h2 class="panel-title">Is this ${what} for you?</h2>
+      <p class="lead">Signed in as <b>${esc(db.currentEmail())}</b>.</p>
+      <p class="hint">${link.kind === "invite" ? "An invitation creates a new account for the person it was sent to." : "This link sets up an account for the person it was sent to."} Nothing is used up until that person's account exists.</p>
+      <div class="inline-actions stacked">
+        <button class="btn" data-act="link-for-me">Yes, it's for me</button>
+        <button class="btn ghost" data-act="link-not-me">No, it's for somebody else</button>
+      </div>
+    </div>
+    ${versionBlock()}
+  </div>`;
+}
+
+/* E2: rule 2, the link belongs to a new person. */
+function screenLinkForSomebodyElse(link) {
+  return `<div class="stack">
+    ${flashBar()}
+    <div class="card padded">
+      <h2 class="panel-title">This link is for a new person</h2>
+      <p class="lead">Signed in as <b>${esc(db.currentEmail())}</b>${link.email ? `. The link was sent to <b>${esc(link.email)}</b>` : ""}.</p>
+      <p class="hint">To use it, sign out first. Your account, groups and rounds stay exactly as they are; sign back in any time. ${link.kind === "invite" ? "The invitation stays valid until the new person's account exists." : ""}</p>
+      <div class="inline-actions stacked">
+        <button class="btn" data-act="link-sign-out" ${joining ? "disabled" : ""}>Sign out and continue</button>
+        <button class="btn ghost" data-act="link-cancel">Cancel</button>
+      </div>
+      <p class="hint">Cancel keeps you signed in and changes nothing.</p>
+    </div>
+    ${versionBlock()}
+  </div>`;
+}
+
+/* E1 / rule 4: signed in from a sign-in link, the password not created yet.
+   Every start comes back here until it is saved. */
+function screenCreatePassword() {
+  return `<div class="stack">
+    ${flashBar()}
+    ${offlineAccountNote()}
+    <div class="card padded">
+      <h2 class="panel-title">Create your password</h2>
+      <p class="lead">For <b>${esc(db.currentEmail())}</b>.</p>
+      <p class="hint">One time only. You sign in with this email and password on every device.</p>
+      <label class="lbl">New password</label>
+      <input class="field" name="password" type="password" placeholder="At least 6 characters" autocomplete="new-password">
+      <label class="lbl">Password again</label>
+      <input class="field" name="password-again" type="password" placeholder="At least 6 characters" autocomplete="new-password">
+      <p class="hint"><b>Not your email password.</b> Pick a different one, for The Scorecard only.</p>
+      <div class="inline-actions stacked">
+        <button class="btn" data-act="create-password" ${joining ? "disabled" : ""}>${joining ? "Saving…" : "Save my password"}</button>
+      </div>
+      <p class="hint">Already created one? <button class="linkbtn" data-act="have-password">Sign in with it</button></p>
+    </div>
+    ${versionBlock()}
+  </div>`;
+}
+
+/* E3: a sign-in link that no longer works (expired, or already used). */
+function screenLinkProblem() {
+  const email = (linkProblem && linkProblem.email) || authForm.email || "";
+  return `<div class="stack">
+    ${flashBar()}
+    ${offlineAccountNote()}
+    <div class="card padded">
+      <h2 class="panel-title">This link no longer works</h2>
+      <p class="hint">It has expired or was already used. If you already created your password, sign in below. If not, ask for a new link.</p>
+      <label class="lbl">Email</label>
+      <input class="field" name="email" type="email" value="${esc(email)}" placeholder="you@example.com" autocomplete="username" autocapitalize="none">
+      <div class="inline-actions stacked">
+        <button class="btn ghost" data-act="send-new-link" ${joining ? "disabled" : ""}>Send me a new link</button>
+      </div>
+      <label class="lbl">Password</label>
+      <input class="field" name="password" type="password" placeholder="Your Scorecard password" autocomplete="current-password">
+      <div class="inline-actions stacked">
+        <button class="btn" data-act="sign-in" ${joining ? "disabled" : ""}>${joining ? "Signing in…" : "Sign in"}</button>
+      </div>
+      <p class="hint">A new link works only for an application that was approved, or a public application waiting for its checks. It sometimes lands in junk mail.</p>
+      <p class="hint"><button class="linkbtn" data-act="link-problem-done">Back to Sign in</button></p>
+    </div>
+    ${versionBlock()}
+  </div>`;
+}
+
+/* E3/E4 rule 1: a fact could not be checked. Nothing is created, joined or
+   discarded, and any link is kept. */
+function screenCannotCheck() {
+  return `<div class="stack">
+    ${flashBar()}
+    <div class="card padded">
+      <h2 class="panel-title">Can't check your account right now</h2>
+      <p class="lead">Signed in as <b>${esc(db.currentEmail())}</b>.</p>
+      <p class="hint">Your groups could not be loaded — usually no connection, or a slow one. Nothing has been changed or lost.</p>
+      <div class="inline-actions stacked">
+        <button class="btn" data-act="look-again">Try again</button>
+        <button class="btn ghost" data-act="sign-out-plain">Sign out</button>
+      </div>
+    </div>
+    ${versionBlock()}
+  </div>`;
+}
+
 function screenJoin() {
   const invite = db.readJoinLink();
 
@@ -527,6 +691,9 @@ function screenJoin() {
 
   const signedIn = db.isSignedIn();
 
+  /* E4 rule 1: "no groups" is shown only when the server confirmed it. */
+  if (signedIn && groupState !== "none") return screenCannotCheck();
+
   return `<div class="stack">
     ${flashBar()}
 
@@ -613,14 +780,14 @@ function screenCodeFirst() {
 function screenChoose() {
   return `<div class="stack">
     ${flashBar()}
-    <div class="panel-head"><h2 class="panel-title">Become a member or start a group</h2></div>
+    <div class="panel-head"><h2 class="panel-title">Become a member or request a group</h2></div>
     <p class="hint" style="margin-top:0">Choose one. Every application is read by a person, and approval is subject to the conditions shown on the next screen.</p>
     <button class="choice" data-act="show-apply">
       <span class="choice-title">Become a member</span>
       <span class="hint">Join the public group and track your handicap with golfers from everywhere.</span>
     </button>
     <button class="choice" data-act="show-request">
-      <span class="choice-title">Start your own group</span>
+      <span class="choice-title">Request your own group</span>
       <span class="hint">A private group for your friends or your club, with you as its admin.</span>
     </button>
     <p class="hint">Invited to a private group? Tap the link you were sent instead.</p>
@@ -647,7 +814,7 @@ function screenGroupRequest() {
     ${flashBar()}
     ${offlineAccountNote()}
     <div class="card padded">
-      <h2 class="panel-title">Start your own group</h2>
+      <h2 class="panel-title">Request your own group</h2>
       <p class="hint">Tell us about your group. When it is approved, the group is created and you become its admin.</p>
       <label class="lbl">Your full name</label>
       <input class="field" name="rq-name" value="${esc(f.fullName)}" placeholder="e.g. Willy Rosales" autocomplete="name" maxlength="80">
@@ -722,7 +889,7 @@ function screenApply() {
       <div class="card padded">
         <h2 class="panel-title">Check your email</h2>
         <p class="lead">Thank you. A link to finish joining has gone to <b>${esc(applySentTo)}</b>.</p>
-        <p class="hint">Open that email on this phone or computer and tap the link. It confirms your email; then you choose your password and you are in the public group, once the last checks pass. Otherwise your application waits for a person to look at it.</p>
+        <p class="hint">Open that email on this phone or computer and tap the link. It confirms your email; then you create your password and you are in the public group, once the last checks pass. Otherwise your application waits for a person to look at it.</p>
         <p class="hint">The email comes from Firebase, which The Scorecard uses for accounts. It sometimes lands in junk mail.</p>
         <div class="inline-actions stacked"><button class="btn ghost" data-act="hide-apply">Back to Sign in</button></div>
       </div>
@@ -735,7 +902,7 @@ function screenApply() {
       <div class="card padded">
         <h2 class="panel-title">Application sent</h2>
         <p class="lead">Thank you. Every application is read by a person, so it can take a day or two.</p>
-        <p class="hint">When it is approved, an email goes to <b>${esc(applySentTo)}</b> with a link to choose your password. Then open The Scorecard and sign in with that email and password.</p>
+        <p class="hint">When it is approved, an email titled <b>Sign in to The Scorecard</b> goes to <b>${esc(applySentTo)}</b>. Tap the link in it and create your password — one time only. Then you are in.</p>
         <p class="hint">The email comes from Firebase, which The Scorecard uses for accounts. It sometimes lands in junk mail.</p>
         <div class="inline-actions stacked"><button class="btn ghost" data-act="hide-apply">Back to Sign in</button></div>
       </div>
@@ -749,7 +916,7 @@ function screenApply() {
       <h2 class="panel-title">Become a member</h2>
       <p class="hint">${auto
         ? "Give your full name and your email. No password yet. You get an email with a link to finish joining."
-        : "Give your full name and your email. No password yet. When a person has approved it, you get an email to choose your password."}</p>
+        : "Give your full name and your email. No password yet. When a person has approved it, you get an email with a link to create your password."}</p>
       <label class="lbl">Full name</label>
       <input class="field" name="apply-name" value="${esc(joinForm.name || "")}" placeholder="e.g. Willy Rosales" autocomplete="name" maxlength="80">
       <label class="lbl">Email</label>
@@ -760,14 +927,14 @@ function screenApply() {
       ${auto ? stepsBlock([
         "You send this application.",
         "You get an email with a link. It comes from Firebase, which The Scorecard uses for accounts, and it sometimes lands in junk mail.",
-        "You tap the link, which confirms your email, and choose your password.",
+        "You tap the link, which confirms your email, and create your password.",
         "If the automatic checks pass, you are in the public group straight away. If not, a person reviews your application, usually within one or two days.",
         "You can start entering your rounds.",
       ]) : stepsBlock([
         "You send this application.",
         "A person reviews it, usually within one or two days.",
-        "If it is approved, you get an email with a link to choose your password. It comes from Firebase, which The Scorecard uses for accounts, and it sometimes lands in junk mail.",
-        "You choose your password, open The Scorecard and sign in with your email and that password.",
+        "If it is approved, you get an email titled Sign in to The Scorecard. It comes from Firebase, which The Scorecard uses for accounts, and it sometimes lands in junk mail.",
+        "You tap the link in it and create your password, one time only.",
         "You are in the public group and can start entering your rounds.",
       ])}
       <p class="hint">If your application is not approved, you will not receive an email.</p>
@@ -787,17 +954,17 @@ function screenFinishApply() {
     ${flashBar()}
     ${offlineAccountNote()}
     <div class="card padded">
-      <h2 class="panel-title">Finish joining</h2>
-      <p class="hint">Your email is confirmed by this link. Type the same email, choose a password for The Scorecard, and you are done.</p>
+      <h2 class="panel-title">Create your password</h2>
+      <p class="hint">This link confirms your email. Create a password for The Scorecard and you are done — one time only.</p>
       <label class="lbl">Email</label>
-      <input class="field" name="email" type="email" value="${esc(authForm.email || db.rememberedApplyEmail())}" placeholder="you@example.com" autocomplete="username" autocapitalize="none">
-      <label class="lbl">Choose a password for this app</label>
+      <input class="field" name="email" type="email" value="${esc(db.applyLinkEmail() || authForm.email || db.rememberedApplyEmail())}" placeholder="you@example.com" autocomplete="username" autocapitalize="none" ${db.applyLinkEmail() ? "readonly" : ""}>
+      <label class="lbl">New password</label>
       <input class="field" name="password" type="password" placeholder="At least 6 characters" autocomplete="new-password">
       <label class="lbl">The same password again</label>
       <input class="field" name="password-again" type="password" placeholder="At least 6 characters" autocomplete="new-password">
       <p class="hint"><b>Not your email password.</b> Pick a different one, for The Scorecard only.</p>
       <div class="inline-actions stacked">
-        <button class="btn" data-act="finish-apply" ${joining ? "disabled" : ""}>${joining ? "Finishing…" : "Finish joining"}</button>
+        <button class="btn" data-act="finish-apply" ${joining ? "disabled" : ""}>${joining ? "Saving…" : "Save my password"}</button>
       </div>
     </div>
     ${versionBlock()}
@@ -808,25 +975,42 @@ async function finishApplyHere() {
   const fields = readNewAccountFields();
   if (!fields) return;
   joining = true;
-  busy("Finishing");
+  busy("Saving your password");
   render();
   let finished = { ok: false };
   try {
     finished = await db.finishApplyLink(fields);
   } catch (err) {
-    joining = false; idle();
+    joining = false; idleAll();
     const code = String((err && (err.code || err.message)) || "");
     if (/invalid-action-code|expired-action-code/.test(code)) {
-      db.clearJoinLink();
-      flashMsg("This link has expired or was already used. If you set a password, sign in with it; otherwise apply again.");
+      /* E3: expired or already used — never a dead end. */
+      linkProblem = { email: db.applyLinkEmail() || fields.email };
+      db.dropApplyLink();
     } else if (/invalid-email|user-mismatch/.test(code)) {
       flashMsg("That is not the email the link was sent to. Type the email you applied with.");
     } else {
-      flashMsg(`It did not finish: ${code || "no connection"}. Tap Finish joining again.`);
+      flashMsg(`Nothing was saved: ${code || "no connection"}. Check the connection and tap Save my password again.`);
     }
     return render();
   }
-  /* Approved by a reviewer already? Join that way; otherwise try Auto. */
+  joining = false;
+  idleAll();
+  if (finished.passwordFailed) {
+    /* Signed in from the link, password not saved: rule 4 shows Create your
+       password again, now and at every start, until it is saved. */
+    flashMsg("Your email is confirmed, but the password was not saved. Type it again and tap Save my password.");
+    return render();
+  }
+  await afterPasswordCreated();
+}
+
+/* E1: the password is saved and confirmed by a fresh sign-in. Finish any
+   approval (rule 5), then the person's own groups (rule 6/7). */
+async function afterPasswordCreated() {
+  joining = true;
+  busy("Finishing");
+  render();
   let result = { waiting: true };
   try {
     const manual = await db.joinPublicIfApproved();
@@ -835,16 +1019,44 @@ async function finishApplyHere() {
   } catch { result = { waiting: true }; }
   joining = false;
   idleAll();
-  const pw = finished && finished.passwordFailed
-    ? " Your password could not be set: on the Sign in screen, tap Forgot the password to choose one." : "";
-  if (result.joined) {
+  if (result && result.joined) {
     await start(db.PUBLIC_ID);
+    groupState = "some";
     tab = "enter";
-    flashMsg(`Welcome to the public group. Post your rounds on the Enter tab.${pw}`);
+    flashMsg("Welcome to the public group. Your password is saved — use this email and password on every device. Post your rounds on the Enter tab.");
+    return render();
+  }
+  await settleGroup(db.recallAssociation());
+  await checkPublicApproval();
+  if (!db.currentAssociation()) {
+    flashMsg("Your password is saved. If you applied to the public group, your application waits for a person to review it; you will get an email when it is approved.");
   } else {
-    flashMsg(`Your email is confirmed${pw ? "" : " and your password is set"}. Your application now waits for a person to review it. You will get an email when it is approved.${pw}`);
+    flashMsg("Your password is saved. Use this email and password on every device.");
   }
   render();
+}
+
+async function createPasswordHere() {
+  const password = (view.querySelector('[name="password"]') || {}).value || "";
+  const again = (view.querySelector('[name="password-again"]') || {}).value || "";
+  if (password.length < 6) { flashMsg("The password needs at least six characters"); return render(); }
+  if (password !== again) { flashMsg("The two passwords are not the same. Type them again."); return render(); }
+  joining = true;
+  busy("Saving your password");
+  render();
+  try {
+    await db.createMyPassword(password);
+  } catch (err) {
+    joining = false; idleAll();
+    const code = String((err && (err.code || err.message)) || "");
+    flashMsg(/weak-password/.test(code) ? "That password is too weak. Pick a longer one." :
+      /requires-recent-login/.test(code) ? "For your safety, open the link from your email again, then create your password." :
+      `Nothing was saved: ${code || "no connection"}. Tap Save my password again.`);
+    return render();
+  }
+  joining = false;
+  idleAll();
+  await afterPasswordCreated();
 }
 
 async function submitApplicationHere() {
@@ -980,13 +1192,13 @@ function applicationsSection() {
       }).join("")}
     </div>`}
     ${approvalsWaiting.length ? `<div class="card list" style="margin-top:0.6rem">
-      <div class="list-row"><span class="grow"><span class="name">Approved, not joined yet</span><br><span class="sub">They need to choose a password from the email, then sign in.</span></span></div>
+      <div class="list-row"><span class="grow"><span class="name">Approved, not joined yet</span><br><span class="sub">They need to tap the link in the email and create their password.</span></span></div>
       ${approvalsWaiting.map((p) => `<div class="list-row">
         <span class="grow"><span class="name">${esc(p.displayName || p.key)}</span><br><span class="sub">${esc(p.key)}</span></span>
         <button class="rowbtn" data-act="resend-approval-email" data-id="${esc(p.key)}">Send the email again</button>
       </div>`).join("")}
     </div>` : ""}
-    <p class="hint">Approving creates their account and emails them a link to choose a password. Their golfer name must be unique; if it is taken, add a middle initial.</p>
+    <p class="hint">Approving creates their account and emails them a sign-in link to create their password. Their golfer name must be unique; if it is taken, add a middle initial.</p>
   </section>`;
 }
 
@@ -1200,7 +1412,9 @@ function newAccountFields() {
 /* Nobody signed in. With an invitation or a code, the account comes first
    (create one, or sign in to an existing one); otherwise it is Sign in. */
 function screenSignedOut(invite) {
-  /* beta.4: arrived from the "finish joining" email of an Auto application. */
+  /* E3: a sign-in link that no longer works. */
+  if (!invite && linkProblem) return screenLinkProblem();
+  /* E1: arrived from the "Sign in to The Scorecard" email (approved, or Auto). */
   if (!invite && db.isApplyLink()) return screenFinishApply();
   if (!invite && !showCodeEntry) {
     if (signedOutStep === "code") return screenCodeFirst();
@@ -1246,7 +1460,7 @@ function screenSignedOut(invite) {
     })}
     ${joiningSomething ? (showCodeEntry && !invite ? `<div class="inline-actions stacked"><button class="btn ghost" data-act="hide-code">Back</button></div>` : "") : `
       <div class="inline-actions stacked first-choices">
-        <button class="btn ghost" data-act="show-choose">Become a member or start a group</button>
+        <button class="btn ghost" data-act="show-choose">Become a member or request a group</button>
         <button class="btn ghost" data-act="enter-code">I have a code</button>
       </div>`}
     ${versionBlock()}
@@ -1381,6 +1595,10 @@ async function createAccountHere() {
   try {
     await db.createAccount(fields);
     accountMode = null;
+    /* The new account was made on the link's own screen: the link is theirs. */
+    const link = pendingLink();
+    if (link) linkAnswer = { key: link.key, forMe: true };
+    else await settleGroup(db.recallAssociation());
     await loadInvitedDetails();
     joining = false;
     flashMsg("Account created. Use this email and password on your other devices.");
@@ -3043,7 +3261,7 @@ function switchSection() {
       <button class="seg-b ${mode === "auto" ? "on" : ""}" role="radio" aria-checked="${mode === "auto"}" data-act="set-switch" data-id="auto">Auto</button>
     </div>
     <p class="hint">${mode === "auto"
-      ? `Auto: when every check passes, the applicant is emailed a sign-in link. Tapping it confirms the email, they choose a password and they are in. Any failed check waits for you. At most ${appSettings.dailyLimit} a day.`
+      ? `Auto: when every check passes, the applicant is emailed a sign-in link. Tapping it confirms the email, they create a password and they are in. Any failed check waits for you. At most ${appSettings.dailyLimit} a day.`
       : mode === "manual" ? "Manual: every application waits for you, as today." : "Reading the switch…"}</p>
   </section>`;
 }
@@ -3882,7 +4100,7 @@ sheetEl.addEventListener("click", async (e) => {
           ? `${a.fullName} is approved, but the password email did not send. Use "Send the email again" under Applications.`
           : result.existingAccount
             ? `${a.fullName} is approved. They already had an account: they sign in with it (the email also lets them choose a new password), then confirm their email to join.`
-            : `${a.fullName} is approved. The email to choose a password has gone to ${a.email}.`);
+            : `${a.fullName} is approved. The sign-in link to create a password has gone to ${a.email}.`);
     } catch (err) {
       const code = String((err && (err.code || err.message)) || "");
       if (code.includes("name-taken")) { flashMsg(`The name "${name}" is already used. Add a middle initial or a nickname and approve again.`); openApproveSheet(id); }
@@ -4181,6 +4399,7 @@ document.addEventListener("focusout", (e) => {
 }, true);
 
 function renderNow() {
+  let entryHtml = "";
   try {
     if (!termsAccepted() || termsState === "viewing") {
       tabsEl.innerHTML = "";
@@ -4192,6 +4411,12 @@ function renderNow() {
       tabsEl.innerHTML = "";
       view.innerHTML = screenUpgrade();
       document.getElementById("brandSub").textContent = "Handicap tracking";
+    } else if ((entryHtml = entryScreen())) {
+      /* Build 25, Fix E4: a link waiting, or a password still to create,
+         always comes before any group screen — the same way every time. */
+      tabsEl.innerHTML = "";
+      view.innerHTML = entryHtml;
+      document.getElementById("brandSub").textContent = "Getting started";
     } else if (!db.currentAssociation()) {
       tabsEl.innerHTML = "";
       view.innerHTML = screenJoin();
@@ -4809,7 +5034,7 @@ view.addEventListener("click", async (e) => {
           openNotice({
             title: "No groups found for this account",
             detail: "Nothing is wrong with your rounds — they belong to the group, not to your sign-in. This account simply is not a member of one.",
-            advice: "Ask whoever runs the group for a fresh invitation link, or use the code. Only create a group here if you really are starting a new one.",
+            advice: "Ask whoever runs the group for a fresh invitation link, or use the code.",
           });
         }
       } catch {
@@ -4957,10 +5182,12 @@ view.addEventListener("click", async (e) => {
       return render();
     }
     case "not-me": {
+      /* E2: an invitation for somebody else is never thrown away from here —
+         it is offered to the new person (sign out and continue), or set aside. */
       if ((db.readJoinLink() || {}).token) {
-        db.clearJoinLink(); invitedGolfer = null;
-        flashMsg("Ask the admin for your own invitation.");
-        await settleGroup(db.recallAssociation()); return render();
+        const link = pendingLink();
+        if (link) linkAnswer = { key: link.key, forMe: false };
+        return render();
       }
       /* Fall back to typing a name, rather than joining as the wrong person. */
       invitedGolfer = null;
@@ -5076,6 +5303,70 @@ view.addEventListener("click", async (e) => {
     case "hide-apply": signedOutStep = null; applySentTo = ""; requestSentTo = ""; return render();
     case "submit-application": return submitApplicationHere();
     case "finish-apply": return finishApplyHere();
+    /* Build 25: the entry screens. */
+    case "create-password": return createPasswordHere();
+    case "have-password": {
+      authForm = { email: db.currentEmail() || "", password: "" };
+      await db.signOutHere();
+      groupState = "unknown";
+      flashMsg("Sign in with your email and the password you created.");
+      return render();
+    }
+    case "link-for-me": {
+      const link = pendingLink();
+      if (!link) return render();
+      linkAnswer = { key: link.key, forMe: true };
+      if (link.kind === "invite") { busy("Opening the invitation"); try { await loadInvitedDetails(); } finally { idleAll(); } }
+      return render();
+    }
+    case "link-not-me": {
+      const link = pendingLink();
+      if (link) linkAnswer = { key: link.key, forMe: false };
+      return render();
+    }
+    case "link-sign-out": {
+      /* An account with no password could never be signed back into. */
+      if (!db.hasPassword()) {
+        return openNotice({
+          title: "Set a password first",
+          detail: "This account has no password yet, so signing out now would lock it out.",
+          advice: "Tap Cancel, set a password under Admin → Settings → Account, then open the link again.",
+        });
+      }
+      busy("Signing out");
+      try { await db.signOutHere(); } finally { idleAll(); }
+      /* The link stays on this device for the new person. */
+      linkAnswer = null; groupState = "unknown"; accountMode = null; authForm = { email: "", password: "" };
+      invitedGolfer = null; invitedGroupName = "";
+      flashMsg("Signed out. Now set up the new person's account.");
+      return render();
+    }
+    case "link-cancel": {
+      const link = pendingLink();
+      if (link && link.kind === "invite") { db.clearJoinLink(); invitedGolfer = null; }
+      if (link && link.kind === "signin") db.dropApplyLink();
+      linkAnswer = null;
+      flashMsg("Nothing was changed. The link was set aside on this device.");
+      if (!db.currentAssociation()) await settleGroup(db.recallAssociation());
+      return render();
+    }
+    case "send-new-link": {
+      const address = ((view.querySelector('[name="email"]') || {}).value || "").trim();
+      if (!address) { flashMsg("Type your email address first"); return render(); }
+      busy("Sending a new link");
+      try { await db.sendNewLink(address); flashMsg(`A new link has gone to ${address}. Open it on this device. It sometimes lands in junk mail.`); }
+      catch (e) { flashMsg(`It was not sent: ${String((e && (e.code || e.message)) || "no connection")}. Try again.`); }
+      finally { idleAll(); }
+      return render();
+    }
+    case "link-problem-done": linkProblem = null; return render();
+    case "sign-out-plain": {
+      if (!db.hasPassword()) return openNotice({ title: "Set a password first", detail: "Signing out now would lock this account out.", advice: "Try again when the connection is back instead." });
+      busy("Signing out");
+      try { await db.signOutHere(); } finally { idleAll(); }
+      groupState = "unknown"; linkAnswer = null;
+      return render();
+    }
     case "send-confirmation": {
       busy("Sending the confirmation email");
       try { await db.sendEmailConfirmation(); confirmationSent = true; flashMsg("Sent. Open the link in the email, then tap Continue."); }
@@ -6131,8 +6422,13 @@ async function finishSignIn(result, email, message) {
   accountMode = null;
   /* beta.9: an account whose deletion has started opens nothing. */
   if (await db.checkPendingDeletion()) { await refuseDeletingAccount(); return; }
+  /* Build 25: a password sign-in proves the password exists. */
+  await db.markPasswordCreated();
   if (db.readJoinLink()) {
-    /* Signed in from an invitation: show the invitation next. */
+    /* Signed in from an invitation: show the invitation next. They signed in
+       on the invitation's own screen, so it is theirs (no question, E2). */
+    const link = pendingLink();
+    if (link) linkAnswer = { key: link.key, forMe: true };
     await loadInvitedDetails();
   } else {
     await settleGroup(db.currentAssociation() || db.recallAssociation());
@@ -6594,6 +6890,7 @@ async function start(assocId) {
   db.loadFavouriteCourses().then(() => render()).catch(() => {});
   const member = await db.loadMembership(assocId);
   if (!member) return;
+  groupState = "some";
   association = await db.loadAssociation(assocId);
   if (association) lookup.setSharedKey(association.lookupKey || "");
   /* beta.4: "last seen" for the cockpit (at most twice a day; quiet). */
@@ -6663,15 +6960,19 @@ async function settleGroupInner(preferred) {
      and stacking a second waiting state on top of it would flicker. The veil is
      for actions somebody has just taken, not for opening the app. */
   const mine = await db.loadMyGroups();
+  /* E4: what is known about this account's groups. */
+  groupState = db.groupsCertain() ? "none" : "unknown";
 
   if (preferred && await db.amMemberOf(preferred)) {
     await start(preferred);
+    groupState = "some";
     return;
   }
 
   for (const group of mine) {
     if (await db.amMemberOf(group.id)) {
       await start(group.id);
+      groupState = "some";
       if (preferred && preferred !== group.id) {
         /* settleGroup() renders in its finally block, so this message does
          reach the screen — the note is here so nobody removes that render
@@ -6681,6 +6982,11 @@ async function settleGroupInner(preferred) {
       }
       return;
     }
+  }
+  /* E4: groups were listed but none opened. "No groups" only if the server
+     said, for every one of them, that this account is not a member. */
+  for (const group of mine) {
+    if ((await db.memberCheck(group.id)) !== "no") { groupState = "unknown"; break; }
   }
   /* Nothing belongs to this account: the first screen handles it. */
 }
@@ -6743,6 +7049,8 @@ addEventListener("pageshow", (e) => { if (e.persisted) location.reload(); });
   /* An old guest session (Phase B) can read nothing until it has an email and
      password, so it goes straight to that screen. Signed out: nothing to load. */
   const account = db.hasUser() && !db.isAnonymousSession();
+  /* Build 25 (E1, rule 4): is a password still to be created? */
+  if (account) await db.loadPasswordState();
   if (account) await settleGroup(remembered);
   markBoot("data");
 
