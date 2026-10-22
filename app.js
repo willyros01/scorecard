@@ -6981,6 +6981,11 @@ async function settleGroupInner(preferred) {
       return;
     }
   }
+  /* E4: groups were listed but none opened. "No groups" only if the server
+     said, for every one of them, that this account is not a member. */
+  for (const group of mine) {
+    if ((await db.memberCheck(group.id)) !== "no") { groupState = "unknown"; break; }
+  }
   /* Nothing belongs to this account: the first screen handles it. */
 }
 

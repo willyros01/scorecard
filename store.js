@@ -2826,6 +2826,21 @@ export async function amMemberOf(id) {
   } catch { return false; }
 }
 
+/* Build 25 (E4): the same check, saying whether it could be made at all:
+   "yes", "no" (the server says not a member) or "unknown". */
+export async function memberCheck(id) {
+  if (!fb || !uid) return "unknown";
+  try {
+    const { getDocFromServer } = fb.mod.store;
+    const snap = await withTimeout(getDocFromServer(ref("associations", id, "members", uid)), 15000, "Checking your membership");
+    return snap.exists() ? "yes" : "no";
+  } catch (e) {
+    /* Refused by the rules = not a member (a removed member cannot read it). */
+    if (String((e && e.code) || "").includes("permission-denied")) return "no";
+    return "unknown";
+  }
+}
+
 export function rememberGroup(id, name) {
   try {
     const list = JSON.parse(localStorage.getItem(GROUPS_KEY) || "[]");
