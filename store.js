@@ -1223,23 +1223,43 @@ export const isAnonymousSession = () => {
   return !!(user && user.isAnonymous);
 };
 
-/* Build 25, Fix E1/E4 (Willy, 13 and 22 Oct 2026): how this session was
-   signed in, read from the sign-in token Firebase keeps on the device (no
-   network needed). A session that came from an emailed sign-in link has not
-   had its own password confirmed by a password sign-in yet: the app shows
-   "Create your password" until it has. Returns "emailLink", "password", other
-   providers' names, or "" when it cannot be read. */
-export function signInMethod() {
-  const user = fb && fb.auth && fb.auth.currentUser;
-  if (!user || user.isAnonymous) return "";
+/* Build 25, Fix E1/E4 (Willy, 13 and 22 Oct 2026): has this account created
+   its own password yet? An account opened from an emailed sign-in link has
+   not, until "Create your password" has been saved. Kept where Firebase keeps
+   the account's own settings (users/{uid}/prefs/account: passwordCreated),
+   plus a note on this device for the moment between the two. A password
+   sign-in proves a password exists and marks it created. */
+const PW_PENDING_KEY = (u) => `golf:v2:passwordPending:${u}`;
+let passwordPendingFlag = false;
+export const needsCreatePassword = () => passwordPendingFlag;
+export async function loadPasswordState() {
+  passwordPendingFlag = false;
+  if (!fb || !uid || isAnonymousSession()) return;
+  let local = false;
+  try { local = localStorage.getItem(PW_PENDING_KEY(uid)) === "1"; } catch {}
+  let remote = null;
   try {
-    const token = user.accessToken || (user.stsTokenManager && user.stsTokenManager.accessToken) || "";
-    const part = String(token).split(".")[1] || "";
-    const json = JSON.parse(atob(part.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(part.length / 4) * 4, "=")));
-    return String((json.firebase && json.firebase.sign_in_provider) || "");
-  } catch { return ""; }
+    const snap = await withTimeout(fb.mod.store.getDoc(ref("users", uid, "prefs", "account")), 10000, "Checking your account");
+    if (snap.exists()) remote = (snap.data() || {}).passwordCreated;
+  } catch { /* unknown: the device note decides */ }
+  passwordPendingFlag = remote === false || (remote !== true && local);
 }
-export const needsCreatePassword = () => signInMethod() === "emailLink";
+async function setPasswordState(created) {
+  const me = fb && fb.auth && fb.auth.currentUser;
+  if (!me) return;
+  try { if (created) localStorage.removeItem(PW_PENDING_KEY(me.uid)); else localStorage.setItem(PW_PENDING_KEY(me.uid), "1"); } catch {}
+  passwordPendingFlag = !created;
+  const { setDoc, serverTimestamp } = fb.mod.store;
+  await withTimeout(setDoc(ref("users", me.uid, "prefs", "account"), { passwordCreated: !!created, passwordAt: serverTimestamp() }, { merge: true }), 15000, "Saving your account");
+}
+/* After any successful password sign-in. Quiet; never blocks signing in. */
+export async function markPasswordCreated() {
+  if (!passwordPendingFlag) {
+    /* Only write when something says otherwise, to keep sign-in light. */
+    try { const me = fb.auth.currentUser; if (!me || localStorage.getItem(PW_PENDING_KEY(me.uid)) !== "1") { await loadPasswordState(); if (!passwordPendingFlag) return; } } catch { return; }
+  }
+  try { await setPasswordState(true); } catch {}
+}
 
 /* E1: "Create your password" for a session that came from a sign-in link.
    Counts only when Firebase has saved it AND a fresh sign-in with that email
@@ -1253,7 +1273,11 @@ export async function createMyPassword(password) {
   if (secret.length < 6) { const e = new Error("auth/weak-password"); e.code = "auth/weak-password"; throw e; }
   await withTimeout(fb.mod.auth.updatePassword(user, secret), 20000, "Saving your password");
   await withTimeout(fb.mod.auth.signInWithEmailAndPassword(fb.auth, user.email, secret), 20000, "Signing in with your new password");
-  await ensureAccountEmail();
+  uid = fb.auth.currentUser.uid;
+  /* The password is saved and works; record it. If only this record fails,
+     the next start simply offers Create your password once more. */
+  try { await setPasswordState(true); } catch {}
+  try { await ensureAccountEmail(); } catch {}
   emit();
   return { ok: true, email: user.email };
 }
@@ -1707,6 +1731,11 @@ export const isApplyLink = () => {
 export async function finishApplyLink({ email, password }) {
   const address = String(email || "").trim();
   await withTimeout(fb.mod.auth.signInWithEmailLink(fb.auth, address, platform.signInLinkUrl()), 20000, "Opening your link");
+  uid = fb.auth.currentUser.uid;
+  /* From here until the password is saved, every start shows Create your
+     password (rule 4). The device note is written first, so it holds even if
+     the account record cannot be written yet. */
+  try { await setPasswordState(false); } catch {}
   /* The link is spent now; this device is signed in from it. The password is
      next (E1). If saving it fails, the session stays a link session, so every
      start comes back to Create your password until it is saved. */
@@ -3461,6 +3490,7 @@ export async function signOutHere() {
   myMember = null;
   uid = null;
   deletionPendingFlag = false;
+  passwordPendingFlag = false;
   setStatus("Signed out");
   emit();
 }

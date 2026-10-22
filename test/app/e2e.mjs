@@ -677,7 +677,7 @@ async function applyAndOpenLink(name, email) {
   const code = codes[codes.length - 1].oobCode;
   const q = await newPage();
   await q.goto(`${APP}&apply=1&apiKey=fake-api-key&mode=signIn&oobCode=${encodeURIComponent(code)}&lang=en`, { waitUntil: "load" });
-  await waitForText(q, /Finish joining/);
+  await waitForText(q, /Create your password/);
   await q.fill('[name="email"]', email);
   await q.fill('[name="password"]', "auto-pass-1");
   await q.fill('[name="password-again"]', "auto-pass-1");
@@ -1498,7 +1498,10 @@ await check("B25-4", "E2: an invitation on a signed-in device asks 'Is this invi
   await rex.locator('[data-act="accept-named"]').click();
   await rex.waitForFunction(async () => (await import("/store.js")).currentAssociation() === "G1", null, { timeout: 20000 });
   const kim = await accountByEmail("kim@example.com");
-  if ((await getDoc("golfers/gKim")).linkedUid !== kim.localId) throw new Error("Kim's golfer is not linked to her account");
+  const endK = Date.now() + 15000;
+  let gk = null;
+  while (Date.now() < endK && ((gk = await getDoc("golfers/gKim")) || {}).linkedUid !== kim.localId) await rex.waitForTimeout(400);
+  if ((gk || {}).linkedUid !== kim.localId) throw new Error(`Kim's golfer is not linked to her account: golfer ${JSON.stringify(gk)}, kim ${kim.localId}, rex ${R1.uid}, member ${JSON.stringify(await getDoc(`associations/G1/members/${kim.localId}`))}, screen: ${(await text(rex)).replace(/\s+/g, " ").slice(0, 200)}`);
   if ((await getDoc(`associations/G1/invitationTokens/${token}`)).state !== "used") throw new Error("the invitation was not spent by Kim's join");
   await rex.close();
 });

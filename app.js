@@ -6422,6 +6422,8 @@ async function finishSignIn(result, email, message) {
   accountMode = null;
   /* beta.9: an account whose deletion has started opens nothing. */
   if (await db.checkPendingDeletion()) { await refuseDeletingAccount(); return; }
+  /* Build 25: a password sign-in proves the password exists. */
+  await db.markPasswordCreated();
   if (db.readJoinLink()) {
     /* Signed in from an invitation: show the invitation next. They signed in
        on the invitation's own screen, so it is theirs (no question, E2). */
@@ -7047,6 +7049,8 @@ addEventListener("pageshow", (e) => { if (e.persisted) location.reload(); });
   /* An old guest session (Phase B) can read nothing until it has an email and
      password, so it goes straight to that screen. Signed out: nothing to load. */
   const account = db.hasUser() && !db.isAnonymousSession();
+  /* Build 25 (E1, rule 4): is a password still to be created? */
+  if (account) await db.loadPasswordState();
   if (account) await settleGroup(remembered);
   markBoot("data");
 
