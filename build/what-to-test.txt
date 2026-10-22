@@ -1,10 +1,14 @@
-The Scorecard 2.30.0: the App Store release build.
+The Scorecard 2.30.0, build of 22 October: the entry screens.
 
-This is the same app as 2.30.0-beta.14 with the beta label removed, and every invitation now starts with the App Store step.
+Use a test group or test emails only, never Golfing Buddies' real rounds.
 
-1. Open the foot of any screen: the version reads v2.30.0, with no "beta".
-2. Sign in, post a round, and check History and the handicap list as usual.
-3. Send a report: the version line reads 2.30.0.
-4. Send an invitation: it starts with Step 1, download The Scorecard from the App Store (the link opens once Apple releases the app), then Step 2, the join link.
+1. Approve a public application (Admin, Applications). The applicant gets an email titled "Sign in to The Scorecard", not "Reset your password".
+2. Tap that link: "Create your password" appears once, with the email filled in. Save it: you are in the public group.
+3. Tap the same link again: "This link no longer works", with the email filled in, Send me a new link, and Sign in.
+4. Signed in as yourself, open an invitation meant for somebody else: "Is this invitation for you?" Tap No: "This link is for a new person". Cancel keeps you signed in. Sign out and continue opens the new person's Create account.
+5. Signed in, open an approval link sent to another email: "This link is for a new person" straight away.
+6. Turn on Airplane mode and open the app signed in: never "Start your group"; you see "You're offline" or "Can't check your account right now".
+7. Signed out, the first screen says "Become a member or request a group", and the choice says "Request your own group".
+8. Everything after signing in (Enter, History, Summary, Games, Manage, Admin) is unchanged.
 
 No Firebase rule, index or data change is required. Report problems with Send a report in the app.
