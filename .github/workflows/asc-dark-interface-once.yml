@@ -1,0 +1,139 @@
+name: One-time Apple Dark Interface accessibility metadata
+on:
+  push:
+    branches: [asc-dark-interface-20261101]
+    paths:
+      - .github/workflows/asc-dark-interface-once.yml
+
+permissions:
+  contents: read
+
+jobs:
+  update-accessibility:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Publish and verify Dark Interface for iPhone and iPad
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          node --input-type=module <<'NODE'
+          import crypto from 'node:crypto';
+
+          const expectedAppId = '6817462903';
+          const bundleId = 'io.github.willyros01.scorecard';
+          const families = ['IPHONE', 'IPAD'];
+          const featureFields = [
+            'supportsVoiceover', 'supportsVoiceControl', 'supportsLargerText',
+            'supportsSufficientContrast', 'supportsDarkInterface',
+            'supportsDifferentiateWithoutColorAlone', 'supportsReducedMotion',
+            'supportsCaptions', 'supportsAudioDescriptions'
+          ];
+          for (const key of ['ASC_KEY_ID', 'ASC_ISSUER_ID', 'ASC_KEY_P8']) {
+            if (!process.env[key]) throw new Error('Required Apple API credential is missing: ' + key);
+          }
+          const enc = value => Buffer.from(JSON.stringify(value)).toString('base64url');
+          const now = Math.floor(Date.now() / 1000);
+          const unsigned = enc({alg:'ES256',kid:process.env.ASC_KEY_ID,typ:'JWT'}) + '.' +
+            enc({iss:process.env.ASC_ISSUER_ID,iat:now,exp:now+600,aud:'appstoreconnect-v1'});
+          const signature = crypto.sign('sha256', Buffer.from(unsigned), {
+            key:process.env.ASC_KEY_P8, dsaEncoding:'ieee-p1363'
+          }).toString('base64url');
+          const bearer = unsigned + '.' + signature;
+          async function api(method, path, payload) {
+            const response = await fetch('https://api.appstoreconnect.apple.com' + path, {
+              method,
+              headers:{
+                Authorization:'Bearer ' + bearer,
+                'Content-Type':'application/json'
+              },
+              body: payload === undefined ? undefined : JSON.stringify(payload)
+            });
+            const bodyText = await response.text();
+            let json;
+            try { json = bodyText ? JSON.parse(bodyText) : null; }
+            catch { json = null; }
+            if (!response.ok) {
+              const details = (json?.errors || []).map(e => e.code + ': ' + (e.detail || e.title)).join('; ');
+              throw new Error('Apple API ' + method + ' ' + path.split('?')[0] +
+                ' returned HTTP ' + response.status + ' ' + details.slice(0,500));
+            }
+            return json;
+          }
+          const apps = await api('GET', '/v1/apps?filter[bundleId]=' + encodeURIComponent(bundleId));
+          const app = (apps.data || []).find(a => a.attributes.bundleId === bundleId);
+          if (!app || app.id !== expectedAppId) {
+            throw new Error('Safety check failed: App Store Connect app ID did not match ' + expectedAppId);
+          }
+          console.log('PASS: Exact Scorecard app identity verified: ' + app.id);
+
+          async function readDeclarations() {
+            const result = await api('GET', '/v1/apps/' + app.id + '/accessibilityDeclarations?limit=200');
+            return result.data || [];
+          }
+          const before = await readDeclarations();
+          const plan = [];
+          for (const family of families) {
+            const records = before.filter(d => d.attributes.deviceFamily === family);
+            const published = records.filter(d => d.attributes.state === 'PUBLISHED');
+            const current = published.find(d => d.attributes.supportsDarkInterface === true);
+            if (current) {
+              console.log('PASS: ' + family + ' already has published Dark Interface support');
+              continue;
+            }
+            if (records.some(d => d.attributes.state === 'DRAFT')) {
+              throw new Error('Safety stop: ' + family + ' has an existing draft; do not change or publish someone else\'s draft.');
+            }
+            if (published.length > 1) {
+              throw new Error('Safety stop: multiple published declarations found for ' + family);
+            }
+            const attributes = {deviceFamily:family, supportsDarkInterface:true};
+            if (published.length === 1) {
+              for (const flag of featureFields) {
+                if (typeof published[0].attributes[flag] === 'boolean') {
+                  attributes[flag] = published[0].attributes[flag];
+                }
+              }
+              attributes.supportsDarkInterface = true;
+            }
+            plan.push({family,attributes});
+          }
+          console.log('PASS: Safe preflight completed for iPhone and iPad');
+          for (const item of plan) {
+            const created = await api('POST', '/v1/accessibilityDeclarations', {
+              data:{
+                type:'accessibilityDeclarations',
+                attributes:item.attributes,
+                relationships:{app:{data:{type:'apps',id:app.id}}}
+              }
+            });
+            if (!created?.data?.id) throw new Error('No declaration ID returned for ' + item.family);
+            console.log('DRAFT CREATED: ' + item.family);
+            await api('PATCH', '/v1/accessibilityDeclarations/' + created.data.id, {
+              data:{
+                type:'accessibilityDeclarations',
+                id:created.data.id,
+                attributes:{publish:true}
+              }
+            });
+            console.log('PUBLISH REQUEST ACCEPTED: ' + item.family);
+          }
+          let verified = false;
+          for (let attempt=0; attempt<8; attempt++) {
+            const after = await readDeclarations();
+            const statuses = families.map(family =>
+              after.some(d => d.attributes.deviceFamily === family &&
+                d.attributes.state === 'PUBLISHED' &&
+                d.attributes.supportsDarkInterface === true)
+            );
+            if (statuses.every(Boolean)) { verified = true; break; }
+            await new Promise(resolve => setTimeout(resolve, 2000));
+          }
+          if (!verified) throw new Error('Apple API did not verify both published Dark Interface declarations');
+          console.log('RESULT: PASS — iPhone and iPad Dark Interface support published and verified via Apple API');
+          NODE
