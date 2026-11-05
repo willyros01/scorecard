@@ -1088,6 +1088,25 @@ service cloud.firestore {
         && request.resource.data.updatedAt == request.time;
     }
 
+    /* Batch 5, step 31: the course search key's last four characters, for
+       the key box; written only by the app owner with the key itself. */
+    match /settings/golfKeyInfo {
+      allow get: if signedIn();
+      allow create, update: if isAppOwner()
+        && request.resource.data.keys().hasOnly(['last4', 'savedAt'])
+        && request.resource.data.last4 is string && request.resource.data.last4.size() <= 4;
+    }
+    /* The key itself: written by the app owner only, readable by NO app (the
+       Cloudflare server reads it with its own service account). Kept in the
+       database on purpose, for safe keeping (Willy, 1 Nov 2026). */
+    match /secretKeys/{keyId} {
+      allow read: if false;
+      allow create, update: if isAppOwner() && keyId == 'golfCourseApi'
+        && request.resource.data.keys().hasOnly(['key', 'savedBy', 'savedAt'])
+        && request.resource.data.savedBy == request.auth.uid;
+      allow delete: if false;
+    }
+
     /* Block lists, checked by the rules for every automatic approval. */
     match /blockedEmails/{key} {
       allow read, delete: if reviewer();

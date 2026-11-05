@@ -2,6 +2,8 @@ import * as db from "./store.js";
 import * as model from "./model.js";
 import * as lookup from "./courses-api.js";
 import * as platform from "./platform.js";
+/* Batch 5, step 31: course search through The Marker's server (key never on a phone). */
+lookup.setWorkerCaller((path) => db.callMarkerWorker(path));
 
 const VERSION = (typeof self !== "undefined" && self.APP_VERSION) || "dev";
 const ONE_TIME_INVITATION_NOTICE = "This invitation link is for one-time use only. Once you join, it cannot be used again.";
@@ -1695,6 +1697,7 @@ async function upgradeAccount() {
 }
 
 let editingKey = false;
+let keyInfo = undefined;   /* batch 5: { last4 } of the saved course search key */
 let showCodeEntry = false;
 let joining = false;
 
@@ -3829,29 +3832,28 @@ function accountSection() {
 }
 
 function lookupSection() {
-  if (!db.isOwner()) return "";
-  const set = lookup.usingSharedKey();
-
+  /* Batch 5, step 31 (Willy, 1 Nov 2026): the key box stays here, for the app
+     owner only. The key is saved where no app can read it; only The Marker's
+     Cloudflare server uses it. Here only its last four characters show. */
+  if (!db.appOwnerNow()) return "";
+  if (keyInfo === undefined) { keyInfo = null; db.courseKeyInfo().then((x) => { keyInfo = x || false; render(); }); }
+  const set = !!(keyInfo && keyInfo.last4);
   if (set && !editingKey) {
     return `<section class="panel">
-      <div class="panel-head"><h2 class="panel-title">Course lookup</h2>
+      <div class="panel-head"><h2 class="panel-title">Course search key</h2>
         <button class="linkbtn" data-act="edit-key">Change</button></div>
       <div class="card padded">
-        <p class="hint" style="margin:0">A search key is saved for the group, so everybody can find courses by name without entering anything.</p>
+        <p class="hint" style="margin:0">Key saved, ends in <b>${esc(keyInfo.last4)}</b>. Every golfer searches through The Marker's server, which holds the key; it is never on a phone.</p>
       </div>
     </section>`;
   }
-
   return `<section class="panel">
-    <div class="panel-head"><h2 class="panel-title">Course lookup</h2></div>
+    <div class="panel-head"><h2 class="panel-title">Course search key</h2></div>
     <div class="card padded">
-      <p class="hint" style="margin:0 0 0.6rem">${set
-        ? "Paste a new key to replace the one saved for the group."
-        : "<b>Not set up yet.</b> Without a key, courses have to be typed in by hand with their rating and slope. With one, anybody in the group can search by name. Get a free key at <b>golfcourseapi.com</b>."}</p>
-      <p class="hint">It is saved once for the whole group. Nobody else has to enter it, and only you can change it.</p>
+      <p class="hint" style="margin:0 0 0.6rem">${set ? "Paste a new key to replace the saved one." : "<b>Not saved yet.</b> Paste the GolfCourseAPI key. It is kept in the database for safe keeping, and only the server can read it."}</p>
       <input class="field mono" name="lookupkey" value="" placeholder="Paste the key here" autocomplete="off">
       <div class="inline-actions stacked">
-        <button class="btn" data-act="save-key">Save for the group</button>
+        <button class="btn" data-act="save-key">Save the key</button>
         ${set ? `<button class="btn ghost" data-act="cancel-key">Cancel</button>` : ""}
       </div>
     </div>
@@ -5912,10 +5914,10 @@ view.addEventListener("click", async (e) => {
       const field = view.querySelector('[name="lookupkey"]');
       const key = (field ? field.value : "").trim();
       if (!key) { flashMsg("Paste the key first"); return; }
-      db.updateAssociation({ lookupKey: key });
-      lookup.setSharedKey(key);
-      editingKey = false;
-      flashMsg("Saved. Everybody in the group can search for courses now.");
+      busy("Saving the key");
+      try { const r = await db.saveCourseKey(key); keyInfo = { last4: r.last4 }; editingKey = false; flashMsg(`Key saved, ends in ${r.last4}.`); }
+      catch (e) { flashMsg(`The key was not saved: ${String((e && (e.code || e.message)) || "no connection")}.`); }
+      finally { idleAll(); }
       return render();
     }
   }
@@ -7007,9 +7009,10 @@ async function start(assocId) {
   db.loadFavouriteCourses().then(() => render()).catch(() => {});
   const member = await db.loadMembership(assocId);
   if (!member) return;
+  db.isAppOwner().then((on) => { if (on) render(); }).catch(() => {});   /* batch 4/5: app-owner tools */
   groupState = "some";
   association = await db.loadAssociation(assocId);
-  if (association) lookup.setSharedKey(association.lookupKey || "");
+  if (association) /* batch 5: the key is no longer read by the app */
   /* beta.4: "last seen" for the cockpit (at most twice a day; quiet). */
   db.stampLastSeen();
   /* A new group: the cockpit shows the new group's numbers. */
@@ -7017,7 +7020,7 @@ async function start(assocId) {
   db.stopWatching();
   db.watchAssociation((doc) => {
     association = doc;
-    lookup.setSharedKey(doc.lookupKey || "");
+    /* batch 5: the key is no longer read by the app */
     render();
   });
   db.watchGolfers((list) => { rawGolfers = list; applyBlocks(); render(); scheduleDirectoryRefresh(); });

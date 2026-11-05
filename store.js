@@ -2230,6 +2230,54 @@ export async function loadMembership(id) {
   } catch (e) { report(e); return null; }
 }
 
+/* Batch 5, step 31 (Willy, 1 Nov 2026: GolfCourseAPI's terms): course search
+   goes through The Marker's Cloudflare server, which holds the key; the key
+   never reaches a phone. Its address is in markerConfig/public. */
+let workerBase = "";
+async function markerWorkerUrl() {
+  if (workerBase) return workerBase;
+  try {
+    const snap = await fb.mod.store.getDoc(ref("markerConfig", "public"));
+    const url = snap.exists() ? String(snap.data().workerUrl || "") : "";
+    if (/^https:\/\//.test(url)) { workerBase = url.replace(/\/+$/, ""); try { localStorage.setItem("golf:workerUrl", workerBase); } catch {} return workerBase; }
+  } catch { /* the saved one below */ }
+  try { const saved = localStorage.getItem("golf:workerUrl") || ""; if (saved) return (workerBase = saved); } catch {}
+  throw new Error("NOT_SET_UP");
+}
+export async function callMarkerWorker(path, { method = "GET", body = null } = {}) {
+  const user = fb && fb.auth && fb.auth.currentUser;
+  if (!user) throw new Error("SIGN_IN");
+  if (typeof navigator !== "undefined" && navigator.onLine === false) throw new Error("OFFLINE");
+  const base = await markerWorkerUrl();
+  const token = await user.getIdToken();
+  let res;
+  try {
+    res = await fetch(base + path, { method, headers: { Authorization: `Bearer ${token}`, ...(body ? { "Content-Type": "application/json" } : {}) },
+      body: body ? JSON.stringify(body) : undefined });
+  } catch { throw new Error("UNREACHABLE"); }
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 401 || res.status === 403) throw new Error("SIGN_IN");
+  if (!res.ok) throw new Error("UNREACHABLE");
+  if (data.error) throw new Error(data.error === "REFUSED" ? (data.reason || "Refused.") : data.error);
+  return data;
+}
+
+/* The key box (owner of the app only): the key goes to a record no app can
+   read (secretKeys/golfCourseApi); only its last four characters to one the
+   app shows (settings/golfKeyInfo). One commit. */
+export async function saveCourseKey(key) {
+  const k = String(key || "").trim();
+  if (k.length < 8) throw new Error("That does not look like a key.");
+  await commitTogether([
+    { op: "set", merge: false, path: ["secretKeys", "golfCourseApi"], data: { key: k, savedBy: uid, savedAt: Date.now() } },
+    { op: "set", merge: false, path: ["settings", "golfKeyInfo"], data: { last4: k.slice(-4), savedAt: Date.now() } },
+  ], "save the course search key");
+  return { last4: k.slice(-4) };
+}
+export async function courseKeyInfo() {
+  try { const d = await fb.mod.store.getDoc(ref("settings", "golfKeyInfo")); return d.exists() ? d.data() : null; } catch { return null; }
+}
+
 /* Batch 4, step 9: whether this account is the app owner (appOwners/{uid}). */
 let appOwnerFlag = null;
 export async function isAppOwner() {
