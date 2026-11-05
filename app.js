@@ -400,7 +400,7 @@ function applyTheme() {
   const hour = new Date().getHours();
   const dark = pref === "dark" || (pref === "auto" && (hour >= 19 || hour < 6));
   document.documentElement.dataset.theme = dark ? "dark" : "light";
-  document.querySelector('meta[name="theme-color"]').content = dark ? "#0E2A20" : "#1F5641";
+  document.querySelector('meta[name="theme-color"]').content = dark ? "#2E5279" : "#2F7BC4";
   document.getElementById("themeBtn").textContent = pref === "auto" ? (dark ? "Auto · night" : "Auto · day") : pref === "dark" ? "Night" : "Day";
 }
 document.getElementById("themeBtn").onclick = () => {
