@@ -1761,6 +1761,50 @@ await check("SS4", "a new group puts the creator's existing golfer on its roster
   await page.close();
 });
 
+/* ================= Batch 4 (2.31.0): admin tools ================= */
+
+await check("AT1", "the app owner opens a group they are not in, as its owner; the visit is recorded; nobody else can", async () => {
+  const B = { email: "app.owner@example.com", password: "boss-pass-1" };
+  B.uid = await signUp(B.email, B.password);
+  await put(`appOwners/${B.uid}`, { active: true });
+  const t = await idToken(B.email, B.password);
+  /* the rules: owner powers in G1 without a membership */
+  if (await writeAs(t, "associations/G1/directory/gBossCheck", { golferId: "gBossCheck", displayName: "Boss Check", handicapIndex: null, updatedAt: 1 }) !== 200) throw new Error("the app owner could not act as an admin of G1");
+  const page = await newPage();
+  await page.goto(APP, { waitUntil: "load" });
+  await waitForText(page, /Sign in/);
+  await signIn(page, B.email, B.password);
+  const m = await page.evaluate(async () => { const db = await import("/store.js"); return db.loadMembership("G1"); });
+  if (!m || m.role !== "owner" || !m.appOwner) throw new Error(`membership: ${JSON.stringify(m)}`);
+  const log = await list("associations/G1/ownerLog");
+  if (!log.some((x) => x.uid === B.uid)) throw new Error("the visit was not recorded");
+  const rt = await idToken(R1.email, R1.password);
+  if (await writeAs(rt, "associations/G1/ownerLog/fake", { uid: R1.uid, at: 1, what: "x" }) === 200) throw new Error("a member could write the owner log");
+  await page.close();
+});
+
+await check("AT2", "deleting a group only hides it, in one commit; a member still reads their rounds; only the app owner brings it back", async () => {
+  await put("associations/G9", { name: "Hide Me", ownerUid: W.uid, joinCode: "HIDE01" });
+  await put(`associations/G9/members/${W.uid}`, { uid: W.uid, role: "owner", displayName: "Owner" });
+  await put(`associations/G9/members/${R1.uid}`, { uid: R1.uid, role: "member", displayName: "Rex", golferId: "gR" });
+  await put("associations/G9/rounds/r-hide", { id: "r-hide", golferId: "gR", assocId: "G9", date: "2026-10-04", gross: 90, differential: 15 });
+  const page = await ownerInG1();
+  const r = await page.evaluate(async () => (await import("/store.js")).hideGroup("G9").then((x) => x.ok, (e) => String(e.code || e.message)));
+  if (r !== true) throw new Error(`hide: ${r}`);
+  const g = await getDoc("associations/G9");
+  if (!g || g.hidden !== true) throw new Error("not hidden");
+  if (!(await getDocQuick("associations/G9/rounds/r-hide"))) throw new Error("a round was removed");
+  const rt = await idToken(R1.email, R1.password);
+  const read = await fetch(`http://127.0.0.1:8080/v1/projects/${P}/databases/(default)/documents/associations/G9/rounds/r-hide`, { headers: { Authorization: `Bearer ${rt}` } });
+  if (read.status !== 200) throw new Error(`the member cannot read their round: ${read.status}`);
+  const back = await page.evaluate(async () => (await import("/store.js")).hideGroup("G9", false).then(() => "restored", (e) => String(e.code || e.message)));
+  if (back === "restored") throw new Error("the group's owner brought it back (only the app owner may)");
+  const bt = await idToken("app.owner@example.com", "boss-pass-1");
+  const patch = await fetch(`http://127.0.0.1:8080/v1/projects/${P}/databases/(default)/documents/associations/G9?updateMask.fieldPaths=hidden`, { method: "PATCH", headers: { Authorization: `Bearer ${bt}`, "Content-Type": "application/json" }, body: JSON.stringify({ fields: { hidden: { booleanValue: false } } }) });
+  if (patch.status !== 200) throw new Error(`the app owner could not bring it back: ${patch.status}`);
+  await page.close();
+});
+
 await browser.close();
 server.kill();
 console.log(`\nRESULT: ${passed} passed, ${failed} failed`);

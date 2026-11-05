@@ -1690,7 +1690,7 @@ export async function loadOwnerCockpit() {
         date: String(r.date || ""), golferId: r.golferId || "", courseName: r.courseName || "" };
     });
   } catch (e) { roundsError = String((e && (e.code || e.message)) || "unavailable"); }
-  const groups = groupsSnap.docs.map((d) => ({ id: d.id, name: (d.data() || {}).name || d.id, ownerUid: (d.data() || {}).ownerUid || "" }));
+  const groups = groupsSnap.docs.map((d) => ({ id: d.id, name: (d.data() || {}).name || d.id, ownerUid: (d.data() || {}).ownerUid || "", hidden: (d.data() || {}).hidden === true }));
   const members = membersSnap.docs.map((d) => {
     const m = d.data() || {};
     return { assocId: (d.ref.parent && d.ref.parent.parent && d.ref.parent.parent.id) || "",
@@ -2209,6 +2209,12 @@ export async function loadMembership(id) {
     const snap = await getDoc(ref("associations", id, "members", uid));
     noteRead(snap, snap.exists());
     myMember = snap.exists() ? snap.data() : null;
+    /* Batch 4, step 9: the app owner opens any group as its owner; each time
+       is recorded on the group (ownerLog). The rules decide for real. */
+    if (!myMember && await isAppOwner()) {
+      myMember = { uid, role: "owner", displayName: "App owner", appOwner: true };
+      try { await fb.mod.store.setDoc(ref("associations", id, "ownerLog", `${Date.now()}-${uid.slice(0, 6)}`), { uid, at: Date.now(), what: "opened the group as the app owner" }); } catch {}
+    }
     if (myMember) {
       assocId = id;
       rememberAssociation(id);
@@ -2216,12 +2222,27 @@ export async function loadMembership(id) {
          first created. A group made before this existed would otherwise stay
          invisible to a second device forever. */
       const group = await loadAssociation(id);
-      rememberGroup(id, group ? group.name : "Group");
-      rememberGroupForAccount(id, group ? group.name : "Group");
+      const label = group ? `${group.name}${group.hidden ? " (deleted)" : ""}` : "Group";
+      rememberGroup(id, label);
+      rememberGroupForAccount(id, label);
     }
     return myMember;
   } catch (e) { report(e); return null; }
 }
+
+/* Batch 4, step 9: whether this account is the app owner (appOwners/{uid}). */
+let appOwnerFlag = null;
+export async function isAppOwner() {
+  if (!fb || !uid) return false;
+  if (appOwnerFlag && appOwnerFlag.uid === uid) return appOwnerFlag.on;
+  let on = false;
+  try { const d = await fb.mod.store.getDoc(ref("appOwners", uid)); on = d.exists() && d.data().active === true; } catch { on = false; }
+  appOwnerFlag = { uid, on };
+  return on;
+}
+export const appOwnerNow = () => !!(appOwnerFlag && appOwnerFlag.uid === uid && appOwnerFlag.on);
+/* Batch 4, step 18: the open group was deleted (hidden) by its owner. */
+export const groupHidden = () => !!(cachedAssociation && cachedAssociation.id === assocId && cachedAssociation.hidden === true);
 
 export async function loadAssociation(id) {
   const { getDoc } = fb.mod.store;
@@ -3150,6 +3171,19 @@ async function commitTogether(writes, what) {
  * until that copy exists. If the backup cannot be made, the deletion does not
  * happen at all.
  */
+/* Batch 4, step 18 (Willy, 26 Oct 2026, option B): deleting a group only
+   hides it, in ONE commit. Nothing inside it is removed: the rounds still
+   count in each golfer's handicap and each golfer can still see their own.
+   The app owner can bring it back, or remove it for good (deleteGroup, which
+   takes a backup first). */
+export async function hideGroup(targetId, hidden = true) {
+  const id = targetId || assocId;
+  await commitTogether([{ op: "update", path: ["associations", id],
+    data: hidden ? { hidden: true, hiddenBy: uid, hiddenAt: Date.now() } : { hidden: false, restoredBy: uid, restoredAt: Date.now() } }],
+    hidden ? "hide the group" : "restore the group");
+  return { ok: true };
+}
+
 export async function deleteGroup(targetId) {
   const { collection, getDocs } = fb.mod.store;
   const id = targetId || assocId;

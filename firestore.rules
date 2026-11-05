@@ -181,8 +181,17 @@ service cloud.firestore {
     }
 
     /* beta.9: a deleting account is a member of nothing (see deleting()). */
+    /* Batch 4, step 9 (Willy, like SAP_ALL): the app owner acts as owner in
+       every group, groups made by others included. appOwners/{uid} is written
+       only by Willy's scripts; every use is recorded by the app (ownerLog). */
+    function isAppOwner() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/appOwners/$(request.auth.uid))
+        && get(/databases/$(database)/documents/appOwners/$(request.auth.uid)).data.get('active', false) == true;
+    }
+
     function isMember(assocId) {
-      return signedIn() && exists(memberPath(assocId)) && !deleting();
+      return signedIn() && !deleting() && (exists(memberPath(assocId)) || isAppOwner());
     }
 
     function role(assocId) {
@@ -190,11 +199,11 @@ service cloud.firestore {
     }
 
     function isAdmin(assocId) {
-      return isMember(assocId) && (role(assocId) == 'admin' || role(assocId) == 'owner');
+      return isAppOwner() || (isMember(assocId) && (role(assocId) == 'admin' || role(assocId) == 'owner'));
     }
 
     function isOwner(assocId) {
-      return isMember(assocId) && role(assocId) == 'owner';
+      return isAppOwner() || (isMember(assocId) && role(assocId) == 'owner');
     }
 
     function association(assocId) {
@@ -438,8 +447,14 @@ service cloud.firestore {
         && request.resource.data.ownerUid == resource.data.ownerUid
         /* Phase D: the admin secret may only stay as it was or be removed
            (moved to secrets/admin), never set here again. */
-        && request.resource.data.get('adminCode', null) in [null, resource.data.get('adminCode', null)];
+        && request.resource.data.get('adminCode', null) in [null, resource.data.get('adminCode', null)]
+        /* Batch 4, step 18: deleting a group only hides it; only the app owner
+           brings a hidden group back. */
+        && (resource.data.get('hidden', false) != true || request.resource.data.get('hidden', false) == true || isAppOwner());
 
+      /* Only whoever created it, and only ever their own (and the app owner,
+         removing a hidden group for good after its backup). */
+      allow delete: if isAppOwner() && resource.data.get('hidden', false) == true;
       /* Only whoever created it, and only ever their own. Needed so the
          cleanup tool can remove groups that failed to set up properly. */
       allow delete: if signedIn() && resource.data.ownerUid == request.auth.uid;
@@ -699,6 +714,15 @@ service cloud.firestore {
 
         allow delete: if isAdmin(assocId)
           || (isMember(assocId) && withinEditWindow() && myGolfer(resource.data.golferId));
+      }
+
+      /* Batch 4, step 9: every time the app owner opens a group they are
+         not a member of, a record: who, when, what. Never changed or removed. */
+      match /ownerLog/{entryId} {
+        allow create: if isAppOwner() && request.resource.data.uid == request.auth.uid
+          && request.resource.data.keys().hasOnly(['uid', 'at', 'what']);
+        allow read: if isAdmin(assocId);
+        allow update, delete: if false;
       }
 
       /* ---------------- directory: name and index only ---------------- */
@@ -1127,6 +1151,13 @@ service cloud.firestore {
 
     /* Phase D: who may create groups. You may check your own entry; nobody
        can list it, and no app can write it (the setup script does). */
+    /* Batch 4, step 9: the app owner's own record is readable by them only;
+       nobody can write it from an app. */
+    match /appOwners/{userId} {
+      allow get: if signedIn() && request.auth.uid == userId;
+      allow list, write: if false;
+    }
+
     match /groupCreators/{userId} {
       allow get: if signedIn() && userId == request.auth.uid;
       allow list, write: if false;

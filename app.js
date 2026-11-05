@@ -1913,6 +1913,7 @@ function screenEnter() {
   return `<div class="stack">
     ${flashBar()}
     ${editingRound ? `<div class="note warn">Editing a posted round <button class="linkbtn" data-act="cancel-round-edit">Cancel</button></div>` : ""}
+    ${db.groupHidden() ? `<div class="note warn"><b>This group was deleted by its owner.</b> Its rounds are kept and still count for each golfer's handicap. Nothing new can be posted here.</div>` : ""}
     ${lockedMarker ? `<div class="note tip"><b>Scored in The Marker.</b> Correct the scores in The Marker (Correct this card). Here you can change the notes and the game.</div>` : ""}
     ${db.canManage() ? "" : `<div class="style-switch"><button class="linkbtn" data-act="enter-steps">Switch to one step at a time</button></div>`}
 
@@ -3128,6 +3129,7 @@ async function loadOwnerCockpitHere() {
   ownerCockpitState = "loading"; render();
   try {
     ownerCockpit = await db.loadOwnerCockpit();
+    await db.isAppOwner();   /* batch 4: offers Open this group as its owner */
     ownerCockpitState = "ready";
   } catch (e) {
     ownerCockpitState = "failed";
@@ -3269,6 +3271,11 @@ function otherGroupCockpit(groupId) {
   return `<section class="panel">
     <div class="inline-actions"><button class="btn ghost compact" data-act="cockpit-group" data-id="">Back to all groups</button></div>
     <div class="panel-head" style="margin-top:0.8rem"><h2 class="panel-title">${esc(g ? (g.id === db.PUBLIC_ID ? "Public group" : g.name) : "Group")}</h2></div>
+    ${db.appOwnerNow() && g && g.id !== db.currentAssociation() ? `<div class="inline-actions stacked"><button class="btn" data-act="open-as-app-owner" data-id="${esc(g.id)}">Open this group as its owner</button></div>
+      <p class="hint">As the app owner you can do everything its owner can. Each time is recorded on the group.</p>` : ""}
+    ${db.appOwnerNow() && g && g.hidden ? `<div class="note warn"><b>Deleted by its owner</b> (hidden; its rounds still count).</div>
+      <div class="inline-actions stacked"><button class="btn" data-act="restore-group" data-id="${esc(g.id)}">Bring the group back</button>
+      <button class="btn ghost warn" data-act="remove-group-for-good" data-id="${esc(g.id)}">Remove it for good (a backup is taken first)</button></div>` : ""}
     <div class="ck-tiles">
       ${tile(ms.length, "Members")}
       ${tile(ms.filter((m) => m.lastSeen >= week).length, "Active in 7 days")}
@@ -3555,13 +3562,12 @@ function groupSection() {
   <section class="panel">
     <div class="panel-head"><h2 class="panel-title">Delete this group</h2></div>
     <div class="card padded">
-      <p class="hint" style="margin:0 0 0.7rem">Removes <b>${esc(association ? association.name : "")}</b> and every round and game in it. <b>Golfers are not deleted</b> — they are people, and they keep their handicap and their place in your other groups.</p>
+      <p class="hint" style="margin:0 0 0.7rem">Closes <b>${esc(association ? association.name : "")}</b> for everybody. Nothing in it is erased: <b>every round still counts</b> in each golfer's handicap, and each golfer can still see their own rounds, marked (deleted). The app owner can bring the group back.</p>
       ${confirmDeleteGroup ? `
         <div class="note warn">
-          <b>What goes:</b> this group, its ${rounds.length} round${rounds.length === 1 ? "" : "s"} and its ${games.length} game${games.length === 1 ? "" : "s"}.<br>
-          <b>What stays:</b> all ${golfers.length} golfer${golfers.length === 1 ? "" : "s"}, every course, and every round they have played in your other groups. Their handicaps are rebuilt from what remains.
+          <b>What happens:</b> the group closes for all its members. Its ${rounds.length} round${rounds.length === 1 ? "" : "s"} and ${games.length} game${games.length === 1 ? "" : "s"} stay, read only.<br>
+          <b>What stays:</b> all ${golfers.length} golfer${golfers.length === 1 ? "" : "s"}, their handicaps, every course, and their places in your other groups.
         </div>
-        <p class="hint">A copy of the rounds is saved to this device first, and offered to you as a file straight afterwards — so even this is recoverable.</p>
         <div class="inline-actions stacked">
           <button class="btn ghost" data-act="cancel-delete-group">Keep it</button>
           <button class="btn danger" data-act="really-delete-group">Delete ${esc(association ? association.name : "this group")}</button>
@@ -5377,6 +5383,28 @@ view.addEventListener("click", async (e) => {
     case "admin-tab": adminTab = d.id || "cockpit"; cockpitGroup = null; window.scrollTo && window.scrollTo(0, 0); return render();
     case "cockpit-refresh": return loadOwnerCockpitHere();
     case "cockpit-group": cockpitGroup = d.id || null; window.scrollTo && window.scrollTo(0, 0); return render();
+    case "restore-group": {
+      busy("Bringing the group back");
+      try { await db.hideGroup(d.id, false); flashMsg("The group is back, exactly as it was."); await loadOwnerCockpitHere(); }
+      catch (e) { flashMsg(`Nothing was changed: ${String((e && (e.code || e.message)) || "no connection")}.`); }
+      finally { idleAll(); }
+      return render();
+    }
+    case "remove-group-for-good": {
+      if (!window.confirm("Remove this group for good? A backup of its rounds is taken first and offered to you as a file. This cannot be undone.")) return;
+      busy("Removing the group");
+      try { await db.deleteGroup(d.id); cockpitGroup = null; flashMsg("The group is removed. Its backup was kept on this device."); await loadOwnerCockpitHere(); }
+      catch (e) { flashMsg(`It was not removed: ${String((e && (e.code || e.message)) || "no connection")}.`); }
+      finally { idleAll(); }
+      return render();
+    }
+    case "open-as-app-owner": {
+      busy("Opening the group");
+      try { await start(d.id); tab = "enter"; cockpitGroup = null; flashMsg("Opened as the app owner. This visit is recorded on the group."); }
+      catch (e) { flashMsg(`It could not be opened: ${String((e && (e.code || e.message)) || "no connection")}.`); }
+      finally { idleAll(); }
+      return render();
+    }
     case "set-switch": {
       if (!appSettings || appSettings.mode === d.id) return;
       busy("Changing the switch");
@@ -5851,14 +5879,14 @@ view.addEventListener("click", async (e) => {
       busy("Deleting the group");
       render();
       try {
-        await db.deleteGroup();
+        await db.hideGroup();
         /* Start again from a clean slate rather than trying to unpick what is
            left in memory. Deleting a group leaves listeners pointing at
            collections that no longer exist, which is why the roster vanished
            from the screen afterwards and only came back after signing out. A
            reload is instant and cannot be half-right. */
         idle();
-        flashMsg("Group deleted. Reloading…");
+        flashMsg("Group deleted (closed; its rounds still count). Reloading…");
         setTimeout(() => location.reload(), 900);
         return;
       } catch {
@@ -6884,6 +6912,8 @@ async function runFinder() {
 }
 
 function postRound() {
+  /* Batch 4, step 18: a deleted (hidden) group is read only. */
+  if (db.groupHidden() && !db.appOwnerNow()) { flashMsg("This group was deleted by its owner, so nothing new can be posted here."); return; }
   const golfer = golferById(form.golferId);
   const course = courseById(form.courseId);
   const tee = course.tees.find((t) => t.id === form.teeId);
