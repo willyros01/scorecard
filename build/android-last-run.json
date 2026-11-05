@@ -1,10 +1,10 @@
 {
   "workflow": "Scorecard Android APK test build",
   "branch": "android",
-  "run_id": 42096678426,
+  "run_id": 42113878795,
   "run_attempt": "1",
-  "run_url": "https://github.com/willyros01/scorecard/actions/runs/42096678426",
-  "source_sha": "f0face5de48859a6d512ea8424d295913bfd61c0",
+  "run_url": "https://github.com/willyros01/scorecard/actions/runs/42113878795",
+  "source_sha": "f44bd7ba40c95dc82bd3af883e62c10a912608c5",
   "outcome": "success",
   "artifact_name": "scorecard-android-test-apk",
   "publication": {
@@ -12,7 +12,7 @@
     "state": "queued-for-cuberoot-publisher",
     "mechanism": "Cuberoot publisher polls this verified build report"
   },
-  "reported_at": "2026-11-05T19:46:56.211Z",
+  "reported_at": "2026-11-05T21:37:01.300Z",
   "jobs": [
     {
       "name": "Android adapter and launcher checks",
@@ -25,5 +25,5 @@
       "failed_steps": []
     }
   ],
-  "artifact_id": 13446359328
+  "artifact_id": 13454344008
 }
