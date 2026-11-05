@@ -2914,8 +2914,9 @@ export async function linkGolferForMember(displayName) {
       { op: "set", merge: false, path: ["associations", assocId, "roster", mine.id], data: { golferId: mine.id, addedAt: Date.now() } },
       { op: "update", path: ["golfers", mine.id], data: { groups: [...new Set([...(mine.groups || []), assocId])], editedIn: assocId } },
       { op: "set", merge: false, path: ["associations", assocId, "directory", mine.id], data: directoryEntry(mine) },
-      { op: "update", path: ["associations", assocId, "members", uid], data: { golferId: mine.id } },
     ], "put my golfer on the new group");
+    /* The membership points at the golfer too (best effort; findMyGolfer repairs it). */
+    try { await fb.mod.store.updateDoc(ref("associations", assocId, "members", uid), { golferId: mine.id }); } catch {}
     return mine;
   }
   const name = String(displayName || "").trim();

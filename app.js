@@ -2058,6 +2058,64 @@ const courseName = (id) => { const c = courseById(id); return c ? c.name : "Unkn
  * No chart library: one would add a download, a build step and another thing to
  * break, for a line and some dots. Every value here is one the app already
  * calculates. */
+/* Batch 6, step 10: a Marker round's card, read only, with the pars as played. */
+function openRoundCard(r) {
+  const par = Array.isArray(r.holePar) && r.holePar.length === 18 ? r.holePar : null;
+  const si = Array.isArray(r.holeSi) && r.holeSi.length === 18 ? r.holeSi : null;
+  const cell = (v, p) => {
+    const n = Number(v);
+    const cls = v === "X" ? "" : p && n < p ? "color:var(--pine);font-weight:800" : p && n > p ? "color:var(--pencil)" : "";
+    return `<td style="${cls}">${esc(v == null ? "·" : v)}</td>`;
+  };
+  const half = (from) => `<tr><th>Hole</th>${Array.from({ length: 9 }, (_, i) => `<th>${from + i + 1}</th>`).join("")}</tr>
+    ${par ? `<tr><th>Par</th>${par.slice(from, from + 9).map((p) => `<td>${p}</td>`).join("")}</tr>` : ""}
+    ${si ? `<tr><th>HCP</th>${si.slice(from, from + 9).map((p) => `<td>${p ?? ""}</td>`).join("")}</tr>` : ""}
+    <tr><th>Score</th>${r.holes.slice(from, from + 9).map((v, i) => cell(v, par && par[from + i])).join("")}</tr>`;
+  sheetEl.hidden = false;
+  sheetEl.innerHTML = `<div class="sheet-body">
+    <div style="display:flex;justify-content:space-between;align-items:center"><h2>${esc((golferById(r.golferId) || {}).name || "The card")}</h2><button class="rowbtn" data-close="1">Close</button></div>
+    <p class="hint">${esc(dateOf(r) || "")} · ${esc(r.courseName || "")}${r.teeName ? ` · ${esc(r.teeName)}` : ""} · gross ${esc(r.gross)}</p>
+    <div style="overflow-x:auto"><table class="cardcheck" style="border-collapse:collapse;text-align:center">${half(0)}${half(9)}</table></div>
+    <p class="hint">Scored in The Marker. Read only: corrections are made in The Marker. X = picked up.</p>
+  </div>`;
+}
+
+/* Batch 6, step 25 (Willy, 29 Oct 2026): simple scoring statistics from the
+   golfer's Marker rounds still in The Scorecard. Kept small. A picked-up hole
+   counts as double bogey or worse; rounds entered as a total are left out. */
+function scoringStats(list) {
+  const marker = list.filter((r) => Array.isArray(r.holes) && r.holes.length === 18 && Array.isArray(r.holePar) && r.holePar.length === 18);
+  if (!marker.length) return "";
+  const k = { eagle: 0, birdie: 0, par: 0, bogey: 0, double: 0 };
+  const by = { 3: [], 4: [], 5: [] };
+  let holes = 0;
+  for (const r of marker) r.holes.forEach((v, i) => {
+    const p = Number(r.holePar[i]);
+    if (!p) return;
+    holes++;
+    if (v === "X") { k.double++; return; }
+    const n = Number(v);
+    if (!Number.isFinite(n)) return;
+    const d = n - p;
+    if (d <= -2) k.eagle++; else if (d === -1) k.birdie++; else if (d === 0) k.par++; else if (d === 1) k.bogey++; else k.double++;
+    if (by[p]) by[p].push(n);
+  });
+  const max = Math.max(1, ...Object.values(k));
+  const bar = (label, n) => `<div style="display:grid;grid-template-columns:9em 1fr 3em;gap:8px;align-items:center;margin:4px 0">
+    <span>${label}</span><span style="background:var(--tint);border-radius:6px;height:14px"><span style="display:block;height:14px;border-radius:6px;background:var(--pine);width:${Math.round((n / max) * 100)}%"></span></span><b style="text-align:right">${n}</b></div>`;
+  const avg = (p) => {
+    const a = by[p];
+    if (!a.length) return `<div class="tile"><b>–</b><span>Par ${p}s</span></div>`;
+    const m = a.reduce((x, y) => x + y, 0) / a.length;
+    return `<div class="tile"><b>${m.toFixed(2)}</b><span>Par ${p}s · ${m - p >= 0 ? "+" : ""}${(m - p).toFixed(2)}</span></div>`;
+  };
+  return `<section class="panel"><div class="card padded">
+    <div class="eyebrow">Scoring · ${marker.length} Marker round${marker.length === 1 ? "" : "s"}, ${holes} holes</div>
+    ${bar("Eagles or better", k.eagle)}${bar("Birdies", k.birdie)}${bar("Pars", k.par)}${bar("Bogeys", k.bogey)}${bar("Double bogeys or worse", k.double)}
+    <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:10px;text-align:center">${avg(3)}${avg(4)}${avg(5)}</div>
+  </div></section>`;
+}
+
 function trendChart(list) {
   /* Wrapped whole. A chart is decoration — it must never be able to stop
      somebody reading their rounds, which is exactly what it did. */
@@ -2240,6 +2298,7 @@ function screenHistory() {
   </div>
   ${chips ? `<div class="pills">${chips}<button class="linkbtn" data-act="clear-filters">Clear</button></div>` : ""}
   ${filter.golferId ? trendChart(rounds.filter((r) => r.golferId === filter.golferId)) : ""}
+  ${filter.golferId ? scoringStats(rounds.filter((r) => r.golferId === filter.golferId)) : ""}
   ${rows.length === 0 ? empty("No rounds here yet", "Post one from the Enter tab, or widen the filters above.") : `
   <div class="eyebrow" style="display:flex;justify-content:space-between"><span>${rows.length} round${rows.length === 1 ? "" : "s"}</span><span>Differential</span></div>
   <div class="card list">${rows.map((r) => {
@@ -2256,6 +2315,7 @@ function screenHistory() {
             return gm ? `<div class="sub">in game: ${esc(gm.name || courseName(gm.courseId))}</div>` : "";
           })()}
           ${r.notes ? `<div class="small muted" style="font-style:italic">${esc(r.notes)}</div>` : ""}
+          ${Array.isArray(r.holes) && r.holes.length === 18 ? `<button class="linkbtn" data-act="show-card" data-id="${esc(r.id)}" aria-label="Show the hole-by-hole card">▦ Card</button>` : ""}
         </div>
         <div style="text-align:right">
           <span class="stamp sm">${Number.isFinite(+r.differential) ? (+r.differential).toFixed(1) : "—"}</span>
@@ -5561,6 +5621,7 @@ view.addEventListener("click", async (e) => {
     case "approve-request": return approveRequestHere(d.id);
     case "admin-tab": adminTab = d.id || "cockpit"; cockpitGroup = null; window.scrollTo && window.scrollTo(0, 0); return render();
     case "cockpit-refresh": return loadOwnerCockpitHere();
+    case "show-card": { const r = rounds.find((x) => x.id === d.id); if (r) openRoundCard(r); return; }
     case "toggle-golfer-list": showGolferList = !showGolferList; return render();
     case "toggle-course-list": showCourseList = !showCourseList; return render();
     /* Batch 5, step 24: Find another course. */

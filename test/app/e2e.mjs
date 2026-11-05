@@ -1675,6 +1675,16 @@ await check("GI4", "fresh phone: Terms of Use, then Welcome to the group (email,
 
 /* ================= Batch 3 (2.31.0): safe saving ================= */
 
+/* A document with nested arrays and maps decoded (getDoc decodes one level). */
+const deepValue = (v) => v == null ? v : "arrayValue" in v ? (v.arrayValue.values || []).map(deepValue)
+  : "mapValue" in v ? Object.fromEntries(Object.entries(v.mapValue.fields || {}).map(([k, x]) => [k, deepValue(x)]))
+  : "integerValue" in v ? Number(v.integerValue) : "doubleValue" in v ? Number(v.doubleValue) : "nullValue" in v ? null : Object.values(v)[0];
+async function getDeep(docPath) {
+  const r = await fetch(`${FS}/${docPath}`, { headers: OWNER });
+  if (r.status === 404) return null;
+  const j = await r.json();
+  return Object.fromEntries(Object.entries(j.fields || {}).map(([k, v]) => [k, deepValue(v)]));
+}
 /* A page signed in as the owner, in G1. */
 async function ownerInG1() {
   const page = await newPage();
@@ -1695,7 +1705,7 @@ await check("SS1", "editing then deleting a round: round, golfer window and coun
   const r1 = await page.evaluate(async () => (await import("/store.js")).saveRoundChange({ roundId: "r-gSS1", golferId: "gSS1",
     change: { gross: 97, adjusted: 96, differential: 21.5 } }).then((x) => ({ ok: x.ok, queued: !!x.queued }), (e) => ({ error: String(e.code || e.message) })));
   if (!r1.ok || r1.queued) throw new Error(`edit: ${JSON.stringify(r1)}`);
-  const g = await getDoc("golfers/gSS1");
+  const g = await getDeep("golfers/gSS1");
   const entry = (g.recentWindow || []).find((e) => e.roundId === "r-gSS1");
   if (!entry || entry.differential !== 21.5) throw new Error(`window not updated: ${JSON.stringify(g.recentWindow)}`);
   if ((await getDoc("associations/G1/rounds/r-gSS1")).gross !== 97) throw new Error("round not updated");
@@ -1703,7 +1713,7 @@ await check("SS1", "editing then deleting a round: round, golfer window and coun
   if (!dir || !dir.updatedAt || dir.displayName !== "Sam Safe") throw new Error(`group list not written: ${JSON.stringify(dir)}`);
   const r2 = await page.evaluate(async () => (await import("/store.js")).saveRoundChange({ roundId: "r-gSS1", golferId: "gSS1", change: "delete" }).then((x) => x.ok, (e) => String(e.code || e.message)));
   if (r2 !== true) throw new Error(`delete: ${r2}`);
-  const g2 = await getDoc("golfers/gSS1");
+  const g2 = await getDeep("golfers/gSS1");
   if (await getDocQuick("associations/G1/rounds/r-gSS1")) throw new Error("round not deleted");
   if ((g2.recentWindow || []).some((e) => e.roundId === "r-gSS1") || g2.roundCount !== 0) throw new Error(`golfer not rebuilt: ${JSON.stringify(g2)}`);
   await page.close();
@@ -1731,7 +1741,19 @@ await check("SS3", "deleting a game: the game and the game id on its rounds go i
   await put("associations/G1/rounds/r-gm2", { id: "r-gm2", golferId: "gD2", assocId: "G1", date: "2026-10-02", gross: 91, differential: 16, gameId: "gmDel" });
   const page = await ownerInG1();
   const r = await page.evaluate(async () => (await import("/store.js")).deleteGame("gmDel").then((x) => x, (e) => ({ error: String(e.code || e.message) })));
-  if (!r.ok || r.rounds !== 2) throw new Error(JSON.stringify(r));
+  if (!r.ok || r.rounds !== 2) {
+    /* Which part was refused? (diagnosis) */
+    const parts = await page.evaluate(async () => {
+      const db = await import("/store.js");
+      const out = {};
+      try { await db.callForTest?.("noop"); } catch {}
+      return out;
+    }).catch(() => ({}));
+    const t = await idToken(W.email, W.password);
+    const one = await writeAs(t, "associations/G1/rounds/r-gm1", { id: "r-gm1", golferId: "gD1", assocId: "G1", date: "2026-10-02", gross: 90, differential: 15, gameId: null });
+    const del = await deleteAs(t, "associations/G1/games/gmDel");
+    throw new Error(`${JSON.stringify(r)}; round write alone ${one}, game delete alone ${del} ${JSON.stringify(parts)}`);
+  }
   if (await getDocQuick("associations/G1/games/gmDel")) throw new Error("the game is still there");
   for (const id of ["r-gm1", "r-gm2"]) { const x = await getDoc(`associations/G1/rounds/${id}`); if (!x || x.gameId !== null) throw new Error(`${id}: ${JSON.stringify(x)}`); }
   await page.close();
@@ -1748,10 +1770,11 @@ await check("SS4", "a new group puts the creator's existing golfer on its roster
   await page.waitForFunction(async () => !!(await import("/store.js")).currentAssociation(), null, { timeout: 20000 });
   const out = await page.evaluate(async (email) => {
     const db = await import("/store.js");
-    const g = await db.createAssociation({ name: "Second Group", displayName: email });
+    let g;
+    try { g = await db.createAssociation({ name: "Second Group", displayName: email }); } catch (e) { return { error: `creating the group: ${e.code || e.message}` }; }
     db.setAssociation(g.id);
-    const mine = await db.linkGolferForMember(email);
-    return { id: g.id, golfer: mine && mine.id };
+    try { const mine = await db.linkGolferForMember(email); return { id: g.id, golfer: mine && mine.id }; }
+    catch (e) { return { error: `linking the golfer: ${e.code || e.message}` }; }
   }, C.email).catch((e) => ({ error: String(e.message || e) }));
   if (out.error) throw new Error(out.error);
   if (out.golfer !== "gCreator") throw new Error(`linked ${out.golfer}, not the creator's golfer`);
