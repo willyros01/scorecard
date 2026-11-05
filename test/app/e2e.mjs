@@ -1670,6 +1670,94 @@ await check("GI4", "fresh phone: Terms of Use, then Welcome to the group (email,
   await page.close();
 });
 
+/* ================= Batch 3 (2.31.0): safe saving ================= */
+
+/* A page signed in as the owner, in G1. */
+async function ownerInG1() {
+  const page = await newPage();
+  await page.goto(APP, { waitUntil: "load" });
+  await waitForText(page, /Sign in/);
+  await signIn(page, W.email, W.password);
+  await page.waitForFunction(async () => !!(await import("/store.js")).currentAssociation(), null, { timeout: 20000 });
+  await page.evaluate(async () => (await import("/store.js")).setAssociation("G1"));
+  return page;
+}
+
+await check("SS1", "editing then deleting a round: round, golfer window and count, and group list change in ONE commit", async () => {
+  const P = { email: "ss.one@example.com", password: "ss-one-pass-1" };
+  await joinedPerson("gSS1", "Sam Safe", P.email, P.password);   /* one round r-gSS1, differential 14.0 */
+  await put("golfers/gSS1", { name: "Sam Safe", nameKey: "sam-safe", linkedUid: null, groups: ["G1"], roundCount: 1,
+    recentWindow: [{ roundId: "r-gSS1", date: "2026-09-05", differential: 14.0, assocId: "G1" }], handicapIndex: null });
+  const page = await ownerInG1();
+  const r1 = await page.evaluate(async () => (await import("/store.js")).saveRoundChange({ roundId: "r-gSS1", golferId: "gSS1",
+    change: { gross: 97, adjusted: 96, differential: 21.5 } }).then((x) => ({ ok: x.ok, queued: !!x.queued }), (e) => ({ error: String(e.code || e.message) })));
+  if (!r1.ok || r1.queued) throw new Error(`edit: ${JSON.stringify(r1)}`);
+  const g = await getDoc("golfers/gSS1");
+  const entry = (g.recentWindow || []).find((e) => e.roundId === "r-gSS1");
+  if (!entry || entry.differential !== 21.5) throw new Error(`window not updated: ${JSON.stringify(g.recentWindow)}`);
+  if ((await getDoc("associations/G1/rounds/r-gSS1")).gross !== 97) throw new Error("round not updated");
+  const dir = await getDoc("associations/G1/directory/gSS1");
+  if (!dir || !dir.updatedAt || dir.displayName !== "Sam Safe") throw new Error(`group list not written: ${JSON.stringify(dir)}`);
+  const r2 = await page.evaluate(async () => (await import("/store.js")).saveRoundChange({ roundId: "r-gSS1", golferId: "gSS1", change: "delete" }).then((x) => x.ok, (e) => String(e.code || e.message)));
+  if (r2 !== true) throw new Error(`delete: ${r2}`);
+  const g2 = await getDoc("golfers/gSS1");
+  if (await getDocQuick("associations/G1/rounds/r-gSS1")) throw new Error("round not deleted");
+  if ((g2.recentWindow || []).some((e) => e.roundId === "r-gSS1") || g2.roundCount !== 0) throw new Error(`golfer not rebuilt: ${JSON.stringify(g2)}`);
+  await page.close();
+});
+
+await check("SS2", "a round from The Marker: its scores cannot be changed in The Scorecard (rules); its notes can", async () => {
+  await put("golfers/gSS2", { name: "Mark Locked", nameKey: "mark-locked", linkedUid: null, groups: ["G1"], roundCount: 1,
+    recentWindow: [{ roundId: "r-mk", date: "2026-10-01", differential: 12.0, assocId: "G1" }] });
+  await put("associations/G1/roster/gSS2", { golferId: "gSS2" });
+  await put("associations/G1/rounds/r-mk", { id: "r-mk", golferId: "gSS2", assocId: "G1", date: "2026-10-01", gross: 88, adjusted: 87, differential: 12.0,
+    enteredVia: "marker", cardId: "card-1", holes: [4,4,3,5,4,4,3,4,5,4,3,5,4,4,4,3,4,5], notes: "" });
+  const page = await ownerInG1();
+  const bad = await page.evaluate(async () => (await import("/store.js")).saveRoundChange({ roundId: "r-mk", golferId: "gSS2", change: { gross: 80, adjusted: 80, differential: 5 } }).then(() => "saved", (e) => String(e.code || e.message)));
+  if (bad === "saved") throw new Error("a Marker round's score was changed");
+  if ((await getDoc("associations/G1/rounds/r-mk")).gross !== 88) throw new Error("the score changed");
+  const ok = await page.evaluate(async () => (await import("/store.js")).saveRoundChange({ roundId: "r-mk", golferId: "gSS2", change: { notes: "windy" } }).then((x) => x.ok, (e) => String(e.code || e.message)));
+  if (ok !== true) throw new Error(`notes refused: ${ok}`);
+  if ((await getDoc("associations/G1/rounds/r-mk")).notes !== "windy") throw new Error("notes not saved");
+  await page.close();
+});
+
+await check("SS3", "deleting a game: the game and the game id on its rounds go in one commit; the rounds stay", async () => {
+  await put("associations/G1/games/gmDel", { id: "gmDel", assocId: "G1", date: "2026-10-02", endDate: null, courseId: "", name: "Gone Game", createdBy: W.uid });
+  await put("associations/G1/rounds/r-gm1", { id: "r-gm1", golferId: "gD1", assocId: "G1", date: "2026-10-02", gross: 90, differential: 15, gameId: "gmDel" });
+  await put("associations/G1/rounds/r-gm2", { id: "r-gm2", golferId: "gD2", assocId: "G1", date: "2026-10-02", gross: 91, differential: 16, gameId: "gmDel" });
+  const page = await ownerInG1();
+  const r = await page.evaluate(async () => (await import("/store.js")).deleteGame("gmDel").then((x) => x, (e) => ({ error: String(e.code || e.message) })));
+  if (!r.ok || r.rounds !== 2) throw new Error(JSON.stringify(r));
+  if (await getDocQuick("associations/G1/games/gmDel")) throw new Error("the game is still there");
+  for (const id of ["r-gm1", "r-gm2"]) { const x = await getDoc(`associations/G1/rounds/${id}`); if (!x || x.gameId !== null) throw new Error(`${id}: ${JSON.stringify(x)}`); }
+  await page.close();
+});
+
+await check("SS4", "a new group puts the creator's existing golfer on its roster; no golfer named after the email", async () => {
+  const C = { email: "creator.two@example.com", password: "creator-pass-1" };
+  await joinedPerson("gCreator", "Cora Creator", C.email, C.password);
+  await put(`groupCreators/${(await accountByEmail(C.email)).localId}`, { note: "test" });
+  const page = await newPage();
+  await page.goto(APP, { waitUntil: "load" });
+  await waitForText(page, /Sign in/);
+  await signIn(page, C.email, C.password);
+  await page.waitForFunction(async () => !!(await import("/store.js")).currentAssociation(), null, { timeout: 20000 });
+  const out = await page.evaluate(async (email) => {
+    const db = await import("/store.js");
+    const g = await db.createAssociation({ name: "Second Group", displayName: email });
+    db.setAssociation(g.id);
+    const mine = await db.linkGolferForMember(email);
+    return { id: g.id, golfer: mine && mine.id };
+  }, C.email).catch((e) => ({ error: String(e.message || e) }));
+  if (out.error) throw new Error(out.error);
+  if (out.golfer !== "gCreator") throw new Error(`linked ${out.golfer}, not the creator's golfer`);
+  if (!(await getDocQuick(`associations/${out.id}/roster/gCreator`))) throw new Error("not on the new roster");
+  if ((await list("golfers")).some((g) => g.name === C.email)) throw new Error("a golfer named after the email was created");
+  if (!((await getDoc("golfers/gCreator")).groups || []).includes(out.id)) throw new Error("the golfer does not list the new group");
+  await page.close();
+});
+
 await browser.close();
 server.kill();
 console.log(`\nRESULT: ${passed} passed, ${failed} failed`);

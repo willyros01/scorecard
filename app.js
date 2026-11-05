@@ -241,6 +241,7 @@ let fastEntry = null;   /* { scores: {golferId: "97"}, indexes: {golferId: "14.2
    redraw — a dialog that reappears is worse than one that is missed. */
 let toldAboutPromotion = false;
 let editingGame = false;
+let confirmGameDelete = null;   /* Batch 3: the game whose deletion is being confirmed */
 let invitedGolfer = null;
 let invitedGroupName = "";
 /* Build 25, Fixes E2–E4 (Willy, 13 and 22 Oct 2026).
@@ -380,7 +381,8 @@ function shownIndex(golfer) {
 /* Whether an index came from real rounds or a typed-in starting figure, so a
    screen can say so rather than passing off an estimate as a calculation. */
 const indexSource = (golfer) => model.effectiveIndex(golfer).source;
-const courseById = (id) => courses.find((c) => c.id === id);
+/* Batch 3, Fix 5: an empty id finds nothing, never a course without its own id. */
+const courseById = (id) => (id ? courses.find((c) => c.id === id) : undefined);
 
 /* ================= appearance ================= */
 
@@ -1902,6 +1904,8 @@ function screenEnter() {
 
   /* Both layouts are built from the SAME values computed above — course, tee,
      golfer, ready2. Nothing about what is required or what is saved differs. */
+  /* Batch 3, Fix 1: a Marker round's scores are read-only here. */
+  const lockedMarker = !!(editingRound && (rounds.find((r) => r.id === editingRound) || {}).enteredVia === "marker");
   if (currentEnterStyle() === "steps" && !editingRound) {
     return enterInSteps({ course, tee, golfer, ags, diff, ch, ready2, pickableGames });
   }
@@ -1909,6 +1913,7 @@ function screenEnter() {
   return `<div class="stack">
     ${flashBar()}
     ${editingRound ? `<div class="note warn">Editing a posted round <button class="linkbtn" data-act="cancel-round-edit">Cancel</button></div>` : ""}
+    ${lockedMarker ? `<div class="note tip"><b>Scored in The Marker.</b> Correct the scores in The Marker (Correct this card). Here you can change the notes and the game.</div>` : ""}
     ${db.canManage() ? "" : `<div class="style-switch"><button class="linkbtn" data-act="enter-steps">Switch to one step at a time</button></div>`}
 
     <div class="row">
@@ -1959,9 +1964,9 @@ function screenEnter() {
 
     <div class="row">
       <div><div class="eyebrow">Gross score</div>
-        <input class="field score" name="gross" inputmode="numeric" value="${form.gross}" placeholder="—"></div>
+        <input class="field score" name="gross" inputmode="numeric" value="${form.gross}" placeholder="—" ${lockedMarker ? "readonly" : ""}></div>
       <div><div class="eyebrow">Adjusted</div>
-        <input class="field score" name="adjusted" inputmode="numeric" value="${form.adjusted}" placeholder="${form.gross || "same"}"></div>
+        <input class="field score" name="adjusted" inputmode="numeric" value="${form.adjusted}" placeholder="${form.gross || "same"}" ${lockedMarker ? "readonly" : ""}></div>
     </div>
     <p class="hint">Adjusted gross caps each hole at net double bogey. Leave it blank if it matches your gross.</p>
 
@@ -2187,7 +2192,11 @@ function screenHistory() {
           <div><span class="sub">${esc(dateOf(r) || "no date")}</span> <span class="name">${esc((golferById(r.golferId) || {}).name || "Unknown")}</span></div>
           <div class="small truncate">${esc(r.courseName || "Unknown course")}${r.teeName ? ` · ${esc(r.teeName)}` : ""}</div>
           <div class="sub">${r.gross == null ? "—" : r.gross}${r.adjusted != null && r.adjusted !== r.gross ? ` (adj ${r.adjusted})` : ""}${r.courseHandicap != null ? ` · net ${model.netScore(r)}` : ""}${Number.isFinite(+r.rating) && r.slope ? ` · ${(+r.rating).toFixed(1)}/${r.slope}` : ""}</div>
-          ${r.gameId ? `<div class="sub">in game: ${esc((games.find((g) => g.id === r.gameId) || {}).name || courseName((games.find((g) => g.id === r.gameId) || {}).courseId))}</div>` : ""}
+          ${(() => {
+            /* Batch 3, Fix 4: a game that no longer exists shows nothing (Willy, 26 Oct). */
+            const gm = r.gameId ? games.find((g) => g.id === r.gameId) : null;
+            return gm ? `<div class="sub">in game: ${esc(gm.name || courseName(gm.courseId))}</div>` : "";
+          })()}
           ${r.notes ? `<div class="small muted" style="font-style:italic">${esc(r.notes)}</div>` : ""}
         </div>
         <div style="text-align:right">
@@ -2581,6 +2590,14 @@ function gameDetail(gameId) {
       <div class="inline-actions stacked">
         <button class="btn" data-act="save-game-edit">Save the changes</button>
       </div>
+      ${(() => {
+        /* Batch 3, Fix 4: deleting a game is one commit and frees its rounds. */
+        const n = rounds.filter((r) => r.gameId === game.id).length;
+        return confirmGameDelete === game.id
+          ? `<div class="note warn"><b>Delete the game?</b> Its ${n} round${n === 1 ? "" : "s"} stay in each golfer's history and still count for their handicap; they are only taken out of the game.</div>
+             <div class="inline-actions stacked"><button class="btn danger" data-act="delete-game">Yes, delete the game</button><button class="btn ghost" data-act="delete-game-cancel">Keep it</button></div>`
+          : `<div class="inline-actions stacked"><button class="btn ghost warn" data-act="delete-game-ask">Delete this game</button></div>`;
+      })()}
     </div>` : ""}
   </section>
 
@@ -4940,10 +4957,9 @@ view.addEventListener("click", async (e) => {
     confirmId = null;
     busy("Deleting the round");
     try {
-      if (r) await db.deleteRoundAndRebuild(r);
-      else db.deleteRound(d.confirmDel);
-      flashMsg("Round deleted");
-    } catch { flashMsg("Couldn't delete it — the message above says why."); }
+      const done = r ? await db.deleteRoundAndRebuild(r) : (db.deleteRound(d.confirmDel), { ok: true });
+      flashMsg(done && done.queued ? "Round deleted on this phone; The Scorecard is updated, with the index, when the signal returns." : "Round deleted, and the index updated.");
+    } catch (e) { flashMsg(String((e && e.code) || "") === "round/conflict" ? e.message : `Nothing was deleted: ${String((e && (e.code || e.message)) || "no connection")}. Try again.`); }
     finally { idle(); }
     return render();
   }
@@ -5681,7 +5697,20 @@ view.addEventListener("click", async (e) => {
       finally { idleAll(); }
       return render();
     }
-    case "delete-game": db.deleteGame(openGame); openGame = null; flashMsg("Game deleted"); return render();
+    case "delete-game-ask": confirmGameDelete = openGame; return render();
+    case "delete-game-cancel": confirmGameDelete = null; return render();
+    case "delete-game": {
+      const id = openGame;
+      confirmGameDelete = null;
+      busy("Deleting the game");
+      try {
+        const r = await db.deleteGame(id);
+        openGame = null; editingGame = false;
+        flashMsg(`Game deleted. ${r.rounds} round${r.rounds === 1 ? "" : "s"} taken out of it, still in each golfer's history.${r.queued ? " (Saved to The Scorecard when the signal returns.)" : ""}`);
+      } catch (e) { flashMsg(`Nothing was deleted: ${String((e && (e.code || e.message)) || "no connection")}.`); }
+      finally { idleAll(); }
+      return render();
+    }
     case "share-game": {
       const board = model.gameLeaderboard(rounds.filter((r) => r.gameId === openGame), allGolfers);
       const everyoneHasNet = board.length > 0 && board.every((r) => r.net != null);
@@ -6652,7 +6681,11 @@ async function createGroup(name, groupName) {
     /* Only if they said they play. An organiser who does not play should not
        appear on the roster, and should certainly not get a handicap record
        created for them without being asked. */
-    if (playing) await db.linkGolferForMember(name);
+    if (playing) {
+      try { await db.linkGolferForMember(name); }
+      catch (e) { if (String((e && e.code) || "") !== "golfer/name") throw e;
+        flashMsg("The group is ready, but you are not on its roster yet: add yourself under Manage with the name you play under."); }
+    }
     await start(created.id);
     joining = false;
     idleAll();
@@ -6871,15 +6904,27 @@ function postRound() {
     const wasSlope = original && Number.isFinite(Number(original.slope)) ? Number(original.slope) : tee.slope;
     /* gameId is written every time, including as null — so a round can be taken
        out of a game as well as moved between them. */
-    db.updateRound(editingRound, {
-      date: form.date, gross: +form.gross, adjusted: ags,
-      differential: model.differential(ags, wasRating, wasSlope),
-      notes: form.notes.trim(), gameId: form.gameId || null,
-    });
-    db.rebuildGolferIndex(golfer.id);
-    editingRound = null;
-    form = { ...form, gross: "", adjusted: "", notes: "" };
-    flashMsg("Round updated");
+    /* Batch 3, Fix 1: a round from The Marker keeps its scores (corrected in
+       The Marker only); its notes and game can still change here. */
+    const fromMarker = !!(original && original.enteredVia === "marker");
+    const change = fromMarker
+      ? { notes: form.notes.trim(), gameId: form.gameId || null }
+      : { date: form.date, gross: +form.gross, adjusted: ags,
+          differential: model.differential(ags, wasRating, wasSlope),
+          notes: form.notes.trim(), gameId: form.gameId || null };
+    /* Batch 3, Fix 2: the round, the golfer's index and the group list in one commit. */
+    const roundId = editingRound;
+    busy("Saving the round");
+    render();
+    db.saveRoundChange({ roundId, change, golferId: (original && original.golferId) || golfer.id })
+      .then((r) => {
+        editingRound = null;
+        form = { ...form, gross: "", adjusted: "", notes: "" };
+        flashMsg(r && r.queued ? "Round updated on this phone; it is saved to The Scorecard, with the index, when the signal returns." : "Round updated, with the index.");
+      })
+      .catch((e) => flashMsg(String((e && e.code) || "") === "round/conflict" ? e.message
+        : `Nothing was saved: ${String((e && (e.code || e.message)) || "no connection")}. Try again.`))
+      .finally(() => { idleAll(); render(); });
     return;
   }
 

@@ -502,6 +502,8 @@ export function postRound({ golfer, course, tee, date, gross, adjusted, notes, g
           editedIn: assocId,
         },
       },
+      /* Batch 3, Fix 3: the group list's index moves in the same commit. */
+      ...directoryWrites(golfer, window),
     ],
     opId: `round-create-${round.id}`,
   });
@@ -510,8 +512,99 @@ export function postRound({ golfer, course, tee, date, gross, adjusted, notes, g
   return { round, window, handicapIndex: model.indexFromWindow(window) };
 }
 
+/* Batch 3, Fix 3 (Willy's commit rule): the golfer's entry in the group list,
+   written in the same commit as the round and the golfer. This group always;
+   the golfer's other groups only when it is the signed-in person's own golfer
+   (the rules allow exactly that; their admins' apps repair the rest). */
+function directoryWrites(golfer, window) {
+  const groups = new Set([assocId]);
+  if (golfer && golfer.linkedUid && golfer.linkedUid === uid) {
+    const mine = new Set(knownGroups().map((g) => g.id));
+    for (const a of golfer.groups || []) if (mine.has(a)) groups.add(a);
+  }
+  const index = model.effectiveIndex({ ...golfer, recentWindow: window }).index;
+  return [...groups].map((a) => ({ op: "set", merge: false, path: ["associations", a, "directory", golfer.id],
+    data: { golferId: golfer.id, displayName: golfer.name || "", handicapIndex: index == null ? null : index, updatedAt: Date.now() } }));
+}
+
+/* Batch 3, Fix 2 (Willy's commit rule, plan of 3 Nov 2026): editing or
+ * deleting a round, the golfer's 20-round window, index and round count, and
+ * their group-list entries are saved in ONE commit, or nothing is.
+ *
+ * Online it is a Firestore transaction: the round, the golfer and the list
+ * entries are read inside it, so if anybody changed them meanwhile the commit
+ * is refused and tried again (Firestore's own precondition). Offline the
+ * whole change waits in the outbox as ONE item and is committed whole later.
+ * change: "delete", or the round's new field values. */
+export async function saveRoundChange({ roundId, change, golferId }) {
+  const { getDocs, query, where, runTransaction, getDoc } = fb.mod.store;
+  const roundPath = ["associations", assocId, "rounds", roundId];
+  if (!golferId) {
+    if (change === "delete") outbox.enqueue({ type: "delete", path: roundPath, opId: `round-delete-${roundId}` });
+    else outbox.enqueue({ type: "update", path: roundPath, data: change, opId: `round-update-${roundId}-${Date.now()}` });
+    await flush();
+    return { ok: true };
+  }
+  /* This group's other rounds of the golfer (a query cannot run inside a
+     transaction; the round itself is read again inside it). */
+  let others = [];
+  try {
+    const snap = await getDocs(query(col("associations", assocId, "rounds"), where("golferId", "==", golferId)));
+    snap.forEach((d) => { if (d.id !== roundId) { const r = d.data(); others.push({ roundId: d.id, date: r.date, differential: r.differential, assocId }); } });
+  } catch { others = null; }
+  const reachable = new Set(knownGroups().map((g) => g.id)); reachable.add(assocId);
+  const plan = (golfer, round) => {
+    const fresh = [...(others || [])];
+    if (change !== "delete") { const m = { ...round, ...change }; fresh.push({ roundId, date: m.date, differential: m.differential, assocId }); }
+    fresh.sort((a, b) => String(b.date).localeCompare(String(a.date)));
+    fresh.length = Math.min(fresh.length, 20);
+    const kept = golfer ? model.windowFromOtherGroups(golfer.recentWindow, assocId).filter((e) => e.assocId && reachable.has(e.assocId)) : [];
+    const window = model.mergeWindow(kept, fresh);
+    return { window, count: fresh.length + kept.length };
+  };
+  const golferUpdate = (window, count) => ({ recentWindow: window, handicapIndex: model.displayIndex(window), roundCount: count, editedIn: assocId });
+  const online = others !== null && !(typeof navigator !== "undefined" && navigator.onLine === false);
+  if (online) {
+    try {
+      return await runTransaction(fb.db, async (tx) => {
+        const r = await tx.get(ref(...roundPath));
+        if (!r.exists()) { const e = new Error("round/gone"); e.code = "round/gone"; throw e; }
+        const g = await tx.get(ref("golfers", golferId));
+        const golfer = g.exists() ? { ...g.data(), id: golferId } : null;
+        const { window, count } = plan(golfer, r.data());
+        if (change === "delete") tx.delete(ref(...roundPath)); else tx.update(ref(...roundPath), change);
+        if (golfer) {
+          tx.update(ref("golfers", golferId), golferUpdate(window, count));
+          for (const w of directoryWrites(golfer, window)) tx.set(ref(...w.path), w.data);
+        }
+        return { ok: true, window };
+      });
+    } catch (e) {
+      const code = String((e && (e.code || e.message)) || "");
+      if (!/unavailable|offline|network/i.test(code)) {
+        if (/aborted|failed-precondition/.test(code)) { const c = new Error("Somebody changed this golfer a moment ago. Nothing was saved. Try again."); c.code = "round/conflict"; throw c; }
+        throw e;
+      }
+      /* no connection after all: queue it whole, below */
+    }
+  }
+  /* Offline: one queued item, from the copies on this device. */
+  let golfer = null, round = {};
+  try { const g = await getDoc(ref("golfers", golferId)); if (g.exists()) golfer = { ...g.data(), id: golferId }; } catch {}
+  try { const r = await getDoc(ref(...roundPath)); if (r.exists()) round = r.data(); } catch {}
+  if (others === null) others = [];
+  const { window, count } = plan(golfer, round);
+  outbox.enqueue({ type: "batch", writes: [
+    change === "delete" ? { op: "delete", path: roundPath } : { op: "update", path: roundPath, data: change },
+    ...(golfer ? [{ op: "update", path: ["golfers", golferId], data: golferUpdate(window, count) }, ...directoryWrites(golfer, window)] : []),
+  ], opId: `round-change-${roundId}-${Date.now()}` });
+  flush();
+  return { ok: true, queued: true, window };
+}
+
 /* Editing or deleting is rarer, and correctness matters more than avoiding a
-   read, so the window is rebuilt from the golfer's last twenty rounds. */
+   read, so the window is rebuilt from the golfer's last twenty rounds.
+   (Batch 3: kept only as a repair tool; edits and deletes use saveRoundChange.) */
 /* Rebuilds after an edit or deletion.
  *
  * Only this group's rounds are readable from here, so entries belonging to the
@@ -580,9 +673,7 @@ export function deleteRound(roundId) {
 /* Deleting and rebuilding in one call, so a caller cannot do half of it and
    leave the golfer's index quietly wrong. */
 export async function deleteRoundAndRebuild(round) {
-  deleteRound(round.id);
-  await flush();
-  if (round.golferId) await rebuildGolferIndex(round.golferId);
+  return saveRoundChange({ roundId: round.id, change: "delete", golferId: round.golferId || null });
 }
 
 /* ---------------- roster, courses, games ---------------- */
@@ -925,7 +1016,8 @@ export function watchRounds(callback, { max = 500 } = {}) {
 
 export function watchCourses(callback) {
   const { onSnapshot } = fb.mod.store;
-  const stop = listen(col("courses"), (snap) => callback(snap.docs.map((d) => d.data())), (e) => report(e));
+  /* Batch 3, Fix 5: the document's own id always wins over any stored field. */
+  const stop = listen(col("courses"), (snap) => callback(snap.docs.map((d) => ({ ...d.data(), id: d.id }))), (e) => report(e));
   unsubscribers.push(stop);
   return stop;
 }
@@ -2508,7 +2600,7 @@ export function watchGames(callback, { max = 200 } = {}) {
   if (canManage()) {
     const stop = listen(
       query(col("associations", assocId, "games"), orderBy("date", "desc"), limit(max)),
-      (snap) => callback(snap.docs.map((d) => d.data())), (e) => report(e));
+      (snap) => callback(snap.docs.map((d) => ({ ...d.data(), id: d.id }))), (e) => report(e));
     unsubscribers.push(stop);
     return stop;
   }
@@ -2519,11 +2611,11 @@ export function watchGames(callback, { max = 200 } = {}) {
     .sort((a, b) => String(b.date || "").localeCompare(String(a.date || ""))));
   const stops = [];
   stops.push(listen(query(col("associations", assocId, "games"), where("createdBy", "==", uid), limit(max)),
-    (snap) => { created.clear(); snap.docs.forEach((d) => created.set(d.id, d.data())); emit(); }, (e) => report(e)));
+    (snap) => { created.clear(); snap.docs.forEach((d) => created.set(d.id, { ...d.data(), id: d.id })); emit(); }, (e) => report(e)));
   findMyGolfer().then((g) => {
     if (generation !== watchGeneration || !g) { emit(); return; }
     stops.push(listen(query(col("associations", assocId, "games"), where("participantGolferIds", "array-contains", g.id), limit(max)),
-      (snap) => { played.clear(); snap.docs.forEach((d) => played.set(d.id, d.data())); emit(); }, (e) => report(e)));
+      (snap) => { played.clear(); snap.docs.forEach((d) => played.set(d.id, { ...d.data(), id: d.id })); emit(); }, (e) => report(e)));
   });
   const stop = () => { while (stops.length) { try { stops.pop()(); } catch {} } };
   unsubscribers.push(stop);
@@ -2554,10 +2646,22 @@ export function updateGame(gameId, data) {
   flush();
 }
 
-export function deleteGame(gameId) {
-  outbox.enqueue({ type: "delete", path: ["associations", assocId, "games", gameId],
-    opId: `game-delete-${gameId}` });
+/* Batch 3, Fix 4: the game and the game id on every one of its rounds, in ONE
+   commit (or one queued item offline). The rounds stay; they leave the game. */
+export async function deleteGame(gameId) {
+  const { getDocs, query, where } = fb.mod.store;
+  const snap = await getDocs(query(col("associations", assocId, "rounds"), where("gameId", "==", gameId)));
+  const writes = [{ op: "delete", path: ["associations", assocId, "games", gameId] }];
+  snap.forEach((d) => writes.push({ op: "update", path: ["associations", assocId, "rounds", d.id], data: { gameId: null } }));
+  if (writes.length > 400) throw new Error("The game has too many rounds to delete in one step.");
+  const offline = typeof navigator !== "undefined" && navigator.onLine === false;
+  if (!offline) {
+    try { await commitTogether(writes, `delete game ${gameId}`); return { ok: true, rounds: writes.length - 1 }; }
+    catch (e) { if (!/unavailable|network|offline/i.test(String((e && (e.code || e.message)) || ""))) throw e; }
+  }
+  outbox.enqueue({ type: "batch", writes, opId: `game-delete-${gameId}` });
   flush();
+  return { ok: true, rounds: writes.length - 1, queued: true };
 }
 
 /* ---------------- editing a round ---------------- */
@@ -2572,9 +2676,7 @@ export function updateRound(roundId, data) {
    Use this rather than updateRound followed by a rebuild — that pairing could
    leave a corrected score with an index still reflecting the old one. */
 export async function updateRoundAndRebuild(roundId, data, golferId) {
-  updateRound(roundId, data);
-  await flush();
-  if (golferId) await rebuildGolferIndex(golferId);
+  return saveRoundChange({ roundId, change: data, golferId: golferId || null });
 }
 
 /* Whether this person may still change a round. The rules decide for real;
@@ -2708,8 +2810,23 @@ export async function restoreBackup({ golfers = [], courses = [], rounds = [] })
  * an existing person when the name matches, so somebody joining a second group
  * keeps their handicap rather than starting again. */
 export async function linkGolferForMember(displayName) {
+  /* Batch 3, step 21 (found by Willy, 26 Oct 2026): the creator's EXISTING
+     golfer goes on the new group's roster, group list and membership, in one
+     commit — never a second golfer named after the account's email. */
+  myGolferCache = null;
+  const mine = await findMyGolfer();
+  if (mine) {
+    await commitTogether([
+      { op: "set", merge: false, path: ["associations", assocId, "roster", mine.id], data: { golferId: mine.id, addedAt: Date.now() } },
+      { op: "update", path: ["golfers", mine.id], data: { groups: [...new Set([...(mine.groups || []), assocId])], editedIn: assocId } },
+      { op: "set", merge: false, path: ["associations", assocId, "directory", mine.id], data: directoryEntry(mine) },
+      { op: "update", path: ["associations", assocId, "members", uid], data: { golferId: mine.id } },
+    ], "put my golfer on the new group");
+    return mine;
+  }
   const name = String(displayName || "").trim();
-  if (!name) return null;
+  /* A new golfer only with a real name, never an email address. */
+  if (!name || name.includes("@")) { const e = new Error("Type the name you play under."); e.code = "golfer/name"; throw e; }
 
   const { golfer } = await addGolfer({ name });
 
