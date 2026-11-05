@@ -195,3 +195,18 @@ jobs:
               content, sha, branch: 'android'
             });
             core.info('APK outcome recorded: ' + result + ', run ' + runId);
+      - name: Publish on the Cuberoot website now
+        # Batch 4, step 11 (Willy): the APK is published as soon as it is built.
+        # Starts Cuberoot's publisher right away instead of waiting for its
+        # timer (GitHub often delays timers by hours), as The Marker does. The
+        # publisher still checks the signature and never rebuilds.
+        if: ${{ needs.apk.result == 'success' }}
+        env:
+          TOKEN: ${{ secrets.CUBEROOT_DISPATCH_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then echo "::notice::No CUBEROOT_DISPATCH_TOKEN; the Cuberoot timer will publish."; exit 0; fi
+          code=$(curl -s -o /tmp/dispatch.txt -w '%{http_code}' -X POST \
+            -H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/repos/willyros01/Cuberoot/actions/workflows/publish-scorecard-apk.yml/dispatches \
+            -d '{"ref":"main"}')
+          if [ "$code" = "204" ]; then echo "Cuberoot publisher started."; else echo "::warning title=Publisher not started::GitHub answered $code; the Cuberoot timer will publish."; head -c 300 /tmp/dispatch.txt; fi
