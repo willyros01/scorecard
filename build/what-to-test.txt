@@ -1,14 +1,12 @@
-The Scorecard 2.30.0, build of 22 October: the entry screens.
+The Scorecard 2.31.0 beta 1, 5 November: batch 1, the new look only.
 
-Use a test group or test emails only, never Golfing Buddies' real rounds.
+Nothing else has changed: every screen works exactly as in 2.30.0.
 
-1. Approve a public application (Admin, Applications). The applicant gets an email titled "Sign in to The Scorecard", not "Reset your password".
-2. Tap that link: "Create your password" appears once, with the email filled in. Save it: you are in the public group.
-3. Tap the same link again: "This link no longer works", with the email filled in, Send me a new link, and Sign in.
-4. Signed in as yourself, open an invitation meant for somebody else: "Is this invitation for you?" Tap No: "This link is for a new person". Cancel keeps you signed in. Sign out and continue opens the new person's Create account.
-5. Signed in, open an approval link sent to another email: "This link is for a new person" straight away.
-6. Turn on Airplane mode and open the app signed in: never "Start your group"; you see "You're offline" or "Can't check your account right now".
-7. Signed out, the first screen says "Become a member or request a group", and the choice says "Request your own group".
-8. Everything after signing in (Enter, History, Summary, Games, Manage, Admin) is unchanged.
+1. The app icon on the Home Screen is the new one: a green with a flag and a 12.4 badge, on Lake blue.
+2. The launch screen shows the new icon on a pale blue background.
+3. The header bar is Lake blue, with a green trim line under it.
+4. Buttons, links and highlights are blue instead of green.
+5. Night colours: tap Auto at the top and choose Night. The app turns dark blue, with a light green trim line. Everything stays easy to read.
+6. Go through Enter, History, Summary, Games, Manage and Settings, day and night. Look for anything still green or hard to read.
 
-No Firebase rule, index or data change is required. Report problems with Send a report in the app.
+No Firebase rule, index or data change. Report problems with Send a report in the app.
