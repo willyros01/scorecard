@@ -1095,10 +1095,28 @@ export async function signInWithEmail({ email, password }) {
   }
 }
 
+/* Batch 2, step 1 (Willy, 23 Oct 2026: the app first, never a Firebase page):
+   Forgot password sends the same kind of sign-in link as the approval email.
+   It opens the app, which shows its own "Choose a new password" screen. */
 export async function sendPasswordReset(email) {
   if (!fb) throw new Error("Firebase has not loaded yet.");
-  await fb.mod.auth.sendPasswordResetEmail(fb.auth, String(email || "").trim());
+  const address = String(email || "").trim();
+  const settings = signInLinkSettings(address);
+  await fb.mod.auth.sendSignInLinkToEmail(fb.auth, address, { ...settings, url: `${settings.url}&reset=1` });
 }
+/* A value from the link. With Firebase's action URL set to the Cuberoot join
+   page (Batch 2), an email link arrives as ?mode=signIn&oobCode=…&continueUrl=…,
+   so our own values (e, reset, approved) sit inside continueUrl. */
+function linkParam(name) {
+  const top = new URLSearchParams(platform.linkQuery());
+  if (top.has(name)) return top.get(name);
+  try { const c = top.get("continueUrl"); if (c) return new URL(c).searchParams.get(name); } catch {}
+  return null;
+}
+/* A Forgot password link (not an approval or application link). */
+export const isResetLink = () => {
+  try { return isApplyLink() && linkParam("reset") === "1"; } catch { return false; }
+};
 
 /* Whether this account can already be signed into with a password. A Google
    account cannot, until one is added — which is the whole point of the panel
@@ -1684,6 +1702,17 @@ export async function nextFreeName(name) {
   return base;
 }
 
+/* Batch 2, step 29: whether a golfer already has this name (one read of its
+   name claim; the rules allow single reads, never a list). Unsure: false, and
+   the application simply goes on as today. */
+export async function nameTaken(name) {
+  if (!fb) return false;
+  try {
+    const snap = await fb.mod.store.getDoc(ref("golferNames", model.nameKey(name)));
+    return snap.exists();
+  } catch { return false; }
+}
+
 /* The Level 1 name check the app can make before anything is sent (the rules
    make it again): two or more words, plain letters, 4-60 characters. */
 export const plainName = (name) => /^[A-Za-z][A-Za-z'-]*( [A-Za-z][A-Za-z'-]*)+$/.test(String(name || "")) && String(name).length >= 4 && String(name).length <= 60;
@@ -1713,7 +1742,7 @@ export async function sendApprovalLink(email) {
 export const sendNewLink = (email) => sendApprovalLink(email);
 /* The email a sign-in link was sent to (from the link itself), or "". */
 export function applyLinkEmail() {
-  try { return String(new URLSearchParams(platform.linkQuery()).get("e") || "").trim().toLowerCase(); } catch { return ""; }
+  try { return String(linkParam("e") || "").trim().toLowerCase(); } catch { return ""; }
 }
 /* The link is no longer wanted on this device (Cancel, or after it is used). */
 export function dropApplyLink() {
@@ -1730,7 +1759,19 @@ export const isApplyLink = () => {
    with the email confirmed), then set their chosen password. */
 export async function finishApplyLink({ email, password }) {
   const address = String(email || "").trim();
-  await withTimeout(fb.mod.auth.signInWithEmailLink(fb.auth, address, platform.signInLinkUrl()), 20000, "Opening your link");
+  const reset = isResetLink();
+  const cred = await withTimeout(fb.mod.auth.signInWithEmailLink(fb.auth, address, platform.signInLinkUrl()), 20000, "Opening your link");
+  /* A Forgot password link for an email with no account would make one:
+     it is taken back at once and nothing else is written. */
+  if (reset) {
+    const m = (cred && cred.user && cred.user.metadata) || {};
+    const made = Date.parse(m.creationTime || ""), last = Date.parse(m.lastSignInTime || "");
+    if (Number.isFinite(made) && Number.isFinite(last) && Math.abs(last - made) < 1500) {
+      try { await fb.mod.auth.deleteUser(cred.user); } catch {}
+      dropApplyLink();
+      const e = new Error("auth/no-such-account"); e.code = "auth/no-such-account"; throw e;
+    }
+  }
   uid = fb.auth.currentUser.uid;
   /* From here until the password is saved, every start shows Create your
      password (rule 4). The device note is written first, so it holds even if
@@ -1744,7 +1785,7 @@ export async function finishApplyLink({ email, password }) {
   let passwordFailed = false;
   try { await createMyPassword(password); } catch { passwordFailed = true; }
   try { await ensureAccountEmail(); } catch {}
-  return { ok: true, passwordFailed };
+  return { ok: true, passwordFailed, reset };
 }
 
 /* Auto: join the public group by yourself. Every Level 1 check is made again
@@ -2065,7 +2106,7 @@ let myMember = null;
    was previously below its first use, which is the kind of ordering fault that
    silently breaks a whole feature. */
 let cachedAssociation = null;
-const currentAssociationDoc = () => cachedAssociation;
+export const currentAssociationDoc = () => cachedAssociation;
 export const myRole = () => (myMember ? myMember.role : null);
 export const canManage = () => ["owner", "admin"].includes(myRole());
 export const isOwner = () => myRole() === "owner";
@@ -2192,7 +2233,9 @@ export async function inviteLink(role = "member", golferId = null) {
         groupName: String(group.name || "").slice(0, 120), state: "pending", sentAt: { __serverTimestamp: true } } },
     { op: "set", merge: false, path: ["associations", group.id, "invitationSlots", slot], data: { token } },
   ], "prepare one-time invitation");
-  return `${platform.joinBase()}?join=${group.id}.${token}${golferId ? `.${golferId}` : ""}${role === "admin" ? "&as=admin" : ""}&v=2`;
+  /* g: the group's name, only for the welcome line before the account exists
+     (Batch 2); joining itself checks everything against the database. */
+  return `${platform.joinBase()}?join=${group.id}.${token}${golferId ? `.${golferId}` : ""}${role === "admin" ? "&as=admin" : ""}&v=2&g=${encodeURIComponent(String(group.name || "").slice(0, 60))}`;
 }
 
 /* A token is deliberately unreadable by list to invitees; only its random
@@ -2309,6 +2352,8 @@ export function readJoinLink() {
       token: params.get("v") === "2" ? parts[1] : null,
       golferId: params.get("v") === "2" && loadedInvitation && loadedInvitation.token === parts[1]
         ? loadedInvitation.golferId : parts.length > 2 ? parts.slice(2).join(".") : null,
+      /* The group's name for the welcome line only (display, never trusted). */
+      groupHint: String(params.get("g") || "").replace(/[<>]/g, "").slice(0, 60),
       /* Verified against the group by the rules, never trusted on its own. */
       role: params.get("v") === "2" && loadedInvitation && loadedInvitation.token === parts[1]
         ? loadedInvitation.role : params.get("as") === "admin" ? "admin" : "member",

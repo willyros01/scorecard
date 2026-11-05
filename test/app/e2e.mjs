@@ -108,6 +108,17 @@ async function waitForText(page, re, ms = 20000) {
   while (Date.now() < end) { if (re.test(await text(page))) return; await page.waitForTimeout(300); }
   throw new Error(`text ${re} did not appear; the screen says: ${(await text(page)).replace(/\s+/g, " ").slice(0, 300)}`);
 }
+/* Batch 2: the welcome screen's Join finishes joining by itself for a new
+   account; signing in to an existing account still shows the invitation. */
+async function acceptIfAsked(page) {
+  const end = Date.now() + 20000;
+  while (Date.now() < end) {
+    if (await page.locator('[data-act="accept-named"]').count()) { await page.locator('[data-act="accept-named"]').click(); return "asked"; }
+    if (await page.evaluate(async () => !!(await import("/store.js")).currentAssociation()).catch(() => false)) return "joined";
+    await page.waitForTimeout(300);
+  }
+  throw new Error("neither joined nor shown the invitation");
+}
 async function signIn(page, email, password) {
   await page.fill('[name="email"]', email);
   await page.fill('[name="password"]', password);
@@ -357,7 +368,7 @@ await check("E5", "build 25 (E1): approval sends the Sign in link, not the reset
   if ((await signInCodes(APPLICANT.email)).some((c) => c.requestType === "PASSWORD_RESET")) throw new Error("the reset-password email was sent");
   applicantLink = await latestSignInLink(APPLICANT.email);
   await pat.goto(applicantLink, { waitUntil: "load" });
-  await waitForText(pat, /Create your password/);
+  await waitForText(pat, /Create your password|Welcome to the public group/);
   if ((await pat.inputValue('[name="email"]')) !== APPLICANT.email) throw new Error("the email is not filled in from the link");
   await pat.fill('[name="password"]', APPLICANT.password);
   await pat.fill('[name="password-again"]', APPLICANT.password);
@@ -444,14 +455,13 @@ await check("E11", "a named private invitation: create an account, then join as 
   await ivy.fill('[name="password"]', "ivy-pass-1");
   await ivy.fill('[name="password-again"]', "ivy-pass-1");
   await ivy.locator('[data-act="create-account"]').click();
-  await waitForText(ivy, /Ivy Invitee/);
-  if (!/Saturday Group/i.test(await text(ivy))) throw new Error("the group name is not shown on the invitation");
+  await acceptIfAsked(ivy);
+  await waitForText(ivy, /Welcome to Saturday Group/i);
   const blocked = await ivy.evaluate(async () => {
     const db = await import("/store.js");
     return db.invitationFor("G1", "gJ").then((x) => x === null);
   });
   if (!blocked) throw new Error("an invitation record exists for a golfer never invited");
-  await ivy.locator('[data-act="accept-named"]').click();
   const end = Date.now() + 20000;
   while (Date.now() < end && (await ivy.evaluate(async () => (await import("/store.js")).currentAssociation())) !== "G1") await ivy.waitForTimeout(300);
   const uid = (await accountByEmail("ivy@example.com")).localId;
@@ -682,7 +692,7 @@ async function applyAndOpenLink(name, email) {
   const code = codes[codes.length - 1].oobCode;
   const q = await newPage();
   await q.goto(`${APP}&apply=1&apiKey=fake-api-key&mode=signIn&oobCode=${encodeURIComponent(code)}&lang=en`, { waitUntil: "load" });
-  await waitForText(q, /Create your password/);
+  await waitForText(q, /Create your password|Welcome to the public group/);
   await q.fill('[name="email"]', email);
   await q.fill('[name="password"]', "auto-pass-1");
   await q.fill('[name="password-again"]', "auto-pass-1");
@@ -692,7 +702,7 @@ async function applyAndOpenLink(name, email) {
 await check("E22", "Auto: the applicant taps the link, chooses a password and is in the public group by themselves", async () => {
   await turnSwitch("auto");
   const q = await applyAndOpenLink("Gwen Auto", "gwen.auto@example.com");
-  await waitForText(q, /Welcome to the public group/, 30000);
+  await waitForText(q, /Post your rounds on the Enter tab/, 30000);
   const acct = await accountByEmail("gwen.auto@example.com");
   if (!acct || !acct.emailVerified) throw new Error("no confirmed account");
   const uid = acct.localId;
@@ -1130,8 +1140,7 @@ for (const mode of ["web", "native-immediate", "native-delayed"]) {
     await page.fill('[name="password"]', password);
     await page.fill('[name="password-again"]', password);
     await page.locator('[data-act="create-account"]').click();
-    await waitForText(page, new RegExp("Logout " + mode));
-    await page.locator('[data-act="accept-named"]').click();
+    await acceptIfAsked(page);
     await page.waitForFunction(async () => (await import("/store.js")).currentAssociation() === "G1");
     await page.locator('[data-tab="summary"]').waitFor();
     await Promise.all([
@@ -1286,8 +1295,7 @@ for (const mode of ["web", "native"]) {
     await waitForText(page, /You.re invited/);
     await page.fill('[name="email"]',email); await page.fill('[name="password"]',password); await page.fill('[name="password-again"]',password);
     await page.locator('[data-act="create-account"]').click();
-    await page.locator('[data-act="accept-named"]').waitFor();
-    await page.locator('[data-act="accept-named"]').click();
+    await acceptIfAsked(page);
     await page.locator('[data-tab="summary"]').waitFor();
     await Promise.all([page.waitForNavigation({waitUntil:"load"}),page.evaluate(async()=> (await import("/store.js")).signOutEverywhere())]);
     await page.locator('[data-act="sign-in"]').first().waitFor();
@@ -1397,7 +1405,7 @@ await check("E34", "favourite courses: starred on the web, first in the app's co
 await check("B25-1", "E3: the same sign-in link opened again: 'This link no longer works', email filled in, and signing in there works", async () => {
   const again = await newPage();
   await again.goto(applicantLink, { waitUntil: "load" });
-  await waitForText(again, /Create your password/);
+  await waitForText(again, /Create your password|Welcome to the public group/);
   await again.fill('[name="password"]', "another-pass-9");
   await again.fill('[name="password-again"]', "another-pass-9");
   await again.locator('[data-act="finish-apply"]').click();
@@ -1426,13 +1434,13 @@ if (cutsConnections) await check("B25-2", "E1 rule 4: the password not saved (co
   const isUpdate = (url) => String(url).includes("accounts:update");
   await nina.route(isUpdate, (r) => r.abort());
   await nina.goto(await latestSignInLink(N.email), { waitUntil: "load" });
-  await waitForText(nina, /Create your password/);
+  await waitForText(nina, /Create your password|Welcome to the public group/);
   await nina.fill('[name="password"]', N.password);
   await nina.fill('[name="password-again"]', N.password);
   await nina.locator('[data-act="finish-apply"]').click();
   await waitForText(nina, /password was not saved/);
   await nina.reload({ waitUntil: "load" });
-  await waitForText(nina, /Create your password/);
+  await waitForText(nina, /Create your password|Welcome to the public group/);
   if (!new RegExp(N.email.replace(/\./g, "\\.")).test(await text(nina))) throw new Error("the signed-in email is not shown");
   await nina.unroute(isUpdate);
   await nina.fill('[name="password"]', N.password);
@@ -1478,7 +1486,7 @@ await check("B25-3", "E2: a sign-in link for another email on a signed-in device
   await rex.goto(link, { waitUntil: "load" });
   await waitForText(rex, /This link is for a new person/).catch((e) => { throw new Error(`second opening, after Cancel: ${e.message}`); });
   await rex.locator('[data-act="link-sign-out"]').click();
-  await waitForText(rex, /Create your password/);
+  await waitForText(rex, /Create your password|Welcome to the public group/);
   if ((await rex.inputValue('[name="email"]')) !== NEW.email) throw new Error("the new person's email is not filled in");
   await rex.fill('[name="password"]', NEW.password);
   await rex.fill('[name="password-again"]', NEW.password);
@@ -1510,9 +1518,8 @@ await check("B25-4", "E2: an invitation on a signed-in device asks 'Is this invi
   await rex.fill('[name="password"]', "kim-pass-1");
   await rex.fill('[name="password-again"]', "kim-pass-1");
   await rex.locator('[data-act="create-account"]').click();
-  await waitForText(rex, /Kim Invitee/);
+  await acceptIfAsked(rex);
   if (/Is this invitation for you/.test(await text(rex))) throw new Error("asked the new person again");
-  await rex.locator('[data-act="accept-named"]').click();
   await rex.waitForFunction(async () => (await import("/store.js")).currentAssociation() === "G1", null, { timeout: 20000 });
   const kim = await accountByEmail("kim@example.com");
   const endK = Date.now() + 15000;
@@ -1555,6 +1562,111 @@ await check("B25-7", "E5: the new wording — request a group; no 'Only create a
   await page.locator('[data-act="show-choose"]').click();
   await waitForText(page, /Request your own group/);
   if (/Start your own group|start a group/.test(await text(page))) throw new Error("the old wording is still shown");
+  await page.close();
+});
+
+/* ================= Batch 2 (2.31.0): getting in ================= */
+
+/* Step 1: Forgot password sends the app's own sign-in link (never Firebase's
+   reset email); the link opens "Choose a new password"; groups stay. */
+await check("GI1", "Forgot password: a sign-in link, never the reset email; the app's own Choose a new password; the new password works", async () => {
+  const P = { email: "forgot.me@example.com", password: "old-pass-1" };
+  await joinedPerson("gForgot", "Forgot Me", P.email, P.password);
+  const page = await newPage();
+  await page.goto(APP, { waitUntil: "load" });
+  await waitForText(page, /Sign in/);
+  await page.evaluate(async (e) => (await import("/store.js")).sendPasswordReset(e), P.email);
+  const codes = await signInCodes(P.email);
+  if (codes.some((c) => c.requestType === "PASSWORD_RESET")) throw new Error("Firebase's reset email was sent");
+  const mine = codes.filter((c) => c.requestType === "EMAIL_SIGNIN");
+  if (!mine.length) throw new Error("no sign-in link was sent");
+  const code = mine[mine.length - 1].oobCode;
+  await page.waitForTimeout(2000);   /* an account made seconds ago must never be taken for a new one */
+  /* As the email arrives with the action URL on the join page: our values sit inside continueUrl. */
+  const cont = `${APP}&apply=1&e=${encodeURIComponent(P.email)}&reset=1`;
+  const q = await newPage();
+  await q.goto(`${APP}&apiKey=fake-api-key&mode=signIn&oobCode=${encodeURIComponent(code)}&lang=en&continueUrl=${encodeURIComponent(cont)}`, { waitUntil: "load" });
+  await waitForText(q, /Choose a new password/);
+  if ((await q.inputValue('[name="email"]')) !== P.email) throw new Error("the email is not filled in from the link");
+  await q.fill('[name="password"]', "new-pass-2");
+  await q.fill('[name="password-again"]', "new-pass-2");
+  await q.locator('[data-act="finish-apply"]').click();
+  await waitForText(q, /Your new password is saved/, 30000);
+  await q.waitForFunction(async () => (await import("/store.js")).currentAssociation() === "G1", null, { timeout: 20000 });
+  if (await getDocQuick(`associations/PUBLIC/members/${(await accountByEmail(P.email)).localId}`)) throw new Error("joined the public group");
+  const ok = await fetch(`${AUTH}/accounts:signInWithPassword?key=fake-api-key`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: P.email, password: "new-pass-2", returnSecureToken: true }) });
+  if (!ok.ok) throw new Error("the new password does not work");
+  await page.close(); await q.close();
+});
+
+await check("GI2", "Forgot password for an email with no account: says so, and no account is left behind", async () => {
+  const email = "nobody.here@example.com";
+  const page = await newPage();
+  await page.goto(APP, { waitUntil: "load" });
+  await waitForText(page, /Sign in/);
+  await page.evaluate(async (e) => (await import("/store.js")).sendPasswordReset(e), email);
+  const mine = (await signInCodes(email)).filter((c) => c.requestType === "EMAIL_SIGNIN");
+  if (!mine.length) throw new Error("no link");
+  const q = await newPage();
+  await q.goto(`${APP}&apply=1&e=${encodeURIComponent(email)}&reset=1&apiKey=fake-api-key&mode=signIn&oobCode=${encodeURIComponent(mine[mine.length - 1].oobCode)}&lang=en`, { waitUntil: "load" });
+  await waitForText(q, /Choose a new password/);
+  await q.fill('[name="password"]', "whatever-1");
+  await q.fill('[name="password-again"]', "whatever-1");
+  await q.locator('[data-act="finish-apply"]').click();
+  await waitForText(q, /There is no Scorecard account for that email/, 30000);
+  if (await accountByEmail(email)) throw new Error("an account was left behind");
+  await page.close(); await q.close();
+});
+
+/* Step 29: the taken-name warning, before anything is saved or sent. */
+await check("GI3", "applying with a name that is taken: warned before anything is sent; Sign in goes back; Continue anyway sends it for a person", async () => {
+  await put("golferNames/taken-name", { golferId: "gTakenName", name: "Taken Name" });
+  const email = "taken.again@example.com";
+  const p = await newPage();
+  await p.goto(APP, { waitUntil: "load" });
+  await waitForText(p, /Become a member or request a group/);
+  await p.locator('[data-act="show-choose"]').click();
+  await p.locator('[data-act="show-apply"]').click();
+  await p.fill('[name="apply-name"]', "Taken Name");
+  await p.fill('[name="apply-email"]', email);
+  await p.locator('[name="ap-agree"]').check();
+  await p.locator('[data-act="submit-application"]').click();
+  await waitForText(p, /A golfer with this name already exists/);
+  if (await getDocQuick(`publicApplications/${email}`)) throw new Error("the application was saved before the warning");
+  if ((await signInCodes(email)).length) throw new Error("a link was sent before the warning");
+  if (!(await p.locator('[data-act="apply-name-ok"]').count()) || !(await p.locator('[data-act="hide-apply"]').count())) throw new Error("no Sign in / Continue anyway");
+  await p.locator('[data-act="apply-name-ok"]').click();
+  await waitForText(p, /Check your email|waits for a person/);
+  if (!(await getDocQuick(`publicApplications/${email}`))) throw new Error("Continue anyway did not send the application");
+  await p.close();
+});
+
+/* Step 2: one welcome screen; step 4: the whole first journey on a fresh
+   phone — Terms of Use first, then the invitation's welcome, then the group. */
+await check("GI4", "fresh phone: Terms of Use, then Welcome to the group (email, password twice, Join), then straight into the group", async () => {
+  await put("golfers/gFresh", { name: "Fresh Phone", nameKey: "fresh-phone", linkedUid: null, groups: ["G1"] });
+  await put("golferNames/fresh-phone", { golferId: "gFresh", name: "Fresh Phone" });
+  await put("associations/G1/roster/gFresh", { golferId: "gFresh" });
+  const url = await freshInvitation("gFresh");
+  if (!/&g=Saturday%20Group/.test(url)) throw new Error(`the link does not carry the group's name: ${url}`);
+  globalThis.__termsFresh = true;
+  const page = await newPage();
+  globalThis.__termsFresh = false;
+  await page.goto(`${APP}&${new URL(url).search.slice(1)}`, { waitUntil: "load" });
+  await waitForText(page, /Terms of Use/);
+  if (await page.locator('[data-act="create-account"]').count()) throw new Error("the welcome screen came before the terms");
+  await page.locator("#termsTick").check();
+  await page.locator('[data-act="terms-accept"]').click();
+  await waitForText(page, /Welcome to Saturday Group/);
+  if (!/Password again/.test(await text(page)) || !/\bJoin\b/.test(await text(page))) throw new Error("not the welcome screen");
+  await page.fill('[name="email"]', "fresh.phone@example.com");
+  await page.fill('[name="password"]', "fresh-pass-1");
+  await page.fill('[name="password-again"]', "fresh-pass-1");
+  await page.locator('[data-act="create-account"]').click();
+  await page.waitForFunction(async () => (await import("/store.js")).currentAssociation() === "G1", null, { timeout: 30000 });
+  await waitForText(page, /Welcome to Saturday Group\. Post your rounds/);
+  const uid = (await accountByEmail("fresh.phone@example.com")).localId;
+  if ((await getDoc("golfers/gFresh")).linkedUid !== uid) throw new Error("the golfer is not linked");
   await page.close();
 });
 

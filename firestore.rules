@@ -841,7 +841,10 @@ service cloud.firestore {
          every name in the database. Creating a claim is open to a signed-in
          account (adding or joining as a golfer); changing or removing one is
          for that golfer's own account or an admin of a group it plays in. */
-      allow get: if signedIn();
+      /* Batch 2, step 29: single reads are open to anybody, so an applicant
+         (not signed in yet) is told at once when the name is taken. A read
+         by exact name only says whether that one name exists. */
+      allow get: if true;
       allow list: if false;
       allow create: if signedIn() && !deleting() && request.resource.data.golferId is string;
       allow update, delete: if signedIn() && !deleting() && (

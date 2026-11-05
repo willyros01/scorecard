@@ -7,7 +7,9 @@ const VERSION = (typeof self !== "undefined" && self.APP_VERSION) || "dev";
 const ONE_TIME_INVITATION_NOTICE = "This invitation link is for one-time use only. Once you join, it cannot be used again.";
 /* 2.30.0 (Willy, Oct 1 and 11): every invitation starts by sending iPhone and iPad users to the App Store. */
 const APP_STORE_URL = "https://apps.apple.com/app/id6817462903";
-const APP_STORE_STEP = `Step 1 — on an iPhone or iPad, download The Scorecard from the App Store first: ${APP_STORE_URL}`;
+/* Batch 2: Android too (the signed download on the Cuberoot site). */
+const ANDROID_URL = "https://www.cuberoot-systems.com/downloads/scorecard.apk";
+const APP_STORE_STEP = `Step 1 — download The Scorecard first.\niPhone or iPad, from the App Store: ${APP_STORE_URL}\nAndroid: ${ANDROID_URL}`;
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -272,6 +274,8 @@ let returnTo = (() => {
 let signedOutStep = null;
 let applySentTo = "";           /* signed out: the application just sent */
 let applySentAuto = false;      /* beta.4: that application got the sign-in link (Auto) */
+let applyNameTaken = "";        /* Batch 2, step 29: the name typed is already a golfer's */
+let applyNameOk = "";           /* "Continue anyway" was tapped for this name */
 let applyInUse = "";            /* beta.4: the email typed already has an account */
 let applySettings = null;       /* beta.4: { mode, dailyLimit }, read when the form opens */
 let requestSentTo = "";         /* signed out: the group request just sent */
@@ -921,6 +925,8 @@ function screenApply() {
       <input class="field" name="apply-name" value="${esc(joinForm.name || "")}" placeholder="e.g. Willy Rosales" autocomplete="name" maxlength="80">
       <label class="lbl">Email</label>
       <input class="field" name="apply-email" type="email" value="${esc(authForm.email || "")}" placeholder="you@example.com" autocomplete="email" autocapitalize="none" maxlength="254">
+      ${applyNameTaken ? `<div class="note warn in-use"><b>A golfer with this name already exists.</b> If that's you, sign in instead. Otherwise, continue and your application will be checked by a person.</div>
+        <div class="inline-actions stacked"><button class="btn" data-act="hide-apply">Sign in</button><button class="btn ghost" data-act="apply-name-ok">Continue anyway</button></div>` : ""}
       ${applyInUse ? `<div class="note warn in-use"><b>This email already has an account.</b> Sign in with it instead, or tap Forgot the password on the Sign in screen. Nothing was sent.</div>
         <div class="inline-actions stacked"><button class="btn" data-act="hide-apply">Back to Sign in</button></div>` : ""}
       <div class="note tip">Other members of the public group see your <b>full name</b> and your <b>handicap index</b>, and nothing else. Your rounds stay private.</div>
@@ -948,23 +954,26 @@ function screenApply() {
   </div>`;
 }
 
-/* beta.4: the applicant tapped the link in their email. */
+/* beta.4: the applicant tapped the link in their email.
+   Batch 2 (Willy, 22 Oct 2026): the same welcome screen as an invitation;
+   a Forgot password link shows "Choose a new password" instead. */
 function screenFinishApply() {
+  const reset = db.isResetLink();
+  const email = db.applyLinkEmail() || authForm.email || db.rememberedApplyEmail();
   return `<div class="stack">
     ${flashBar()}
     ${offlineAccountNote()}
     <div class="card padded">
-      <h2 class="panel-title">Create your password</h2>
-      <p class="hint">This link confirms your email. Create a password for The Scorecard and you are done — one time only.</p>
+      <h2 class="panel-title">${reset ? "Choose a new password" : "Welcome to the public group"}</h2>
+      <p class="lead">${reset ? "For your Scorecard account. Your groups and rounds stay as they are." : "Create your password to join. One time only."}</p>
       <label class="lbl">Email</label>
-      <input class="field" name="email" type="email" value="${esc(db.applyLinkEmail() || authForm.email || db.rememberedApplyEmail())}" placeholder="you@example.com" autocomplete="username" autocapitalize="none" ${db.applyLinkEmail() ? "readonly" : ""}>
-      <label class="lbl">New password</label>
-      <input class="field" name="password" type="password" placeholder="At least 6 characters" autocomplete="new-password">
-      <label class="lbl">The same password again</label>
+      <input class="field" name="email" type="email" value="${esc(email)}" placeholder="you@example.com" autocomplete="username" autocapitalize="none" ${db.applyLinkEmail() ? "readonly" : ""}>
+      <label class="lbl">${reset ? "New password" : "Password"}</label>
+      <input class="field" name="password" type="password" placeholder="Not your email password" autocomplete="new-password">
+      <label class="lbl">Password again</label>
       <input class="field" name="password-again" type="password" placeholder="At least 6 characters" autocomplete="new-password">
-      <p class="hint"><b>Not your email password.</b> Pick a different one, for The Scorecard only.</p>
       <div class="inline-actions stacked">
-        <button class="btn" data-act="finish-apply" ${joining ? "disabled" : ""}>${joining ? "Saving…" : "Save my password"}</button>
+        <button class="btn" data-act="finish-apply" ${joining ? "disabled" : ""}>${joining ? "Saving…" : reset ? "Save my new password" : "Join"}</button>
       </div>
     </div>
     ${versionBlock()}
@@ -987,6 +996,8 @@ async function finishApplyHere() {
       /* E3: expired or already used — never a dead end. */
       linkProblem = { email: db.applyLinkEmail() || fields.email };
       db.dropApplyLink();
+    } else if (/no-such-account/.test(code)) {
+      flashMsg("There is no Scorecard account for that email, so there is no password to change. Nothing was created.");
     } else if (/invalid-email|user-mismatch/.test(code)) {
       flashMsg("That is not the email the link was sent to. Type the email you applied with.");
     } else {
@@ -1000,6 +1011,12 @@ async function finishApplyHere() {
     /* Signed in from the link, password not saved: rule 4 shows Create your
        password again, now and at every start, until it is saved. */
     flashMsg("Your email is confirmed, but the password was not saved. Type it again and tap Save my password.");
+    return render();
+  }
+  if (finished.reset) {
+    /* Forgot password: the person's own groups, nothing joined. */
+    await settleGroup(db.recallAssociation());
+    flashMsg("Your new password is saved. Use it on every device.");
     return render();
   }
   await afterPasswordCreated();
@@ -1071,6 +1088,15 @@ async function submitApplicationHere() {
   busy("Sending your application");
   render();
   applyInUse = "";
+  /* Batch 2, step 29 (Willy, 1 Nov 2026): a name that is already a golfer's
+     is said at once, before anything is saved or sent. */
+  applyNameTaken = "";
+  if (applyNameOk !== fullName && await db.nameTaken(fullName)) {
+    applyNameTaken = fullName;
+    joining = false; idle(); render();
+    if (agreed) { const box = view.querySelector('[name="ap-agree"]'); if (box) box.checked = true; }
+    return;
+  }
   try {
     await db.submitApplication({ fullName, email });
     /* beta.4: with the switch on Auto and a plain name, the sign-in link goes
@@ -1430,15 +1456,21 @@ function screenSignedOut(invite) {
     : showCodeEntry ? "Join with a code" : "Sign in";
 
   if (joiningSomething && mode === "create") {
+    /* Batch 2 (Willy, 22 Oct 2026): one welcome screen for invited golfers
+       and approved applicants — "Welcome to <group>", email, password twice,
+       Join. An open invitation also asks the name they play under. */
+    const openInvite = invite && !invite.golferId && !adminOnly;
     return `<div class="stack">
       ${flashBar()}
       ${offlineAccountNote()}
       <div class="card padded">
-        <h2 class="panel-title">${heading}</h2>
-        <p class="lead">${invite ? "Create your account to join." : "Create your account, then type the code."}</p>
+        <h2 class="panel-title">${invite ? `Welcome to ${esc(invite.groupHint || "your group")}` : heading}</h2>
+        <p class="lead">${invite ? (adminOnly ? "You\u2019re invited to help run the group. Create your password to join." : "You\u2019re invited. Create your password to join.") : "Create your account, then type the code."}</p>
+        ${openInvite ? `<label class="lbl">Your name</label>
+        <input class="field" name="join-name" value="${esc(joinForm.name)}" placeholder="e.g. Willy Rosales" autocomplete="name">` : ""}
         ${newAccountFields()}
         <div class="inline-actions stacked">
-          <button class="btn" data-act="create-account" ${joining ? "disabled" : ""}>${joining ? "Creating your account…" : "Create account"}</button>
+          <button class="btn" data-act="create-account" ${joining ? "disabled" : ""}>${joining ? "Joining…" : invite ? "Join" : "Create account"}</button>
         </div>
         <p class="hint"><button class="linkbtn" data-act="account-mode-signin">Have an account? Sign in</button></p>
         ${showCodeEntry && !invite ? `<div class="inline-actions stacked"><button class="btn ghost" data-act="hide-code">Back</button></div>` : ""}
@@ -1602,6 +1634,10 @@ async function createAccountHere() {
     await loadInvitedDetails();
     joining = false;
     flashMsg("Account created. Use this email and password on your other devices.");
+    /* Batch 2: the welcome screen's Join finishes joining too, no second screen. */
+    const inv = db.readJoinLink();
+    if (inv && inv.golferId && invitedGolfer) { idle(); await acceptNamedHere(); return; }
+    if (inv && !inv.golferId && inv.role !== "admin" && joinForm.name.trim()) { idle(); await acceptInvite(); return; }
   } catch (err) {
     const code = String((err && (err.code || err.message)) || "");
     if (code.includes("email-already-in-use")) {
@@ -5169,7 +5205,7 @@ view.addEventListener("click", async (e) => {
       const address = ((view.querySelector('[name="email"]') || {}).value || authForm.email).trim();
       if (!address) { flashMsg("Type your email address first"); return; }
       busy("Sending the reset link");
-      try { await db.sendPasswordReset(address); flashMsg(`Reset link sent to ${address}. Open it, choose a new password, then sign in with it.`); }
+      try { await db.sendPasswordReset(address); flashMsg(`Link sent to ${address}. Open the email "Sign in to The Scorecard" on this phone and tap the link: The Scorecard opens and asks for your new password.`); }
       catch { flashMsg("Couldn't send the reset link. Check the email address."); }
       finally { idleAll(); }
       return render();
@@ -5194,82 +5230,7 @@ view.addEventListener("click", async (e) => {
       flashMsg("Type the name you play under instead.");
       return render();
     }
-    case "accept-named": {
-      const link = db.readJoinLink();
-      if (!link || !link.golferId) return;
-      joining = true;
-      busy("Joining the group");
-      render();
-      try {
-        /* The role comes from the link. Somebody who has not joined yet cannot
-           read the group document, so asking it is pointless — the rules verify
-           the code against the group when the membership is written. */
-        const role = link.role || "member";
-        const result = link.token
-          ? await db.acceptTokenInvite({ associationId: link.associationId, token: link.token })
-          : await db.acceptNamedInvite({ associationId: link.associationId, code: link.code, golferId: link.golferId, role });
-        joining = false;
-        if (!result.ok) {
-          idleAll();
-          note(`join refused: ${result.reason}`);
-          openProblem({
-            title: result.reason === "USED"
-              ? "This invitation has already been used"
-              : result.reason === "OTHER_GOLFER"
-                ? "You are already in this group as another golfer"
-                : "This invitation belongs to somebody else",
-            detail: result.reason === "USED"
-              ? "An admin invitation works once only. Ask for a fresh one."
-              : result.reason === "OTHER_GOLFER"
-                ? "This sign-in already plays in this group under another name, so it cannot become this golfer as well."
-                : "Somebody has already joined with this link. Ask whoever runs the group to send you your own.",
-            advice: result.reason === "OTHER_GOLFER"
-              ? "Nothing was changed. If this invitation is for you, ask whoever runs the group to sort out the two names."
-              : "Nothing was changed.",
-          });
-          return render();
-        }
-        db.clearJoinLink();
-        await start(link.associationId);
-        tab = "enter";
-        idleAll();
-        if (role === "admin") {
-          /* Said properly rather than as a passing message. An admin without an
-             account can manage everything, but only from this browser — they
-             need to understand that before they walk away from it. */
-          /* The password step happens HERE, as part of joining — not as a
-             pointer to somewhere they have to go and find. An admin who walks
-             away without one is locked out the moment this browser forgets
-             them, and their invitation is already spent. */
-          tab = "manage";
-        }
-        finishJoining();
-      } catch (err) {
-        joining = false;
-        idleAll();
-        /* Say what actually went wrong. Swallowing it left the screen exactly
-           as it was, which reads as the button doing nothing at all. */
-        /* beta.9: each refusal names its step and says what to do. */
-        const code = String((err && (err.code || err.message)) || "");
-        note(`join refused: ${code}`);
-        openProblem({
-          title: code.includes("join/membership-refused") ? "This invitation link no longer works"
-            : code.includes("join/link-refused") ? "You are in the group, but your golfer could not be linked"
-            : "Could not join the group",
-          detail: code.includes("join/membership-refused")
-            ? "The group's code has changed since it was sent, so the link is out of date."
-            : code.includes("join/link-refused")
-              ? "This golfer is still linked to another sign-in."
-              : code || "No detail was given.",
-          advice: code.includes("join/membership-refused")
-            ? "Ask whoever runs the group to tap Send again for you, then use the new link. Nothing was changed."
-            : code.includes("join/link-refused")
-              ? "Ask whoever runs the group to tap Send again for you (that releases the old link), then tap the new link."
-              : "Nothing was changed. Try the link again, or send this report.",
-        });
-      }
-      return render();
-    }
+    case "accept-named": return acceptNamedHere();
     case "join-by-code": return joinByCode();
     case "skip-import": skipImport = true; return render();
     /* Named apart from the Admin tab's "show-code" on purpose: both lived in
@@ -5302,6 +5263,7 @@ view.addEventListener("click", async (e) => {
       return render();
     case "hide-apply": signedOutStep = null; applySentTo = ""; requestSentTo = ""; return render();
     case "submit-application": return submitApplicationHere();
+    case "apply-name-ok": applyNameOk = applyNameTaken; applyNameTaken = ""; return submitApplicationHere();
     case "finish-apply": return finishApplyHere();
     /* Build 25: the entry screens. */
     case "create-password": return createPasswordHere();
@@ -6240,7 +6202,7 @@ sheetEl.addEventListener("click", async (e) => {
     try {
       await db.sendPasswordReset(address);
       sheetEl.hidden = true;
-      flashMsg(`Reset link sent to ${address}. Open it, choose a new password, then sign in with it.`);
+      flashMsg(`Link sent to ${address}. Open the email "Sign in to The Scorecard" on this phone and tap the link: The Scorecard opens and asks for your new password.`);
     } catch {
       resetting.disabled = false;
       resetting.textContent = "Reset my password";
@@ -6513,6 +6475,85 @@ function openSignInProblem(error, email) {
   </div>`;
 }
 
+/* Batch 2: accepting a named invitation is its own function, so the welcome
+   screen can finish joining straight after the account is created. */
+async function acceptNamedHere() {
+  const link = db.readJoinLink();
+  if (!link || !link.golferId) return;
+  joining = true;
+  busy("Joining the group");
+  render();
+  try {
+    /* The role comes from the link. Somebody who has not joined yet cannot
+       read the group document, so asking it is pointless — the rules verify
+       the code against the group when the membership is written. */
+    const role = link.role || "member";
+    const result = link.token
+      ? await db.acceptTokenInvite({ associationId: link.associationId, token: link.token })
+      : await db.acceptNamedInvite({ associationId: link.associationId, code: link.code, golferId: link.golferId, role });
+    joining = false;
+    if (!result.ok) {
+      idleAll();
+      note(`join refused: ${result.reason}`);
+      openProblem({
+        title: result.reason === "USED"
+          ? "This invitation has already been used"
+          : result.reason === "OTHER_GOLFER"
+            ? "You are already in this group as another golfer"
+            : "This invitation belongs to somebody else",
+        detail: result.reason === "USED"
+          ? "An admin invitation works once only. Ask for a fresh one."
+          : result.reason === "OTHER_GOLFER"
+            ? "This sign-in already plays in this group under another name, so it cannot become this golfer as well."
+            : "Somebody has already joined with this link. Ask whoever runs the group to send you your own.",
+        advice: result.reason === "OTHER_GOLFER"
+          ? "Nothing was changed. If this invitation is for you, ask whoever runs the group to sort out the two names."
+          : "Nothing was changed.",
+      });
+      return render();
+    }
+    db.clearJoinLink();
+    await start(link.associationId);
+    tab = "enter";
+    idleAll();
+    if (role === "admin") {
+      /* Said properly rather than as a passing message. An admin without an
+         account can manage everything, but only from this browser — they
+         need to understand that before they walk away from it. */
+      /* The password step happens HERE, as part of joining — not as a
+         pointer to somewhere they have to go and find. An admin who walks
+         away without one is locked out the moment this browser forgets
+         them, and their invitation is already spent. */
+      tab = "manage";
+    }
+    finishJoining();
+  } catch (err) {
+    joining = false;
+    idleAll();
+    /* Say what actually went wrong. Swallowing it left the screen exactly
+       as it was, which reads as the button doing nothing at all. */
+    /* beta.9: each refusal names its step and says what to do. */
+    const code = String((err && (err.code || err.message)) || "");
+    note(`join refused: ${code}`);
+    openProblem({
+      title: code.includes("join/membership-refused") ? "This invitation link no longer works"
+        : code.includes("join/link-refused") ? "You are in the group, but your golfer could not be linked"
+        : "Could not join the group",
+      detail: code.includes("join/membership-refused")
+        ? "The group's code has changed since it was sent, so the link is out of date."
+        : code.includes("join/link-refused")
+          ? "This golfer is still linked to another sign-in."
+          : code || "No detail was given.",
+      advice: code.includes("join/membership-refused")
+        ? "Ask whoever runs the group to tap Send again for you, then use the new link. Nothing was changed."
+        : code.includes("join/link-refused")
+          ? "Ask whoever runs the group to tap Send again for you (that releases the old link), then tap the new link."
+          : "Nothing was changed. Try the link again, or send this report.",
+    });
+  }
+  return render();
+}
+
 async function acceptInvite() {
   /* Every path that waits on Firebase raises the veil, without exception. */
   const invite = db.readJoinLink();
@@ -6561,7 +6602,8 @@ function finishJoining() {
     });
     return;
   }
-  flashMsg("You're in. Post your round on the Enter tab.");
+  const g = db.currentAssociationDoc && db.currentAssociationDoc();
+  flashMsg(`Welcome to ${(g && g.name) || "the group"}. Post your rounds on the Enter tab.`);
 }
 
 async function joinByCode() {
