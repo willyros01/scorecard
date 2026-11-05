@@ -1619,17 +1619,31 @@ export async function stampLastSeen() {
 const favKey = () => `golf:v2:favCourses:${uid}`;
 let favCourses = [];
 export const favouriteCourses = () => favCourses.slice();
+/* Batch 5, step 24: the golfer's own courses, kept with the favourites. */
+let myCourseIds = [];
+export const myCourses = () => myCourseIds.slice();
+export function addMyCourse(courseId) {
+  if (!uid || !courseId || myCourseIds.includes(courseId)) return;
+  myCourseIds = [...myCourseIds, courseId];
+  try { localStorage.setItem(`${favKey()}:mine`, JSON.stringify(myCourseIds)); } catch {}
+  outbox.enqueueOrMerge({ type: "set", path: ["users", uid, "prefs", "courses"], data: { favourites: favCourses.slice(), mine: myCourseIds.slice(), at: Date.now() } });
+  flush();
+  emit();
+}
 export const isFavouriteCourse = (id) => favCourses.includes(id);
 export async function loadFavouriteCourses() {
   favCourses = [];
   if (!fb || !uid) return favCourses;
   try { favCourses = JSON.parse(localStorage.getItem(favKey()) || "[]").filter((x) => typeof x === "string"); } catch {}
+  try { myCourseIds = JSON.parse(localStorage.getItem(`${favKey()}:mine`) || "[]").filter((x) => typeof x === "string"); } catch {}
   try {
     const snap = await fb.mod.store.getDoc(ref("users", uid, "prefs", "courses"));
     /* A change still waiting in the outbox is newer than the database. */
     const queued = (JSON.parse(localStorage.getItem("golf:v2:outbox") || "[]") || [])
       .some((o) => o && o.path && o.path.join("/") === `users/${uid}/prefs/courses`);
     if (snap.exists() && !queued) {
+      const mineList = (snap.data() || {}).mine;
+      if (Array.isArray(mineList)) { myCourseIds = mineList.filter((x) => typeof x === "string"); try { localStorage.setItem(`${favKey()}:mine`, JSON.stringify(myCourseIds)); } catch {} }
       const list = (snap.data() || {}).favourites;
       if (Array.isArray(list)) {
         favCourses = list.filter((x) => typeof x === "string");
@@ -1647,7 +1661,7 @@ export function toggleFavouriteCourse(courseId) {
   try { localStorage.setItem(favKey(), JSON.stringify(favCourses)); } catch {}
   outbox.enqueueOrMerge({
     type: "set", path: ["users", uid, "prefs", "courses"],
-    data: { favourites: favCourses.slice(), at: Date.now() },
+    data: { favourites: favCourses.slice(), mine: myCourseIds.slice(), at: Date.now() },
   });
   /* Each change carries the whole list; queued changes are sent in order,
      so the last one wins. */
@@ -2228,6 +2242,17 @@ export async function loadMembership(id) {
     }
     return myMember;
   } catch (e) { report(e); return null; }
+}
+
+/* Batch 5, step 14 (Willy, 16 Oct 2026): withdraw a course for ALL groups, for
+   good. It stays only because posted rounds point to it (they keep their
+   frozen figures, nothing is recalculated); it is never used, edited or
+   restored. A replacement is a new course. One write. */
+export async function withdrawCourse(courseId, reason) {
+  await commitTogether([{ op: "update", path: ["courses", courseId],
+    data: { withdrawn: true, withdrawnBy: uid, withdrawnAt: Date.now(), withdrawnReason: String(reason || "").trim().slice(0, 200), withdrawnIn: assocId } }],
+    "withdraw the course");
+  return { ok: true };
 }
 
 /* Batch 5, step 31 (Willy, 1 Nov 2026: GolfCourseAPI's terms): course search

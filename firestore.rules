@@ -1246,7 +1246,16 @@ service cloud.firestore {
          well-meaning edits that break other groups' data, so version 3 should
          replace this with a curated review step. Until then, ratings that are
          wrong get a new course entry rather than an edit war. */
-      allow update: if signedIn() && !deleting() && resource.data.createdBy == request.auth.uid;
+      /* Batch 5, step 14 (Willy, 16 Oct 2026): a withdrawn course is never
+         used, edited or restored again. */
+      allow update: if signedIn() && !deleting() && resource.data.get('withdrawn', false) != true
+        && (resource.data.createdBy == request.auth.uid
+            /* Withdrawal: an owner or admin of a group (named in withdrawnIn),
+               or the app owner, for every group, for good. Nothing else changes. */
+            || ((isAppOwner() || isAdmin(request.resource.data.get('withdrawnIn', '')))
+                && request.resource.data.withdrawn == true
+                && request.resource.data.withdrawnBy == request.auth.uid
+                && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['withdrawn', 'withdrawnBy', 'withdrawnAt', 'withdrawnReason', 'withdrawnIn'])));
 
       allow delete: if false;   /* rounds reference courses; never orphan them */
     }
