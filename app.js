@@ -1467,7 +1467,7 @@ function screenSignedOut(invite) {
       ${offlineAccountNote()}
       <div class="card padded">
         <h2 class="panel-title">${invite ? `Welcome to ${esc(invite.groupHint || "your group")}` : heading}</h2>
-        <p class="lead">${invite ? (adminOnly ? "You\u2019re invited to help run the group. Create your password to join." : "You\u2019re invited. Create your password to join.") : "Create your account, then type the code."}</p>
+        <p class="lead">${invite ? (adminOnly ? "You\u2019re invited to help run a group. Create your password to join." : "You\u2019re invited. Create your password to join.") : "Create your account, then type the code."}</p>
         ${openInvite ? `<label class="lbl">Your name</label>
         <input class="field" name="join-name" value="${esc(joinForm.name)}" placeholder="e.g. Willy Rosales" autocomplete="name">` : ""}
         ${newAccountFields()}

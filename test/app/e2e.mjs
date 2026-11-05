@@ -113,7 +113,8 @@ async function waitForText(page, re, ms = 20000) {
 async function acceptIfAsked(page) {
   const end = Date.now() + 20000;
   while (Date.now() < end) {
-    if (await page.locator('[data-act="accept-named"]').count()) { await page.locator('[data-act="accept-named"]').click(); return "asked"; }
+    const btn = page.locator('[data-act="accept-named"]');
+    if (await btn.count() && await btn.first().isEnabled().catch(() => false)) { await btn.first().click(); return "asked"; }
     if (await page.evaluate(async () => !!(await import("/store.js")).currentAssociation()).catch(() => false)) return "joined";
     await page.waitForTimeout(300);
   }
@@ -684,6 +685,9 @@ async function applyAndOpenLink(name, email) {
   await p.fill('[name="apply-email"]', email);
   await p.locator('[name="ap-agree"]').check();
   await p.locator('[data-act="submit-application"]').click();
+  /* Batch 2, step 29: a taken name is said first; Continue anyway goes on. */
+  await waitForText(p, /Check your email|A golfer with this name already exists/);
+  if (/A golfer with this name already exists/.test(await text(p))) await p.locator('[data-act="apply-name-ok"]').click();
   await waitForText(p, /Check your email/);
   if (await accountByEmail(email)) throw new Error("an account was created before the link was tapped");
   const r = await fetch(`${AUTH_ADMIN}/oobCodes`);
@@ -1032,8 +1036,7 @@ await check("E30", "Delete my account: signed out, gone, golfer and rounds kept;
   await back.fill('[name="password"]', "zed-new-pass-1");
   await back.fill('[name="password-again"]', "zed-new-pass-1");
   await back.locator('[data-act="create-account"]').click();
-  await waitForText(back, /Zed Leaver/);
-  await back.locator('[data-act="accept-named"]').click();
+  await acceptIfAsked(back);
   const end = Date.now() + 20000;
   while (Date.now() < end && (await back.evaluate(async () => (await import("/store.js")).currentAssociation())) !== "G1") await back.waitForTimeout(300);
   const nUid = (await accountByEmail(Z.email) || {}).localId;
@@ -1658,7 +1661,7 @@ await check("GI4", "fresh phone: Terms of Use, then Welcome to the group (email,
   await page.locator("#termsTick").check();
   await page.locator('[data-act="terms-accept"]').click();
   await waitForText(page, /Welcome to Saturday Group/);
-  if (!/Password again/.test(await text(page)) || !/\bJoin\b/.test(await text(page))) throw new Error("not the welcome screen");
+  if (!/Password again/i.test(await text(page)) || !/\bJoin\b/.test(await text(page))) throw new Error("not the welcome screen");
   await page.fill('[name="email"]', "fresh.phone@example.com");
   await page.fill('[name="password"]', "fresh-pass-1");
   await page.fill('[name="password-again"]', "fresh-pass-1");
