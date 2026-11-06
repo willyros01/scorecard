@@ -2105,9 +2105,9 @@ function scoringStats(list) {
     <span>${label}</span><span style="background:var(--tint);border-radius:6px;height:14px"><span style="display:block;height:14px;border-radius:6px;background:var(--pine);width:${Math.round((n / max) * 100)}%"></span></span><b style="text-align:right">${n}</b></div>`;
   const avg = (p) => {
     const a = by[p];
-    if (!a.length) return `<div class="tile"><b>–</b><span>Par ${p}s</span></div>`;
+    if (!a.length) return `<div class="tile"><b style="display:block;font-size:1.3em">–</b><span>Par ${p}s</span></div>`;
     const m = a.reduce((x, y) => x + y, 0) / a.length;
-    return `<div class="tile"><b>${m.toFixed(2)}</b><span>Par ${p}s · ${m - p >= 0 ? "+" : ""}${(m - p).toFixed(2)}</span></div>`;
+    return `<div class="tile"><b style="display:block;font-size:1.3em">${m.toFixed(2)}</b><span>Par ${p}s · ${m - p >= 0 ? "+" : ""}${(m - p).toFixed(2)}</span></div>`;
   };
   return `<section class="panel"><div class="card padded">
     <div class="eyebrow">Scoring · ${marker.length} Marker round${marker.length === 1 ? "" : "s"}, ${holes} holes</div>

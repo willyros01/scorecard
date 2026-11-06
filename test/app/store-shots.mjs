@@ -135,7 +135,7 @@ async function waitForText(p, re, ms = 30000) {
   while (Date.now() < end) { if (re.test(await text(p))) return; await p.waitForTimeout(300); }
   throw new Error(`text ${re} did not appear: ${(await text(p)).replace(/\s+/g, " ").slice(0, 300)}`);
 }
-const tab = async (p, id) => { await p.locator(`button[data-tab="${id}"]`).click(); await p.waitForTimeout(900); };
+const tab = async (p, id) => { await p.locator(`button[data-tab="${id}"]`).click(); await p.waitForTimeout(900); await p.evaluate(() => window.scrollTo(0, 0)); };
 
 const DEVICES = [
   { key: "iphone", viewport: { width: 440, height: 956 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true },
