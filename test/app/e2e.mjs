@@ -481,6 +481,8 @@ await check("E12", "an admin invites regular members only: no Admin choice on th
   await signIn(ada, A1.email, A1.password);
   await waitForText(ada, /Saturday Group/i);
   await tab(ada, "manage");
+  /* Batch 5: the golfer list opens closed on Manage; Show opens it. */
+  await ada.locator('[data-act="toggle-golfer-list"]').click();
   await ada.locator('[data-invite-golfer="gJ"]').first().waitFor({ timeout: 20000 })
     .catch(async () => { throw new Error(`no Invite button for Jay; the screen says: ${(await text(ada)).replace(/\s+/g, " ").slice(0, 600)}`); });
   await ada.locator('[data-invite-golfer="gJ"]').first().click();
@@ -1775,7 +1777,8 @@ await check("SS4", "a new group puts the creator's existing golfer on its roster
   const out = await page.evaluate(async (email) => {
     const db = await import("/store.js");
     let g;
-    try { g = await db.createAssociation({ name: "Second Group", displayName: "Owner" }); } catch (e) { return { error: `creating the group: ${e.code || e.message}` }; }
+    try { g = await db.createAssociation({ name: "Second Group", displayName: "Owner" }); }
+    catch (e) { const st = db.status(); return { error: `creating the group: ${e.code || e.message} | ${JSON.stringify(st.error || st.lastError || st).slice(0, 300)}` }; }
     db.setAssociation(g.id);
     try { const mine = await db.linkGolferForMember(email); return { id: g.id, golfer: mine && mine.id }; }
     catch (e) { return { error: `linking the golfer: ${e.code || e.message}` }; }
