@@ -1,13 +1,11 @@
 kind:    ops
-result:  success
+result:  failure
 branch:  v2
-commit:  3c8bf6869a7dde3633fa4765cc5cc97717c1b99e
-run:     74 (id 38153156500)
-time:    2026-10-11T15:58:21Z
+commit:  ecfbf4f9ef854a839caffd5f35f017a4cbc356e9
+run:     111 (id 42139195460)
+time:    2026-11-06T00:57:02Z
 
 --- last lines of ops-tests.log ---
-PASS  IX2 succeeds (exit 0)
-PASS  IX2 says DONE
 true
 PASS  IX2 asked for the across-groups index on members.uid
 true
@@ -40,9 +38,11 @@ PASS  IX6 tells you to verify later
 PASS  IX6 verify says not ready yet (exit 1)
 
 RESULT: 19 passed, 0 failed
-[32m[1m✔ [22m[39m Script exited successfully (code 0)
+[33m[1m⚠ [22m[39m Script exited unsuccessfully (code 1)
 [36m[1mi  emulators:[22m[39m Shutting down emulators.
 [36m[1mi  firestore:[22m[39m Stopping Firestore Emulator
 [36m[1mi  auth:[22m[39m Stopping Authentication Emulator
 [36m[1mi  hub:[22m[39m Stopping emulator hub
 [36m[1mi  logging:[22m[39m Stopping Logging Emulator
+
+[1m[31mError:[39m[22m Script "[1ms=0; bash sec-tests.sh || s=1; echo; bash del1-tests.sh || s=1; echo; if [ -f privacy-tests.sh ]; then bash privacy-tests.sh || s=1; fi; echo; bash acc-tests.sh || s=1; echo; bash pub-tests.sh || s=1; echo; bash grp-tests.sh || s=1; echo; bash grq-tests.sh || s=1; echo; bash ck4-tests.sh || s=1; echo; if [ -d ../../node_modules/playwright ]; then node ../app/e2e.mjs ../.. || s=1; else echo "SKIP  app tests (npm ci not run)"; fi; echo; node golive-tests.mjs || s=1; echo; bash go2-tests.sh || s=1; echo; bash rq3-tests.sh || s=1; echo; bash ap4-tests.sh || s=1; echo; bash bk1-tests.sh || s=1; echo; bash cl5-tests.sh || s=1; echo; bash bdg-tests.sh || s=1; echo; NBK_SLEEP=0 bash nbk-tests.sh || s=1; echo; bash nb-tests.sh || s=1; echo; bash arc-tests.sh || s=1; echo; bash dl9-tests.sh || s=1; echo; bash ix9-tests.sh || s=1; exit $s[22m" exited with code 1
