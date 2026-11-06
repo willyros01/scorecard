@@ -1714,6 +1714,8 @@ async function createAccountHere() {
   joining = true;
   busy("Creating your account");
   render();
+  /* Item 9: the invitation as it was before the account was made. */
+  const invBefore = db.readJoinLink();
   try {
     await db.createAccount(fields);
     accountMode = null;
@@ -1726,6 +1728,9 @@ async function createAccountHere() {
     flashMsg("Account created. Use this email and password on your other devices.");
     /* Batch 2: the welcome screen's Join finishes joining too, no second screen. */
     const inv = db.readJoinLink();
+    /* Item 9: the invitation turned out to be used or replaced, so there is
+       nothing to join: the account just made is taken back. */
+    if (invBefore && !inv) { idle(); await undoAccountIfNotJoined(invBefore, "This invitation was used or replaced by a newer one."); return; }
     if (inv && inv.golferId && invitedGolfer) { idle(); await acceptNamedHere(); await undoAccountIfNotJoined(inv); return; }
     if (inv && !inv.golferId && inv.role !== "admin" && joinForm.name.trim()) { idle(); await acceptInvite(); await undoAccountIfNotJoined(inv); return; }
   } catch (err) {
@@ -1785,13 +1790,18 @@ async function signOutForLink() {
    just made here but joining did not finish, the account is removed again, so
    nothing is left behind; the invitation stays waiting, and Join can simply
    be tapped again. The message about why joining failed stays on screen. */
-async function undoAccountIfNotJoined(inv) {
+async function undoAccountIfNotJoined(inv, why) {
   if (db.currentAssociation() === inv.associationId && db.myRole()) return;
   note("join did not finish: removing the account just made");
   let removed = false;
   try { removed = (await db.removeNewAccount()).removed; } catch {}
   if (removed) {
     linkAnswer = null; groupState = "unknown"; accountMode = "create";
+    if (why) {
+      render();
+      formMessage(`${why} Nothing was kept: the new account was removed again. Ask whoever runs the group for a fresh link.`);
+      return;
+    }
     flashMsg("Nothing was kept: the new account was removed again. Tap Join to try once more.");
   }
   render();

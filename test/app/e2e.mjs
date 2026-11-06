@@ -125,6 +125,18 @@ async function formOk(page, field) {
     if (!outlined) throw new Error(`the field ${field} is not outlined after OK`);
   }
 }
+/* Item 1: on a signed-in device an invitation either signs out by itself
+   (the account already plays as another golfer) or asks; "someone else"
+   then signs out and continues. Either way: the new person's welcome screen. */
+async function toNewPerson(page) {
+  await waitForText(page, /Is this invitation for you\?|You.re invited/, 30000);
+  if (/Is this invitation for you\?/.test(await text(page))) {
+    await page.waitForTimeout(1500);   /* the automatic check may still sign out */
+    const no = page.locator('[data-act="link-not-me"]');
+    if (await no.count()) await no.click({ timeout: 5000 }).catch(() => {});
+  }
+  await waitForText(page, /You.re invited/, 30000);
+}
 async function acceptIfAsked(page) {
   const end = Date.now() + 20000;
   while (Date.now() < end) {
@@ -277,6 +289,7 @@ await check("E2b", "a second application for the same email is refused with a cl
   await pat.locator('[name="ap-agree"]').check();
   await pat.locator('[data-act="submit-application"]').click();
   await waitForText(pat, /already an application for that email/);
+  await formOk(pat, "apply-email");
   await pat.locator('[data-act="show-choose"]').click();
   await pat.locator('[data-act="hide-apply"]').click();
 });
@@ -1610,10 +1623,16 @@ await check("B25-5", "E2: 'Yes, it's for me' shows the invitation itself even wh
   await put("associations/G1/roster/gYes", { golferId: "gYes" });
   const url = await freshInvitation("gYes");
   /* Item 1: an account that does not play as a golfer yet still gets the question. */
-  const rex = await ownerInG1();
+  const NG = { email: "no.golfer@example.com", password: "no-golfer-pass-1" };
+  NG.uid = await signUp(NG.email, NG.password);
+  await put(`associations/G1/members/${NG.uid}`, { uid: NG.uid, role: "member", displayName: "No Golfer" });
+  await put(`userGroups/${NG.uid}/groups/G1`, { assocId: "G1", name: "Saturday Group", at: Date.now() });
+  const rex = await newPage();
+  await rex.goto(APP, { waitUntil: "load" });
+  await waitForText(rex, /Sign in/);
+  await signIn(rex, NG.email, NG.password);
+  await rex.waitForFunction(async () => !!(await import("/store.js")).status().uid, null, { timeout: 30000 });
   await rex.waitForTimeout(1500);
-  await rex.reload({ waitUntil: "load" });
-  await rex.waitForFunction(async () => !!(await import("/store.js")).currentAssociation(), null, { timeout: 30000 });
   await rex.goto(`${APP}&${new URL(url).search.slice(1)}`, { waitUntil: "load" });
   await waitForText(rex, /Is this invitation for you\?/);
   await rex.locator('[data-act="link-for-me"]').click();
@@ -1685,7 +1704,7 @@ await check("FM2", "welcome screen, second password empty: a pop-up says so, tha
 
 /* Item 7: inside the app, a link that arrives while a box is open closes the
    box, so the link's question is what shows (iPhone, warm start). */
-await check("LK1", "app, signed in, a box open: an arriving invitation link closes it and the question shows", async () => {
+await check("LK1", "app, signed in, a box open: an arriving invitation link closes it and the link's own screen shows", async () => {
   await put("golfers/gLk1", { name: "Link One", nameKey: "link-one", linkedUid: null, groups: ["G1"] });
   await put("golferNames/link-one", { golferId: "gLk1", name: "Link One" });
   await put("associations/G1/roster/gLk1", { golferId: "gLk1" });
@@ -1702,8 +1721,10 @@ await check("LK1", "app, signed in, a box open: an arriving invitation link clos
   await signIn(page, R1.email, R1.password);
   await page.waitForFunction(async () => (await import("/store.js")).currentAssociation() === "G1", null, { timeout: 30000 });
   await page.evaluate(() => { const sh = document.getElementById("sheet"); sh.innerHTML = '<div class="sheet-body"><h2>Invitation</h2></div>'; sh.hidden = false; });
+  await page.waitForTimeout(1500);
   await page.evaluate((u) => window.__linkArrives({ url: u }), url);
-  await waitForText(page, /Is this invitation for you\?/);
+  /* Rex plays as his own golfer, so (item 1) the device may sign out by itself. */
+  await waitForText(page, /Is this invitation for you\?|You.re invited/, 30000);
   if (!(await page.evaluate(() => document.getElementById("sheet").hidden))) throw new Error("the open box still covers the question");
   await page.close();
 });
@@ -1722,9 +1743,7 @@ await check("OW1", "item 8: the group owner signed in; invitation link; No; Sign
   await own.reload({ waitUntil: "load" });
   await own.waitForFunction(async () => !!(await import("/store.js")).currentAssociation(), null, { timeout: 30000 });
   await own.goto(`${APP}&${new URL(url).search.slice(1)}`, { waitUntil: "load" });
-  await waitForText(own, /Is this invitation for you\?/);
-  await own.locator('[data-act="link-not-me"]').click();
-  await waitForText(own, /You.re invited/);
+  await toNewPerson(own);
   await own.waitForTimeout(2000);
   if (!(await own.evaluate(() => document.getElementById("sheet").hidden))) throw new Error("a box is open over the welcome screen: " + (await own.evaluate(() => document.getElementById("sheet").innerText)).replace(/\s+/g, " ").slice(0, 120));
   await own.fill('[name="email"]', "owen.plain@example.com");
@@ -1757,9 +1776,7 @@ await check("OW2", "item 8: the group owner (also the app owner) signed in; invi
   await own.reload({ waitUntil: "load" });
   await own.waitForFunction(async () => !!(await import("/store.js")).currentAssociation(), null, { timeout: 30000 });
   await own.goto(`${APP}&${new URL(url).search.slice(1)}`, { waitUntil: "load" });
-  await waitForText(own, /Is this invitation for you\?/);
-  await own.locator('[data-act="link-not-me"]').click();
-  await waitForText(own, /You.re invited/);
+  await toNewPerson(own);
   await own.waitForTimeout(2000);
   if (!(await own.evaluate(() => document.getElementById("sheet").hidden))) throw new Error("a box is open over the welcome screen: " + (await own.evaluate(() => document.getElementById("sheet").innerText)).replace(/\s+/g, " ").slice(0, 120));
   await own.fill('[name="email"]', "ola.boss@example.com");
@@ -1803,7 +1820,7 @@ await check("JF1", "item 9: a Join that is refused after the account was made le
   if (await page.evaluate(async () => (await import("/store.js")).hasUser())) throw new Error("still signed in");
   if ((await getDoc("golfers/gJf1")).linkedUid) throw new Error("the golfer was linked");
   if (await getDocQuick("accountEmails/join.fail@example.com")) throw new Error("the email record was left behind");
-  if (!/This invitation link no longer works|already been used|belongs to somebody else|Could not join/.test(await text(page))) throw new Error("no message says why");
+  if (!/used or replaced by a newer one|This invitation link no longer works|already been used|belongs to somebody else|Could not join|cannot be used/.test(await text(page))) throw new Error("no message says why");
   await page.close();
 });
 
