@@ -1786,10 +1786,13 @@ await check("SS4", "a new group puts the creator's existing golfer on its roster
     catch (e) { return { error: `linking the golfer: ${e.code || e.message}` }; }
   }, W.email).catch((e) => ({ error: String(e.message || e) }));
   if (out.error) throw new Error(out.error);
-  if (out.golfer !== "gWillyOwn") throw new Error(`linked ${out.golfer}, not the creator's golfer`);
-  if (!(await getDocQuick(`associations/${out.id}/roster/gWillyOwn`))) throw new Error("not on the new roster");
+  /* Earlier tests may have linked another golfer to the owner: any golfer
+     already linked to the creator is the right one, never a new one. */
+  const mine = (await list("golfers")).filter((g) => g.linkedUid === W.uid).map((g) => g.id);
+  if (!mine.includes(out.golfer)) throw new Error(`linked ${out.golfer}, not one of the creator's golfers (${mine.join(", ")})`);
+  if (!(await getDocQuick(`associations/${out.id}/roster/${out.golfer}`))) throw new Error("not on the new roster");
   if ((await list("golfers")).some((g) => g.name === W.email)) throw new Error("a golfer named after the email was created");
-  if (!((await getDeep("golfers/gWillyOwn")).groups || []).includes(out.id)) throw new Error("the golfer does not list the new group");
+  if (!((await getDeep(`golfers/${out.golfer}`)).groups || []).includes(out.id)) throw new Error("the golfer does not list the new group");
   await page.close();
 });
 
