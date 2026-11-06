@@ -52,8 +52,11 @@ await fetch(`${AUTH_ADMIN}/accounts`, { method: "DELETE", headers: OWNER });
 const G = "CLUB1";
 const ME = { email: "alex.morgan@example.com", password: "alex-pass-1", name: "Alex Morgan", id: "gAlex" };
 ME.uid = await signUp(ME.email, ME.password);
-await put(`associations/${G}`, { name: "Saturday Club", ownerUid: ME.uid, joinCode: "CLUB01", settings: { minRoundsForRanking: 3 } });
-await put(`associations/${G}/members/${ME.uid}`, { uid: ME.uid, role: "owner", displayName: ME.name, golferId: ME.id });
+/* Alex is a regular member (what most golfers see); the club has its own organiser. */
+const BOSS = await signUp("organiser@example.com", "organiser-pass-1");
+await put(`associations/${G}`, { name: "Saturday Club", ownerUid: BOSS, joinCode: "CLUB01", settings: { minRoundsForRanking: 3 } });
+await put(`associations/${G}/members/${BOSS}`, { uid: BOSS, role: "owner", displayName: "Club Organiser" });
+await put(`associations/${G}/members/${ME.uid}`, { uid: ME.uid, role: "member", displayName: ME.name, golferId: ME.id });
 await put(`userGroups/${ME.uid}/groups/${G}`, { assocId: G, name: "Saturday Club" });
 
 const tee = (id, name, rating, slope, par = 72) => ({ id, name, rating, slope, par });
@@ -72,11 +75,14 @@ const PAR = [4, 4, 3, 5, 4, 4, 3, 4, 5, 4, 3, 5, 4, 4, 4, 3, 4, 5];
 const SI = [7, 3, 15, 1, 11, 5, 17, 9, 13, 8, 16, 2, 10, 4, 12, 18, 6, 14];
 let seed = 7;
 const rnd = () => { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; };
-const dates = ["2026-08-01", "2026-08-08", "2026-08-15", "2026-08-22", "2026-08-29", "2026-09-05", "2026-09-12", "2026-09-19", "2026-09-26", "2026-10-03", "2026-10-10", "2026-10-17", "2026-10-24", "2026-10-31"];
+/* A season of Saturdays, May to October (the 6-month trend needs the spring). */
+const dates = [];
+for (let t = Date.UTC(2026, 4, 2); t <= Date.UTC(2026, 9, 31); t += 7 * 86400000) dates.push(new Date(t).toISOString().slice(0, 10));
 const round1 = (x) => Math.round(x * 10) / 10;
 
 const gameId = "gmFinal";
-await put(`associations/${G}/games/${gameId}`, { id: gameId, assocId: G, date: "2026-10-31", endDate: null, courseId: "cMaple", name: "Club Championship", createdBy: ME.uid });
+await put(`associations/${G}/games/${gameId}`, { id: gameId, assocId: G, date: "2026-10-31", endDate: null, courseId: "cMaple", name: "Club Championship", createdBy: BOSS,
+  participantGolferIds: PEOPLE.map((x) => x[0]) });
 
 for (const [id, name, base] of PEOPLE) {
   const window = [];
@@ -86,7 +92,7 @@ for (const [id, name, base] of PEOPLE) {
     const c = COURSES[k % COURSES.length];
     const t = c.tees[0];
     /* Alex's handicap comes down over the season (the trend picture). */
-    const trend = id === "gAlex" ? (dates.length - k) * 0.45 : 0;
+    const trend = id === "gAlex" ? (dates.length - k) * 0.22 : 0;
     const diff = round1(base + trend + (rnd() - 0.5) * 6);
     const adjusted = Math.round(diff * t.slope / 113 + t.rating);
     const rid = `r-${id}-${k}`;
