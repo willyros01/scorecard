@@ -1736,6 +1736,9 @@ await check("OW2", "owner signed in (app owner: False); invitation link; No; Sig
     const E = globalThis.Error;
     globalThis.Error = new Proxy(E, { construct(T, args) { const e = Reflect.construct(T, args); if (/no-current-user/.test(String(args[0]))) console.log("THROWN no-current-user AT " + (e.stack || "").split("\n").slice(0, 12).join(" <- ")); return e; } });
   });
+  for (const ms of [0, 1500, 4000]) { await own.waitForTimeout(ms ? ms - (ms === 4000 ? 1500 : 0) : 0);
+    console.log("      AFTER SIGN-OUT +" + ms + "ms: " + JSON.stringify(await own.evaluate(async () => { const db = await import("/store.js"); const sh = document.getElementById("sheet");
+      return { role: db.myRole(), needsPw: db.needsPassword(), user: db.currentEmail(), assoc: db.currentAssociation(), sheetShown: !!(sh && !sh.hidden), sheet: sh && !sh.hidden ? sh.innerText.replace(/\s+/g, " ").slice(0, 160) : "" }; }))); }
   console.log('      step: fill email | ' + (await text(own)).replace(/\s+/g,' ').slice(0,260));
   await own.fill('[name="email"]', "ollie@example.com");
   await own.fill('[name="password"]', "ow2-pass-1");
@@ -1752,6 +1755,8 @@ await check("OW2", "owner signed in (app owner: False); invitation link; No; Sig
 });
 
 await check("OW1", "owner signed in (app owner: True); invitation link; No; Sign out and continue; new person Join", async () => {
+  await put(`appOwners/${W.uid}`, { active: true });
+  try { await fetch(`${FS_ADMIN}/appOwners/${W.uid}`, { method: "DELETE" }); } catch {}
   await put(`appOwners/${W.uid}`, { active: true });
   await put("golfers/gOw1", { name: "Owen Boss", nameKey: "owen-boss", linkedUid: null, groups: ["G1"] });
   await put("golferNames/owen-boss", { golferId: "gOw1", name: "Owen Boss" });
@@ -1778,6 +1783,9 @@ await check("OW1", "owner signed in (app owner: True); invitation link; No; Sign
     const E = globalThis.Error;
     globalThis.Error = new Proxy(E, { construct(T, args) { const e = Reflect.construct(T, args); if (/no-current-user/.test(String(args[0]))) console.log("THROWN no-current-user AT " + (e.stack || "").split("\n").slice(0, 12).join(" <- ")); return e; } });
   });
+  for (const ms of [0, 1500, 4000]) { await own.waitForTimeout(ms ? ms - (ms === 4000 ? 1500 : 0) : 0);
+    console.log("      AFTER SIGN-OUT +" + ms + "ms: " + JSON.stringify(await own.evaluate(async () => { const db = await import("/store.js"); const sh = document.getElementById("sheet");
+      return { role: db.myRole(), needsPw: db.needsPassword(), user: db.currentEmail(), assoc: db.currentAssociation(), sheetShown: !!(sh && !sh.hidden), sheet: sh && !sh.hidden ? sh.innerText.replace(/\s+/g, " ").slice(0, 160) : "" }; }))); }
   console.log('      step: fill email | ' + (await text(own)).replace(/\s+/g,' ').slice(0,260));
   await own.fill('[name="email"]', "owen@example.com");
   await own.fill('[name="password"]', "ow1-pass-1");
