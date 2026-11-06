@@ -866,3 +866,24 @@ body { font-size: 1rem; }
    text-size setting. */
 .tabs button { font-size: 12.5px; padding: 10px 1px; letter-spacing: 0; white-space: nowrap; min-width: 0; }
 .tabs .ico { font-size: 21px; }
+
+/* Item 11 (Willy, 5 Nov 2026): a form message is a pop-up in the middle of
+   the screen that stays until OK is tapped; the field to fix is then outlined. */
+.sheet.pop-centre { align-items: center; padding: 16px; }
+.sheet.pop-centre .sheet-body { border-radius: 18px; max-width: 420px; padding-bottom: 20px; }
+.needs-fix { outline: 3px solid var(--warn, #E0A33A); outline-offset: 2px; }
+
+/* Item 5 (Willy, 5 Nov 2026): the scoring chart, a colour for each kind of
+   score. The colours also differ in lightness, so they stay apart for
+   everyone, by day and by night. */
+.sc-bar.sc-eagle, .sc-dot.sc-eagle { background: #B8860B; }
+.sc-bar.sc-birdie, .sc-dot.sc-birdie { background: #C62828; }
+.sc-bar.sc-par, .sc-dot.sc-par { background: #2E7D32; }
+.sc-bar.sc-bogey, .sc-dot.sc-bogey { background: #1E5AA8; }
+.sc-bar.sc-double, .sc-dot.sc-double { background: #4A4A55; }
+[data-theme="dark"] .sc-bar.sc-eagle, [data-theme="dark"] .sc-dot.sc-eagle { background: #F2C14E; }
+[data-theme="dark"] .sc-bar.sc-birdie, [data-theme="dark"] .sc-dot.sc-birdie { background: #FF7A7A; }
+[data-theme="dark"] .sc-bar.sc-par, [data-theme="dark"] .sc-dot.sc-par { background: #6FCF7F; }
+[data-theme="dark"] .sc-bar.sc-bogey, [data-theme="dark"] .sc-dot.sc-bogey { background: #7FB2FF; }
+[data-theme="dark"] .sc-bar.sc-double, [data-theme="dark"] .sc-dot.sc-double { background: #B9BCC8; }
+.sc-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }

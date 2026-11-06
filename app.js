@@ -367,9 +367,13 @@ function courseOptions(selectedId) {
    courses already in The Scorecard (searched first), then the golf course
    database through The Marker's server. Check the course, then use it. */
 let courseFind = null;   /* { q, busy, msg, lib: [], ext: [], check: null } */
+const FIND_COURSE_VALUE = "__find-course";
+const FIND_COURSE_OPTION = `<option value="${FIND_COURSE_VALUE}">\u{1F50D} Find another course\u2026</option>`;
 function courseFindPanel() {
   const f = courseFind;
-  if (!f) return `<div class="style-switch"><button class="linkbtn" data-act="cf-open">Find another course</button></div>`;
+  /* Item 6 (Willy, 5 Nov 2026): search lives in one place only, the first
+     line of the Course list; there is no separate link under it. */
+  if (!f) return "";
   if (f.check) {
     const c = f.check;
     return `<div class="card padded">
@@ -541,7 +545,14 @@ function entryScreen() {
       if (answered && !answered.forMe) return screenLinkForSomebodyElse(link);
       db.dropApplyLink();
     } else {
-      if (!answered) return screenLinkForWho(link);
+      if (!answered) {
+        /* Item 1 (Willy, 5 Nov 2026): an invitation for another golfer, on a
+           device whose account already plays as its own golfer, is plainly
+           not for this account: sign out and continue without asking. The
+           question stays for every case that is not that plain. */
+        if (autoLinkChecked !== link.key) { autoLinkChecked = link.key; checkInvitationNotMine(link); }
+        return screenLinkForWho(link);
+      }
       if (!answered.forMe) return screenLinkForSomebodyElse(link);
       /* It is theirs: the invitation itself, even if they already have a group. */
       return screenJoin();
@@ -551,6 +562,25 @@ function entryScreen() {
   return "";
 }
 
+let autoLinkChecked = "";
+async function checkInvitationNotMine(link) {
+  try {
+    await loadInvitedDetails();
+    const inv = db.readJoinLink();
+    if (!inv || !inv.golferId || !db.hasPassword()) return;
+    const mine = await db.findMyGolfer();
+    const now = pendingLink();
+    if (!now || now.key !== link.key || (linkAnswer && linkAnswer.key === link.key)) return;
+    if (mine && mine.id && mine.id !== inv.golferId) {
+      const was = db.currentEmail();
+      linkAnswer = { key: link.key, forMe: false };
+      await signOutForLink();
+      flashMsg(`Signed out of ${was}: this invitation is for someone else. Now set up their account.`);
+      render();
+    }
+  } catch { /* the question stays on screen */ }
+}
+
 /* E2: rule 2, first question. */
 function screenLinkForWho(link) {
   const what = link.kind === "invite" ? "invitation" : "link";
@@ -558,11 +588,11 @@ function screenLinkForWho(link) {
     ${flashBar()}
     <div class="card padded">
       <h2 class="panel-title">Is this ${what} for you?</h2>
-      <p class="lead">Signed in as <b>${esc(db.currentEmail())}</b>.</p>
-      <p class="hint">${link.kind === "invite" ? "An invitation creates a new account for the person it was sent to." : "This link sets up an account for the person it was sent to."} Nothing is used up until that person's account exists.</p>
+      <p class="lead">This device is signed in as <b>${esc(db.currentEmail())}</b>.</p>
+      <p class="hint">If the ${what} is for someone else, tap the second button: this device signs out of <b>${esc(db.currentEmail())}</b> and opens the ${what} for them. Your account, groups and rounds stay exactly as they are.</p>
       <div class="inline-actions stacked">
         <button class="btn" data-act="link-for-me">Yes, it's for me</button>
-        <button class="btn ghost" data-act="link-not-me">No, it's for somebody else</button>
+        <button class="btn ghost" data-act="link-not-me">No, it's for someone else</button>
       </div>
     </div>
     ${versionBlock()}
@@ -912,13 +942,15 @@ async function submitRequestHere() {
   requestForm = { fullName: val("rq-name").trim(), email: val("rq-email").trim(), groupName: val("rq-group").trim(),
     size: val("rq-size").trim(), where: val("rq-where").trim(), note: val("rq-note").trim() };
   const f = requestForm;
-  if (f.fullName.length < 2) { flashMsg("Type your full name"); return render(); }
-  if (!f.email) { flashMsg("Type your email address"); return render(); }
-  if (f.groupName.length < 2) { flashMsg("Type the group name"); return render(); }
-  if (!f.size) { flashMsg("Type about how many golfers"); return render(); }
-  if (f.where.length < 2) { flashMsg("Type where you play"); return render(); }
+  const stop = (text, field) => { render(); formMessage(text, field); };
+  if (f.fullName.length < 2) return stop("Type your full name.", "rq-name");
+  if (!f.email) return stop("Type your email address.", "rq-email");
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.email)) return stop("That email does not look right. Check it for a typo.", "rq-email");
+  if (f.groupName.length < 2) return stop("Type the group name.", "rq-group");
+  if (!f.size) return stop("Type about how many golfers.", "rq-size");
+  if (f.where.length < 2) return stop("Type where you play.", "rq-where");
   const agreed = view.querySelector('[name="rq-agree"]');
-  if (!agreed || !agreed.checked) { flashMsg("Tick the box to agree to the Code of Conduct and the Privacy policy"); return render(); }
+  if (!agreed || !agreed.checked) return stop("Tick the box to agree to the Code of Conduct and the Privacy policy.", "rq-agree");
   joining = true;
   busy("Sending your request");
   render();
@@ -927,13 +959,13 @@ async function submitRequestHere() {
     requestSentTo = f.email;
   } catch (err) {
     const code = String((err && (err.code || err.message)) || "");
-    if (code.includes("app/exists")) flashMsg("There is already a request for that email. If it is approved, you will get an email.");
-    else if (code.includes("app/email")) flashMsg("That email does not look right. Check it for a typo.");
-    else if (code.includes("app/name")) flashMsg("Type your full name (up to 80 characters).");
-    else if (code.includes("app/group")) flashMsg("Type the group name (up to 60 characters).");
-    else if (code.includes("app/size")) flashMsg("Type about how many golfers (up to 20 characters).");
-    else if (code.includes("app/where")) flashMsg("Type where you play (up to 100 characters).");
-    else flashMsg(`It was not sent: ${code || "no connection"}. Check the connection and try again.`);
+    if (code.includes("app/exists")) formMessage("There is already a request for that email. If it is approved, you will get an email.", "rq-email");
+    else if (code.includes("app/email")) formMessage("That email does not look right. Check it for a typo.", "rq-email");
+    else if (code.includes("app/name")) formMessage("Type your full name (up to 80 characters).", "rq-name");
+    else if (code.includes("app/group")) formMessage("Type the group name (up to 60 characters).", "rq-group");
+    else if (code.includes("app/size")) formMessage("Type about how many golfers (up to 20 characters).", "rq-size");
+    else if (code.includes("app/where")) formMessage("Type where you play (up to 100 characters).", "rq-where");
+    else formMessage(`It was not sent: ${code || "no connection"}. Check the connection and try again.`);
   } finally {
     joining = false;
     idle();
@@ -1112,8 +1144,8 @@ async function afterPasswordCreated() {
 async function createPasswordHere() {
   const password = (view.querySelector('[name="password"]') || {}).value || "";
   const again = (view.querySelector('[name="password-again"]') || {}).value || "";
-  if (password.length < 6) { flashMsg("The password needs at least six characters"); return render(); }
-  if (password !== again) { flashMsg("The two passwords are not the same. Type them again."); return render(); }
+  if (password.length < 6) { render(); formMessage("The password needs at least six characters.", "password"); return; }
+  if (password !== again) { render(); formMessage(again ? "The two passwords are not the same. Type them again." : "Type the password again in the second box.", "password-again"); return; }
   joining = true;
   busy("Saving your password");
   render();
@@ -1136,10 +1168,11 @@ async function submitApplicationHere() {
   const fullName = ((view.querySelector('[name="apply-name"]') || {}).value || "").trim();
   const email = ((view.querySelector('[name="apply-email"]') || {}).value || "").trim();
   joinForm.name = fullName; authForm = { email, password: "" };
-  if (fullName.length < 2) { flashMsg("Type your full name"); return; }
-  if (!email) { flashMsg("Type your email address"); return; }
+  if (fullName.length < 2) { formMessage("Type your full name.", "apply-name"); return; }
+  if (!email) { formMessage("Type your email address.", "apply-email"); return; }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { formMessage("That email does not look right. Check it for a typo.", "apply-email"); return; }
   const agreed = view.querySelector('[name="ap-agree"]');
-  if (!agreed || !agreed.checked) { flashMsg("Tick the box to agree to the Code of Conduct and the Privacy policy"); return; }
+  if (!agreed || !agreed.checked) { formMessage("Tick the box to agree to the Code of Conduct and the Privacy policy.", "ap-agree"); return; }
   joining = true;
   busy("Sending your application");
   render();
@@ -1167,10 +1200,10 @@ async function submitApplicationHere() {
   } catch (err) {
     const code = String((err && (err.code || err.message)) || "");
     if (code.includes("app/in-use")) applyInUse = email;
-    else if (code.includes("app/exists")) flashMsg("There is already an application for that email. If it is approved, you will get an email.");
-    else if (code.includes("app/email")) flashMsg("That email does not look right. Check it for a typo.");
-    else if (code.includes("app/name")) flashMsg("Type your full name (up to 80 characters).");
-    else flashMsg(`It was not sent: ${code || "no connection"}. Check the connection and try again.`);
+    else if (code.includes("app/exists")) formMessage("There is already an application for that email. If it is approved, you will get an email.", "apply-email");
+    else if (code.includes("app/email")) formMessage("That email does not look right. Check it for a typo.", "apply-email");
+    else if (code.includes("app/name")) formMessage("Type your full name (up to 80 characters).", "apply-name");
+    else formMessage(`It was not sent: ${code || "no connection"}. Check the connection and try again.`);
   } finally {
     joining = false;
     idle();
@@ -1668,9 +1701,10 @@ function readNewAccountFields() {
   const password = (view.querySelector('[name="password"]') || {}).value || "";
   const again = (view.querySelector('[name="password-again"]') || {}).value || "";
   authForm = { email, password: "" };
-  if (!email) { flashMsg("Type your email address"); return null; }
-  if (password.length < 6) { flashMsg("The password needs at least six characters"); return null; }
-  if (password !== again) { flashMsg("The two passwords are different. Type them again."); return null; }
+  if (!email) { formMessage("Type your email address.", "email"); return null; }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { formMessage("That email does not look right. Check it for a typo.", "email"); return null; }
+  if (password.length < 6) { formMessage("The password needs at least six characters.", "password"); return null; }
+  if (password !== again) { formMessage(again ? "The two passwords are different. Type them again." : "Type the password again in the second box.", "password-again"); return null; }
   return { email, password };
 }
 
@@ -1692,8 +1726,8 @@ async function createAccountHere() {
     flashMsg("Account created. Use this email and password on your other devices.");
     /* Batch 2: the welcome screen's Join finishes joining too, no second screen. */
     const inv = db.readJoinLink();
-    if (inv && inv.golferId && invitedGolfer) { idle(); await acceptNamedHere(); return; }
-    if (inv && !inv.golferId && inv.role !== "admin" && joinForm.name.trim()) { idle(); await acceptInvite(); return; }
+    if (inv && inv.golferId && invitedGolfer) { idle(); await acceptNamedHere(); await undoAccountIfNotJoined(inv); return; }
+    if (inv && !inv.golferId && inv.role !== "admin" && joinForm.name.trim()) { idle(); await acceptInvite(); await undoAccountIfNotJoined(inv); return; }
   } catch (err) {
     const code = String((err && (err.code || err.message)) || "");
     if (code.includes("email-already-in-use")) {
@@ -1722,6 +1756,45 @@ async function createAccountHere() {
     idle();
     render();
   }
+}
+
+/* E2: sign this device out so a link can be used by the new person it was
+   sent to (Sign out and continue; since item 1 also "someone else"). */
+async function signOutForLink() {
+  /* An account with no password could never be signed back into. */
+  if (!db.hasPassword()) {
+    return openNotice({
+      title: "Set a password first",
+      detail: "This account has no password yet, so signing out now would lock it out.",
+      advice: "Tap Cancel, set a password under Admin → Settings → Account, then open the link again.",
+    });
+  }
+  busy("Signing out");
+  try { await db.signOutHere(); } finally { idleAll(); }
+  /* Item 8: nothing of the old account stays on screen. */
+  sheetEl.classList.remove("pop-centre");
+  sheetEl.hidden = true;
+  /* The link stays on this device for the new person. */
+  linkAnswer = null; groupState = "unknown"; accountMode = null; authForm = { email: "", password: "" };
+  invitedGolfer = null; invitedGroupName = "";
+  flashMsg("Signed out. Now set up the new person's account.");
+  return render();
+}
+
+/* Item 9 (Willy, 5 Nov 2026): Join is all or nothing. If the account was
+   just made here but joining did not finish, the account is removed again, so
+   nothing is left behind; the invitation stays waiting, and Join can simply
+   be tapped again. The message about why joining failed stays on screen. */
+async function undoAccountIfNotJoined(inv) {
+  if (db.currentAssociation() === inv.associationId && db.myRole()) return;
+  note("join did not finish: removing the account just made");
+  let removed = false;
+  try { removed = (await db.removeNewAccount()).removed; } catch {}
+  if (removed) {
+    linkAnswer = null; groupState = "unknown"; accountMode = "create";
+    flashMsg("Nothing was kept: the new account was removed again. Tap Join to try once more.");
+  }
+  render();
 }
 
 async function upgradeAccount() {
@@ -1821,6 +1894,7 @@ function enterInSteps({ course, tee, golfer, ags, diff, ch, ready2, pickableGame
         <p class="step-ask">Where did they play?</p>
         <select class="field big" name="courseId">
           <option value="">Choose the course…</option>
+          ${FIND_COURSE_OPTION}
           ${courseOptions(form.courseId)}
         </select>
         ${favouriteToggle(course)}
@@ -1998,6 +2072,7 @@ function screenEnter() {
     <div>
       <div class="eyebrow">Course</div>
       <select class="field" name="courseId"><option value="">Select…</option>
+        ${FIND_COURSE_OPTION}
         ${courseOptions(form.courseId)}
       </select>
       ${favouriteToggle(course)}
@@ -2101,8 +2176,10 @@ function scoringStats(list) {
     if (by[p]) by[p].push(n);
   });
   const max = Math.max(1, ...Object.values(k));
-  const bar = (label, n) => `<div style="display:grid;grid-template-columns:9em 1fr 3em;gap:8px;align-items:center;margin:4px 0">
-    <span>${label}</span><span style="background:var(--tint);border-radius:6px;height:14px"><span style="display:block;height:14px;border-radius:6px;background:var(--pine);width:${Math.round((n / max) * 100)}%"></span></span><b style="text-align:right">${n}</b></div>`;
+  /* Item 5 (Willy, 5 Nov 2026): a colour of its own for each kind of score
+     (styles.css .sc-eagle … .sc-double, with night colours). */
+  const bar = (label, n, kind) => `<div style="display:grid;grid-template-columns:9em 1fr 3em;gap:8px;align-items:center;margin:4px 0">
+    <span><i class="sc-dot sc-${kind}"></i>${label}</span><span style="background:var(--tint);border-radius:6px;height:14px"><span class="sc-bar sc-${kind}" style="display:block;height:14px;border-radius:6px;width:${Math.round((n / max) * 100)}%"></span></span><b style="text-align:right">${n}</b></div>`;
   const avg = (p) => {
     const a = by[p];
     if (!a.length) return `<div class="tile"><b style="display:block;font-size:1.3em">–</b><span>Par ${p}s</span></div>`;
@@ -2111,7 +2188,7 @@ function scoringStats(list) {
   };
   return `<section class="panel"><div class="card padded">
     <div class="eyebrow">Scoring · ${marker.length} Marker round${marker.length === 1 ? "" : "s"}, ${holes} holes</div>
-    ${bar("Eagles or better", k.eagle)}${bar("Birdies", k.birdie)}${bar("Pars", k.par)}${bar("Bogeys", k.bogey)}${bar("Double bogeys or worse", k.double)}
+    ${bar("Eagles or better", k.eagle, "eagle")}${bar("Birdies", k.birdie, "birdie")}${bar("Pars", k.par, "par")}${bar("Bogeys", k.bogey, "bogey")}${bar("Double bogeys or worse", k.double, "double")}
     <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:10px;text-align:center">${avg(3)}${avg(4)}${avg(5)}</div>
   </div></section>`;
 }
@@ -4463,6 +4540,37 @@ function openNotice({ title, detail, advice, action }) {
   </div>`;
 }
 
+/* Item 11 (Willy, 5 Nov 2026): on a long form the bar at the top is out of
+   sight, so a message about the form is a pop-up in the middle of the screen
+   that stays until OK. After OK, the field to fix (if any) is outlined and
+   brought into view. Only the message's place changes; the checks are the same. */
+let formFixField = "";
+function formMessage(text, field) {
+  formFixField = field || "";
+  sheetEl.hidden = false;
+  sheetEl.dataset.report = "";
+  sheetEl.classList.add("pop-centre");
+  sheetEl.innerHTML = `<div class="sheet-body centred" role="alertdialog" aria-modal="true">
+    <p class="lead" style="color:inherit;font-size:17px">${esc(text)}</p>
+    <div class="inline-actions stacked">
+      <button class="btn" data-form-ok="1">OK</button>
+    </div>
+  </div>`;
+}
+function formMessageClosed() {
+  sheetEl.classList.remove("pop-centre");
+  sheetEl.hidden = true;
+  const name = formFixField; formFixField = "";
+  if (!name) return;
+  const el = view.querySelector(`[name="${name}"]`);
+  if (!el) return;
+  el.classList.add("needs-fix");
+  el.addEventListener("input", () => el.classList.remove("needs-fix"), { once: true });
+  el.addEventListener("change", () => el.classList.remove("needs-fix"), { once: true });
+  try { el.scrollIntoView({ block: "center", behavior: "smooth" }); } catch { el.scrollIntoView(); }
+  try { el.focus({ preventScroll: true }); } catch {}
+}
+
 function openProblem({ title, detail, advice, fatal = false }) {
   note(`problem: ${title}`);
   const report = [
@@ -4612,6 +4720,10 @@ function dateFieldIsOpen() {
 function checkPromotion() {
   if (toldAboutPromotion) return;
   if (!ready) return;
+  /* Item 8 (Willy, 5 Nov 2026): never while nobody is signed in. Signing out
+     drops the account a moment before the role, and in that moment this used
+     to open "Set a password" over the new person's welcome screen. */
+  if (!db.hasUser()) return;
   if (typeof db.myRole !== "function" || !db.myRole()) return;
 
   /* Remember the role even when nothing needs saying, so a later promotion is
@@ -4917,6 +5029,14 @@ view.addEventListener("change", (e) => {
     render();
   }
   if (n === "gameId") { form.gameId = v; }
+  if (n === "courseId" && v === FIND_COURSE_VALUE) {
+    /* Item 6: the list's first line opens the search; the chosen course stays. */
+    courseFind = { q: "", busy: false, msg: "", lib: [], ext: [], check: null };
+    render();
+    const box = view.querySelector('[name="cf-q"]');
+    if (box) { try { box.scrollIntoView({ block: "center" }); box.focus(); } catch {} }
+    return;
+  }
   if (n === "courseId") {
     const c = courseById(v);
     form.courseId = v; form.teeId = c && c.tees.length === 1 ? c.tees[0].id : "";
@@ -5549,25 +5669,13 @@ view.addEventListener("click", async (e) => {
     case "link-not-me": {
       const link = pendingLink();
       if (link) linkAnswer = { key: link.key, forMe: false };
+      /* Item 1 (Willy, 5 Nov 2026): "someone else" signs this device out and
+         continues at once. Only an account with no password yet stops on the
+         next screen, which explains why it must not be signed out. */
+      if (link && db.hasPassword()) return signOutForLink();
       return render();
     }
-    case "link-sign-out": {
-      /* An account with no password could never be signed back into. */
-      if (!db.hasPassword()) {
-        return openNotice({
-          title: "Set a password first",
-          detail: "This account has no password yet, so signing out now would lock it out.",
-          advice: "Tap Cancel, set a password under Admin → Settings → Account, then open the link again.",
-        });
-      }
-      busy("Signing out");
-      try { await db.signOutHere(); } finally { idleAll(); }
-      /* The link stays on this device for the new person. */
-      linkAnswer = null; groupState = "unknown"; accountMode = null; authForm = { email: "", password: "" };
-      invitedGolfer = null; invitedGroupName = "";
-      flashMsg("Signed out. Now set up the new person's account.");
-      return render();
-    }
+    case "link-sign-out": return signOutForLink();
     case "link-cancel": {
       const link = pendingLink();
       if (link && link.kind === "invite") { db.clearJoinLink(); invitedGolfer = null; }
@@ -6255,6 +6363,11 @@ sheetEl.addEventListener("click", async (e) => {
    * them join again" did nothing at all. An action button is never a close
    * button, so it must be allowed through. */
   const ACTIONS = "[data-pw],[data-reset-invite],[data-recalc],[data-invite],[data-pick],[data-paste],[data-problem],[data-send],[data-quick],[data-share-toggle]";
+  /* Item 11: a form message closes only with its OK button. */
+  if (sheetEl.classList.contains("pop-centre")) {
+    if (e.target.closest("[data-form-ok]")) formMessageClosed();
+    return;
+  }
   if (!e.target.closest(ACTIONS)
       && (e.target === sheetEl || e.target.closest("[data-close]"))) {
     sheetEl.hidden = true;
@@ -6708,8 +6821,8 @@ async function begin() {
 async function signIn() {
   const email = ((view.querySelector('[name="email"]') || {}).value || authForm.email).trim();
   const password = (view.querySelector('[name="password"]') || {}).value || "";
-  if (!email) { flashMsg("Type your email address"); return; }
-  if (password.length < 6) { flashMsg("The password needs at least six characters"); return; }
+  if (!email) { formMessage("Type your email address.", "email"); return; }
+  if (password.length < 6) { formMessage("The password needs at least six characters.", "password"); return; }
   authForm = { email, password: "" };
   joining = true;
   busy("Signing in");
@@ -6885,21 +6998,28 @@ async function acceptNamedHere() {
        as it was, which reads as the button doing nothing at all. */
     /* beta.9: each refusal names its step and says what to do. */
     const code = String((err && (err.code || err.message)) || "");
+    const refused = /permission-denied|insufficient permissions/i.test(code);
     note(`join refused: ${code}`);
     openProblem({
       title: code.includes("join/membership-refused") ? "This invitation link no longer works"
         : code.includes("join/link-refused") ? "You are in the group, but your golfer could not be linked"
+        : refused ? "This invitation cannot be used with this account"
         : "Could not join the group",
       detail: code.includes("join/membership-refused")
         ? "The group's code has changed since it was sent, so the link is out of date."
         : code.includes("join/link-refused")
           ? "This golfer is still linked to another sign-in."
-          : code || "No detail was given.",
+          : refused
+            /* Item 2 (Willy, 5 Nov 2026): never the bare "permission-denied". */
+            ? "The group did not accept this account for this invitation. Usually the account already plays as another golfer, or the invitation has been replaced by a newer one."
+            : code || "No detail was given.",
       advice: code.includes("join/membership-refused")
         ? "Ask whoever runs the group to tap Send again for you, then use the new link. Nothing was changed."
         : code.includes("join/link-refused")
           ? "Ask whoever runs the group to tap Send again for you (that releases the old link), then tap the new link."
-          : "Nothing was changed. Try the link again, or send this report.",
+          : refused
+            ? "Nothing was changed. If the invitation is for someone else, sign out first and open the link again. Otherwise ask whoever runs the group to tap Send again for you."
+            : "Nothing was changed. Try the link again, or send this report.",
     });
   }
   return render();
@@ -6919,7 +7039,11 @@ async function acceptInvite() {
     : await db.joinAssociation({ associationId: invite.associationId, code: invite.code, displayName: name });
   } catch (err) {
     joining = false; idleAll();
-    openProblem({ title: "This invitation could not be accepted", detail: String(err.code || err.message || err), advice: "Nothing was changed. Ask the admin for a fresh link if this one was used or replaced." });
+    const raw = String(err.code || err.message || err);
+    /* Item 2: a plain sentence instead of "permission-denied". */
+    openProblem({ title: "This invitation could not be accepted",
+      detail: /permission-denied|insufficient permissions/i.test(raw) ? "The group did not accept this account for this invitation. Usually the invitation has been used or replaced by a newer one." : raw,
+      advice: "Nothing was changed. Ask the admin for a fresh link if this one was used or replaced." });
     return render();
   }
   if (result.ok) {
@@ -7418,7 +7542,7 @@ async function loadInvitedDetails() {
   invitedGroupName = "";
   /* Only an account can read an invitation (Phase B); signed out or an old
      guest session, the account screen comes first. */
-  if (!db.hasUser() || db.isAnonymousSession()) return;
+  if (!db.hasUser()) return;
   const link = db.readJoinLink();
   if (link && link.token) {
     try {
@@ -7454,7 +7578,14 @@ addEventListener("pageshow", (e) => { if (e.persisted) location.reload(); });
   if (returnTo && returnTo.left) note(returnTo.left);
   render();
   await platform.initLinks();   /* iPhone app: the link that opened it, if any */
-  platform.onLink(async () => { await loadInvitedDetails(); render(); });
+  platform.onLink(async () => {
+    /* Item 7 (Willy, 5 Nov 2026): a link that arrives while a box is open
+       (the invitation message, a notice) must not be hidden behind it. The
+       box is closed first, so the link's own screen is what shows. */
+    sheetEl.hidden = true;
+    await loadInvitedDetails();
+    render();
+  });
   await db.init();
   /* beta.9: a device still signed in to an account whose deletion has started
      is signed out at once, before anything of it is opened. */
