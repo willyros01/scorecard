@@ -84,10 +84,10 @@ async function expectNoUser(page, ms = 6000) {
 }
 /* 2.31.1 (item 11): a form message is a pop-up that stays until OK. */
 async function tapFormOk(page) {
-  const ok = page.locator('#sheet.pop-centre [data-form-ok]');
+  const ok = page.locator('#popmsg [data-pop-ok]');
   await ok.waitFor({ state: "visible", timeout: 10000 });
   await ok.click();
-  await page.waitForFunction(() => document.getElementById("sheet").hidden, null, { timeout: 5000 });
+  await page.waitForFunction(() => document.getElementById("popmsg").hidden, null, { timeout: 5000 });
 }
 const TEST_EMAIL = () => `webtest-${Date.now()}-${Math.floor(Math.random() * 1e6)}@accounts.cuberoot-systems.com`;
 /* Remove a test account again (an account may delete itself): anonymous
@@ -319,6 +319,7 @@ for (const [name, type] of browsers) {
       await waitForText(page, /Type the group code you were given/);
       await page.locator('[data-act="code-continue"]').first().click();
       await waitForText(page, /Type the group code/);
+      await tapFormOk(page);
       await page.fill('[name="join-code"]', "abc234");
       await page.locator('[data-act="code-continue"]').first().click();
       await waitForText(page, /Join with a code/);
