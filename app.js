@@ -3373,7 +3373,9 @@ function ownerSummary(data) {
     const p = people.get(m.uid) || { uid: m.uid, name: "", lastSeen: 0, groups: [] };
     p.lastSeen = Math.max(p.lastSeen, m.lastSeen || 0);
     /* The golfer's own name first; an email only if there is nothing else. */
-    const golferName = m.golferId && names[m.golferId];
+    /* My own row: my golfer's name even before the directory rule is live. */
+    const mine = m.uid === data.me ? golferById(db.myGolferIdNow()) : null;
+    const golferName = (m.golferId && names[m.golferId]) || (mine && mine.name);
     if (golferName) p.name = golferName;
     else if (!p.name || (p.name.includes("@") && m.displayName && !m.displayName.includes("@"))) p.name = m.displayName || p.name;
     p.groups.push(m.assocId);
@@ -3448,7 +3450,6 @@ function ownerCockpitSection() {
     ${s.recent.length ? `<div class="card list" style="margin-top:0.7rem">${s.recent.map((p) => `<div class="list-row">
       <span class="grow"><span class="name">${esc(p.name || "Unnamed")}</span><br><span class="sub">${esc(p.groupLabel)}</span></span>
       <span class="ck-when">${daysAgo(p.lastSeen)}</span></div>`).join("")}</div>` : ""}
-    <p class="hint">"Not seen yet" counts from this version on; Firebase's own sign-in history is in cnt.txt.</p>
   </section>
   <section class="panel">
     <div class="panel-head"><h2 class="panel-title">Waiting for you</h2></div>
