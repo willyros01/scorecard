@@ -1699,8 +1699,10 @@ async function ownerInG1() {
   await page.goto(APP, { waitUntil: "load" });
   await waitForText(page, /Sign in/);
   await signIn(page, W.email, W.password);
-  await page.waitForFunction(async () => !!(await import("/store.js")).currentAssociation(), null, { timeout: 20000 });
+  /* Signed in for real (the group remembered on the device can come first). */
+  await page.waitForFunction(async () => { const db = await import("/store.js"); return !!db.status().uid && !!db.currentAssociation(); }, null, { timeout: 20000 });
   await page.evaluate(async () => (await import("/store.js")).setAssociation("G1"));
+  await page.waitForTimeout(800);
   return page;
 }
 
