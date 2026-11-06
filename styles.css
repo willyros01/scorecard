@@ -869,8 +869,6 @@ body { font-size: 1rem; }
 
 /* Item 11 (Willy, 5 Nov 2026): a form message is a pop-up in the middle of
    the screen that stays until OK is tapped; the field to fix is then outlined. */
-.sheet.pop-centre { align-items: center; padding: 16px; }
-.sheet.pop-centre .sheet-body { border-radius: 18px; max-width: 420px; padding-bottom: 20px; }
 .needs-fix { outline: 3px solid var(--warn, #E0A33A); outline-offset: 2px; }
 
 /* Item 5 (Willy, 5 Nov 2026): the scoring chart, a colour for each kind of
@@ -887,3 +885,12 @@ body { font-size: 1rem; }
 [data-theme="dark"] .sc-bar.sc-bogey, [data-theme="dark"] .sc-dot.sc-bogey { background: #7FB2FF; }
 [data-theme="dark"] .sc-bar.sc-double, [data-theme="dark"] .sc-dot.sc-double { background: #B9BCC8; }
 .sc-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+
+/* showMessage (Willy, 6 Nov 2026): every error is a pop-up in the middle,
+   above everything, until OK. */
+.popmsg { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(0, 0, 0, .45); }
+.popmsg[hidden] { display: none; }
+.popmsg-body { background: var(--paper); color: var(--ink); border-radius: 18px; padding: 22px 20px 18px; max-width: 420px; width: 100%; box-shadow: 0 12px 40px rgba(0, 0, 0, .3); }
+.popmsg-text { font-size: 18px; line-height: 1.45; margin: 0 0 18px; }
+.popmsg-body .btn { width: 100%; }
+.joined-tick { color: var(--pine, #2e7d32); font-weight: 700; margin-left: 4px; }

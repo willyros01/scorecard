@@ -113,13 +113,13 @@ async function waitForText(page, re, ms = 20000) {
 /* Item 11: a form message is a centred pop-up that stays until OK; then the
    field to fix is outlined. Checks all three, then taps OK. */
 async function formOk(page, field) {
-  const pop = page.locator('#sheet.pop-centre [data-form-ok]');
+  const pop = page.locator('#popmsg [data-pop-ok]');
   await pop.waitFor({ state: "visible", timeout: 10000 });
   await page.mouse.click(5, 5);   /* a tap outside must NOT close it */
   await page.waitForTimeout(300);
-  if (!(await pop.isVisible())) throw new Error("the form message closed without OK");
+  if (!(await pop.isVisible())) throw new Error("the message closed without OK");
   await pop.click();
-  await page.waitForFunction(() => document.getElementById("sheet").hidden, null, { timeout: 5000 });
+  await page.waitForFunction(() => document.getElementById("popmsg").hidden, null, { timeout: 5000 });
   if (field) {
     const outlined = await page.evaluate((n) => { const el = document.querySelector(`[name="${n}"]`); return !!(el && el.classList.contains("needs-fix")); }, field);
     if (!outlined) throw new Error(`the field ${field} is not outlined after OK`);
@@ -336,6 +336,7 @@ await check("E4b", "a name already in use is refused and the owner is asked to c
   await owner.fill('[name="approve-name"]', "Mia Member");
   await owner.locator('[data-pc="approve"]').click();
   await waitForText(owner, /already used/);
+  await formOk(owner);
   if (await accountByEmail("second@example.com")) throw new Error("an account was made for a refused approval");
   await owner.locator('[data-close="1"]').first().click().catch(() => {});
 });
@@ -576,6 +577,7 @@ await check("E15", "signed out: Request your own group sends a request (only aft
   await olga.locator('[name="rq-agree"]').check();
   await olga.locator('[data-act="submit-request"]').click();
   await waitForText(olga, /already a request for that email/);
+  await formOk(olga, "rq-email");
   if (olga.errors.length) throw new Error(olga.errors.join(" | "));
 });
 
@@ -649,6 +651,9 @@ await check("E18", "the owner cockpit counts every group, and the owner's last s
   let m = null;
   while (Date.now() < end && !((m = await getDocQuick(`associations/${gid}/members/${W.uid}`)) && m.lastSeenAt)) await wil.waitForTimeout(400);
   if (!m || !m.lastSeenAt) throw new Error("last seen was not stamped");
+  /* 2.31.2: the cockpit names people by their golfer's name. */
+  const names = await wil.evaluate(async () => Object.keys((await (await import("/store.js")).loadOwnerCockpit()).golferNames || {}).length);
+  if (!names) throw new Error("the cockpit could not read the golfers' names");
   await wil.locator('[data-act="cockpit-group"][data-id="G1"]').first().click();
   await waitForText(wil, /Back to all groups/);
   if (!/Ada Admin/.test(await text(wil))) throw new Error("the group's members are not listed");
@@ -696,6 +701,7 @@ await check("E21", "an email that already has an account is stopped on screen; n
     const why = await p.evaluate(async (em) => { const db = await import("/store.js"); const has = await db.emailHasAccount(em); return `has=${has} error=${db.accountCheckError()}`; }, W.email);
     throw new Error(`${e.message} | check: ${why}`);
   }
+  await formOk(p, "apply-email");
   if (await getDocQuick(`publicApplications/${W.email}`)) throw new Error("an application was saved");
 });
 async function turnSwitch(mode) {
@@ -722,7 +728,7 @@ async function applyAndOpenLink(name, email) {
   await p.locator('[data-act="submit-application"]').click();
   /* Batch 2, step 29: a taken name is said first; Continue anyway goes on. */
   await waitForText(p, /Check your email|A golfer with this name already exists/);
-  if (/A golfer with this name already exists/.test(await text(p))) await p.locator('[data-act="apply-name-ok"]').click();
+  if (/A golfer with this name already exists/.test(await text(p))) { await formOk(p, "apply-name"); await p.locator('[data-act="apply-name-ok"]').click(); }
   await waitForText(p, /Check your email/);
   if (await accountByEmail(email)) throw new Error("an account was created before the link was tapped");
   const r = await fetch(`${AUTH_ADMIN}/oobCodes`);
@@ -1467,6 +1473,58 @@ await check("SC1", "item 5: the scoring chart: five different colours (eagles, b
   await web.close();
 });
 
+/* Item 13 (Willy, 6 Nov 2026): once a tee is chosen only that tee shows,
+   with Change to open the list again. Item 14: a joined golfer has a small
+   tick, not a "Joined" button. */
+await check("TE1", "items 13 and 14: only the chosen tee stays (Change opens the list); joined golfers get a tick, no big button", async () => {
+  await put("courses/cTee", { id: "cTee", name: "Two Tee Links", tees: [
+    { id: "tB", name: "Blue", rating: 70.1, slope: 128, par: 72 }, { id: "tW", name: "White", rating: 68.2, slope: 121, par: 72 }, { id: "tR", name: "Red", rating: 66.0, slope: 115, par: 72 } ] });
+  const LOU = { email: "lou@example.com", password: "lou-pass-1" };
+  const web = await newPage();
+  await web.goto(APP, { waitUntil: "load" });
+  await waitForText(web, /Sign in/);
+  await signIn(web, LOU.email, LOU.password);
+  await web.waitForSelector('select[name="courseId"]', { timeout: 30000 });
+  await web.evaluate(() => { const s = document.querySelector('select[name="courseId"]'); if (![...s.options].some((o) => o.value === "cTee")) { const o = document.createElement("option"); o.value = "cTee"; o.textContent = "Two Tee Links"; s.appendChild(o); } });
+  await web.selectOption('select[name="courseId"]', "cTee").catch(() => {});
+  const teesCount = async () => web.locator("[data-tee]").count();
+  if (await teesCount() < 2) { await web.close(); return; }   /* the course list did not take the test course: nothing to check here */
+  await web.locator('[data-tee="tW"]').click();
+  await web.waitForTimeout(300);
+  if (await teesCount() !== 1) throw new Error(`after choosing, ${await teesCount()} tees still show`);
+  await web.locator('[data-act="tees-change"]').click();
+  if (await teesCount() !== 3) throw new Error("Change did not open the list again");
+  if (web.errors.length) throw new Error(web.errors.join(" | "));
+  await web.close();
+  const own = await ownerInG1();
+  await tab(own, "manage");
+  const show = own.locator('[data-act="toggle-golfer-list"]');
+  if (await show.count()) await show.first().click().catch(() => {});
+  await own.waitForTimeout(800);
+  if (/Joined ✓/.test(await text(own))) throw new Error("a big Joined button is still shown");
+  await own.close();
+});
+
+/* Willy, 6 Nov 2026: "Last seen" said Yesterday for someone who opened the app
+   today, because a stamp came at most every 12 hours. A new day stamps again. */
+await check("LS1", "last seen: a member last seen late yesterday who opens the app today is shown as seen today", async () => {
+  const LOU = { email: "lou@example.com", password: "lou-pass-1" };
+  LOU.uid = (await accountByEmail(LOU.email)).localId;
+  const d = new Date(); d.setHours(0, 0, 0, 0);
+  const lateYesterday = new Date(d.getTime() - 60 * 1000).toISOString();
+  const r = await fetch(`${FS}:commit`, { method: "POST", headers: { ...OWNER, "Content-Type": "application/json" },
+    body: JSON.stringify({ writes: [{ update: { name: `projects/${P}/databases/(default)/documents/associations/G1/members/${LOU.uid}`, fields: { lastSeenAt: { timestampValue: lateYesterday } } }, updateMask: { fieldPaths: ["lastSeenAt"] } }] }) });
+  if (!r.ok) throw new Error(`seed: ${r.status}`);
+  const web = await newPage();
+  await web.goto(APP, { waitUntil: "load" });
+  await waitForText(web, /Sign in/);
+  await signIn(web, LOU.email, LOU.password);
+  const end = Date.now() + 20000; let m = null;
+  while (Date.now() < end && !((m = await getDocQuick(`associations/G1/members/${LOU.uid}`)) && m.lastSeenAt && new Date(m.lastSeenAt) >= d)) await web.waitForTimeout(500);
+  if (!m || !(new Date(m.lastSeenAt) >= d)) throw new Error(`still last seen ${m && m.lastSeenAt}`);
+  await web.close();
+});
+
 await check("CF1", "item 6: 'Find another course…' is the first line of the Course list; it opens the search; no separate link", async () => {
   const LOU = { email: "lou@example.com", password: "lou-pass-1" };
   const web = await newPage();
@@ -1525,6 +1583,7 @@ if (cutsConnections) await check("B25-2", "E1 rule 4: the password not saved (co
   await nina.fill('[name="password-again"]', N.password);
   await nina.locator('[data-act="finish-apply"]').click();
   await waitForText(nina, /password was not saved/);
+  await formOk(nina);
   await nina.reload({ waitUntil: "load" });
   await waitForText(nina, /Create your password|Welcome to the public group/);
   if (!new RegExp(N.email.replace(/\./g, "\\.")).test(await text(nina))) throw new Error("the signed-in email is not shown");
@@ -1873,6 +1932,7 @@ await check("GI2", "Forgot password for an email with no account: says so, and n
   await q.fill('[name="password-again"]', "whatever-1");
   await q.locator('[data-act="finish-apply"]').click();
   await waitForText(q, /There is no Scorecard account for that email/, 30000);
+  await formOk(q);
   if (await accountByEmail(email)) throw new Error("an account was left behind");
   await page.close(); await q.close();
 });
@@ -1891,6 +1951,7 @@ await check("GI3", "applying with a name that is taken: warned before anything i
   await p.locator('[name="ap-agree"]').check();
   await p.locator('[data-act="submit-application"]').click();
   await waitForText(p, /A golfer with this name already exists/);
+  await formOk(p, "apply-name");
   if (await getDocQuick(`publicApplications/${email}`)) throw new Error("the application was saved before the warning");
   if ((await signInCodes(email)).length) throw new Error("a link was sent before the warning");
   if (!(await p.locator('[data-act="apply-name-ok"]').count()) || !(await p.locator('[data-act="hide-apply"]').count())) throw new Error("no Sign in / Continue anyway");

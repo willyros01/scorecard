@@ -82,6 +82,13 @@ async function expectNoUser(page, ms = 6000) {
   const u = await authUser(page);
   if (u && u.uid) throw new Error(`a sign-in happened by itself (${u.isAnonymous ? "anonymous" : u.email})`);
 }
+/* 2.31.1 (item 11): a form message is a pop-up that stays until OK. */
+async function tapFormOk(page) {
+  const ok = page.locator('#popmsg [data-pop-ok]');
+  await ok.waitFor({ state: "visible", timeout: 10000 });
+  await ok.click();
+  await page.waitForFunction(() => document.getElementById("popmsg").hidden, null, { timeout: 5000 });
+}
 const TEST_EMAIL = () => `webtest-${Date.now()}-${Math.floor(Math.random() * 1e6)}@accounts.cuberoot-systems.com`;
 /* Remove a test account again (an account may delete itself): anonymous
    sessions, and the webtest-… email accounts this file creates. Never any
@@ -312,6 +319,7 @@ for (const [name, type] of browsers) {
       await waitForText(page, /Type the group code you were given/);
       await page.locator('[data-act="code-continue"]').first().click();
       await waitForText(page, /Type the group code/);
+      await tapFormOk(page);
       await page.fill('[name="join-code"]', "abc234");
       await page.locator('[data-act="code-continue"]').first().click();
       await waitForText(page, /Join with a code/);
@@ -335,6 +343,7 @@ for (const [name, type] of browsers) {
       if (!/see your full name and your handicap index, and nothing else/.test(await bodyText(page))) throw new Error("no privacy note");
       await page.locator('[data-act="submit-application"]').click();
       await waitForText(page, /Type your full name/);
+      await tapFormOk(page);
       await expectNoUser(page, 1000);
       await page.locator('[data-act="show-choose"]').first().click();
       await waitForText(page, /Request your own group/);
@@ -349,6 +358,7 @@ for (const [name, type] of browsers) {
       if (!/What happens next/.test(t) || !/you join your group as its admin/.test(t) || !/zero tolerance/.test(t)) throw new Error("no steps or conditions");
       await page.locator('[data-act="submit-request"]').click();
       await waitForText(page, /Type your full name/);
+      await tapFormOk(page);
       await expectNoUser(page, 500);
       await page.locator('[data-act="show-choose"]').first().click();
       await page.locator('[data-act="hide-apply"]').first().click();
@@ -471,6 +481,7 @@ for (const [name, type] of browsers) {
       await page.locator('[data-act="create-account"]').click();
       await waitForText(page, /two passwords are different/);
       await expectNoUser(page, 1500);
+      await tapFormOk(page);
     });
     await check(`B4-${tag}`, `${name}: Create my account makes an email account (not anonymous) and then shows the invitation`, async () => {
       const email = TEST_EMAIL();
