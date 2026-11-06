@@ -3909,19 +3909,14 @@ async function saveBackup() {
         : "Choose Save to Files, then pick iCloud Drive or any folder you like.");
       render();
     } catch (e) {
-<<<<<<< HEAD
       if (!android && e && /cancel/i.test(String(e.message || e))) return;
       const message = "Backup was NOT saved: " + ((e && e.message) || "the file could not be written") + ".";
       if (android && backupStatus) {
         backupStatus.hidden = false;
         backupStatus.textContent = message + " You can use Email or Copy, or retry Downloads.";
       } else {
-        flashMsg(message + " Try Email or Copy instead.");
+        showMessage(message + " Try Email or Copy instead.");
       }
-=======
-      if (e && /cancel/i.test(String(e.message || e))) return;   /* they closed the share sheet */
-      showMessage("The backup was NOT saved: " + ((e && e.message) || "the file could not be written") + ". Try Email or Copy instead.");
->>>>>>> fix-33
     }
     return;
   }
