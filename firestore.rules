@@ -923,6 +923,12 @@ service cloud.firestore {
       allow read: if groupCreator();
     }
 
+    /* 2.31.2 (Willy, 6 Nov 2026): the owner cockpit shows people by their
+       golfer's name. Read only, and only for the group creator. */
+    match /{path=**}/directory/{golferId} {
+      allow read: if groupCreator();
+    }
+
     /* Phase A: the recursive rounds read that let ANY signed-in account read
        every round in the database is removed. Rebuild the roster now reads
        only the groups its admin manages. */
