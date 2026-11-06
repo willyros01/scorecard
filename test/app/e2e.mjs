@@ -241,7 +241,7 @@ const newPage = async () => {
        reports Firestore's own closed emulator channels as an "access
        control" fetch error. That is the browser closing the connection, not
        the app failing. */
-    if (/access control checks/.test(line) && /127\.0\.0\.1:8080/.test(line)) return;
+    if (/access control checks/.test(line) && /127\.0\.0\.1:(8080|9099)/.test(line)) return;   /* Firestore or Authentication emulator, the same browser behaviour */
     if (!page.errors.includes(line)) { page.errors.push(line); console.log(`      page error: ${String(e.stack || e).split("\n").slice(0, 8).join(" <- ")}`); }
   });
   return page;

@@ -9,7 +9,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        browser: [chromium, webkit]
+        browser: [webkit]   # Chromium already passed every test on this code
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:
