@@ -28,4 +28,5 @@ jobs:
           ONLY: ""
         run: |
           cd test/ops
+          cp ../../firestore.rules firestore.rules.copy
           firebase emulators:exec --only firestore,auth --project demo-scorecard 'node ../app/zz-diag.mjs ../..'
