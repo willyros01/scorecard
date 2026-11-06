@@ -25,7 +25,7 @@ jobs:
       - run: bash .github/scripts/install-browsers.sh
       - env:
           TEST_BROWSER: ${{ matrix.browser }}
-          ONLY: B25-4,OW2,OW1,GI4
+          ONLY: ""
         run: |
           cd test/ops
           firebase emulators:exec --only firestore,auth --project demo-scorecard 'node ../app/zz-diag.mjs ../..'
