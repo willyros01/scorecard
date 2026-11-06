@@ -33,6 +33,11 @@ await check("LINK1", "a new invitation is accepted", () => {
   const h = harness(); assert.equal(h.api.takeLink(link), true);
   assert.equal(h.api.linkQuery(), "?join=G1.PRIV01.gL");
 });
+await check("LINK12", "item 12: the app's own link name (thescorecard://join/?…) carries the same invitation", () => {
+  const h = harness(); assert.equal(h.api.takeLink("thescorecard://join/?join=G1.PRIV01.gL&v=2&g=Saturday%20Group"), true);
+  assert.equal(h.api.linkQuery(), "?join=G1.PRIV01.gL&v=2&g=Saturday%20Group");
+  assert.equal(h.api.signInLinkUrl(), "https://www.cuberoot-systems.com/scorecard/join/?join=G1.PRIV01.gL&v=2&g=Saturday%20Group");
+});
 await check("LINK2", "duplicate native delivery while pending is ignored", () => {
   const h = harness(); h.api.takeLink(link); assert.equal(h.api.takeLink(link), false);
 });
