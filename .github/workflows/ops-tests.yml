@@ -62,6 +62,8 @@ jobs:
       - name: Test browsers (Chromium and WebKit)
         id: browsers
         continue-on-error: ${{ matrix.browser == 'webkit' }}
+        env:
+          TEST_BROWSER: ${{ matrix.browser }}
         run: bash .github/scripts/install-browsers.sh
       - name: Run SEC1-SEC5 and DEL1 against the emulators
         id: tests

@@ -55,6 +55,16 @@ plutil -replace CFBundleDisplayName -string "The Scorecard" "$PLIST"
 # Export compliance (spec: Encryption answer): the first release uses only the
 # HTTPS built into iOS — exempt. The audit (A7) enforces it.
 plutil -replace ITSAppUsesNonExemptEncryption -bool NO "$PLIST"
+# Item 12 (Willy, 5 Nov 2026): the app's own link name, so the join page can
+# offer a real "Open in The Scorecard" button in any browser (Chrome, Gmail),
+# as Android already has. thescorecard://join/?<the same query> carries the
+# same link; the app reads it exactly like the https one.
+/usr/libexec/PlistBuddy -c "Delete :CFBundleURLTypes" "$PLIST" 2>/dev/null || true
+/usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes array" \
+  -c "Add :CFBundleURLTypes:0 dict" \
+  -c "Add :CFBundleURLTypes:0:CFBundleURLName string io.github.willyros01.scorecard" \
+  -c "Add :CFBundleURLTypes:0:CFBundleURLSchemes array" \
+  -c "Add :CFBundleURLTypes:0:CFBundleURLSchemes:0 string thescorecard" "$PLIST"
 
 echo "--- App icon and launch image"
 ICONSET=ios/App/App/Assets.xcassets/AppIcon.appiconset

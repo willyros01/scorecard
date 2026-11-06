@@ -5,9 +5,12 @@
 # package installer's locks left by the cut-off try are cleared, so the retry
 # can really run (the first version of this retry failed at once on the lock).
 set -uo pipefail
+# A job that tests one browser downloads only that one (half the download,
+# half the chance of a slow-server failure). Default: both.
+BROWSERS="${TEST_BROWSER:-chromium webkit}"
 echo 'Acquire::Retries "5"; Acquire::http::Timeout "60"; Acquire::https::Timeout "60";' | sudo tee /etc/apt/apt.conf.d/80-ci-retries >/dev/null
 for try in 1 2 3; do
-  if timeout 480 npx playwright install --with-deps chromium webkit; then
+  if timeout 480 npx playwright install --with-deps $BROWSERS; then
     echo "Browsers installed (try $try)"
     exit 0
   fi

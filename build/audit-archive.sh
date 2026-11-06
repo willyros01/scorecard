@@ -93,6 +93,10 @@ domains="$(python3 -c 'import json,plistlib,sys; print(json.dumps(plistlib.load(
 [[ "$domains" == '["applinks:www.cuberoot-systems.com"]' ]] && ok "A5 associated domains: applinks:www.cuberoot-systems.com only" \
   || bad "A5 associated domains are $domains"
 
+# Item 12: the app's own link name, for the join page's Open button.
+schemes="$(python3 -c 'import json,plistlib,sys; t=plistlib.load(open(sys.argv[1],"rb")).get("CFBundleURLTypes") or []; print(",".join(s for d in t for s in d.get("CFBundleURLSchemes",[])))' "$PLIST" 2>/dev/null || echo none)"
+[[ "$schemes" == "thescorecard" ]] && ok "A5b link name: thescorecard" || bad "A5b link name is '$schemes'"
+
 # ---- A6 App Transport Security ----
 ats="$(plutil -extract NSAppTransportSecurity json -o - "$PLIST" 2>/dev/null || echo none)"
 if [[ "$ats" == "none" ]] || ! grep -qE 'NSAllowsArbitraryLoads"?:\s*true|NSExceptionDomains' <<<"$ats"; then ok "A6 no App Transport Security exceptions"

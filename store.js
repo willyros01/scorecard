@@ -2166,6 +2166,28 @@ export async function createAccount({ email, password }) {
   return { ok: true, outcome: "created" };
 }
 
+/* Item 9 (Willy, 5 Nov 2026): creating the account and joining are one unit.
+   When Join fails after the account was made moments ago on this screen, the
+   account is taken back: its own small records first, then the sign-in
+   itself, then this device is signed out. Only an account created within the
+   last ten minutes is ever removed this way. Returns { removed }. */
+export async function removeNewAccount() {
+  const user = fb && fb.auth && fb.auth.currentUser;
+  if (!user || user.isAnonymous) return { removed: false };
+  const made = Date.parse((user.metadata && user.metadata.creationTime) || "");
+  if (!Number.isFinite(made) || Date.now() - made > 10 * 60 * 1000) return { removed: false };
+  const { deleteDoc } = fb.mod.store;
+  for (const path of [["users", user.uid, "terms", "accepted"], ["users", user.uid, "prefs", "account"]]) {
+    try { await withTimeout(deleteDoc(ref(...path)), 10000, "Tidying up"); } catch {}
+  }
+  if (user.email) { try { await withTimeout(deleteDoc(ref("accountEmails", emailKey(user.email))), 10000, "Tidying up"); } catch {} }
+  try { await withTimeout(fb.mod.auth.deleteUser(user), 15000, "Removing the new account"); }
+  catch { return { removed: false }; }
+  try { localStorage.removeItem(PW_PENDING_KEY(user.uid)); } catch {}
+  await signOutHere();
+  return { removed: true };
+}
+
 export async function signOutEverywhere() {
   /* Live listeners must go first. Left running, they keep firing against
      collections this account can no longer read, which produces permission
