@@ -366,6 +366,17 @@ function courseOptions(selectedId) {
 /* Batch 5, step 24: "Find another course", for every golfer. Two parts:
    courses already in The Scorecard (searched first), then the golf course
    database through The Marker's server. Check the course, then use it. */
+/* Item 13 (Willy, 6 Nov 2026: avoid clutter): once a tee is chosen, only
+   that tee shows; Change opens the full list again. */
+let teesOpen = false;
+function teesToShow(course) {
+  const chosen = form.teeId && course.tees.find((t) => t.id === form.teeId);
+  return chosen && !teesOpen ? [chosen] : course.tees;
+}
+function teesChangeButton(course) {
+  return form.teeId && !teesOpen && course.tees.length > 1 && course.tees.some((t) => t.id === form.teeId)
+    ? `<button class="linkbtn" data-act="tees-change">Change</button>` : "";
+}
 let courseFind = null;   /* { q, busy, msg, lib: [], ext: [], check: null } */
 const FIND_COURSE_VALUE = "__find-course";
 const FIND_COURSE_OPTION = `<option value="${FIND_COURSE_VALUE}">\u{1F50D} Find another course\u2026</option>`;
@@ -942,7 +953,7 @@ async function submitRequestHere() {
   requestForm = { fullName: val("rq-name").trim(), email: val("rq-email").trim(), groupName: val("rq-group").trim(),
     size: val("rq-size").trim(), where: val("rq-where").trim(), note: val("rq-note").trim() };
   const f = requestForm;
-  const stop = (text, field) => { render(); formMessage(text, field); };
+  const stop = (text, field) => { render(); showMessage(text, field); };
   if (f.fullName.length < 2) return stop("Type your full name.", "rq-name");
   if (!f.email) return stop("Type your email address.", "rq-email");
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.email)) return stop("That email does not look right. Check it for a typo.", "rq-email");
@@ -959,13 +970,13 @@ async function submitRequestHere() {
     requestSentTo = f.email;
   } catch (err) {
     const code = String((err && (err.code || err.message)) || "");
-    if (code.includes("app/exists")) formMessage("There is already a request for that email. If it is approved, you will get an email.", "rq-email");
-    else if (code.includes("app/email")) formMessage("That email does not look right. Check it for a typo.", "rq-email");
-    else if (code.includes("app/name")) formMessage("Type your full name (up to 80 characters).", "rq-name");
-    else if (code.includes("app/group")) formMessage("Type the group name (up to 60 characters).", "rq-group");
-    else if (code.includes("app/size")) formMessage("Type about how many golfers (up to 20 characters).", "rq-size");
-    else if (code.includes("app/where")) formMessage("Type where you play (up to 100 characters).", "rq-where");
-    else formMessage(`It was not sent: ${code || "no connection"}. Check the connection and try again.`);
+    if (code.includes("app/exists")) showMessage("There is already a request for that email. If it is approved, you will get an email.", "rq-email");
+    else if (code.includes("app/email")) showMessage("That email does not look right. Check it for a typo.", "rq-email");
+    else if (code.includes("app/name")) showMessage("Type your full name (up to 80 characters).", "rq-name");
+    else if (code.includes("app/group")) showMessage("Type the group name (up to 60 characters).", "rq-group");
+    else if (code.includes("app/size")) showMessage("Type about how many golfers (up to 20 characters).", "rq-size");
+    else if (code.includes("app/where")) showMessage("Type where you play (up to 100 characters).", "rq-where");
+    else showMessage(`It was not sent: ${code || "no connection"}. Check the connection and try again.`);
   } finally {
     joining = false;
     idle();
@@ -1013,10 +1024,8 @@ function screenApply() {
       <input class="field" name="apply-name" value="${esc(joinForm.name || "")}" placeholder="e.g. Willy Rosales" autocomplete="name" maxlength="80">
       <label class="lbl">Email</label>
       <input class="field" name="apply-email" type="email" value="${esc(authForm.email || "")}" placeholder="you@example.com" autocomplete="email" autocapitalize="none" maxlength="254">
-      ${applyNameTaken ? `<div class="note warn in-use"><b>A golfer with this name already exists.</b> If that's you, sign in instead. Otherwise, continue and your application will be checked by a person.</div>
-        <div class="inline-actions stacked"><button class="btn" data-act="hide-apply">Sign in</button><button class="btn ghost" data-act="apply-name-ok">Continue anyway</button></div>` : ""}
-      ${applyInUse ? `<div class="note warn in-use"><b>This email already has an account.</b> Sign in with it instead, or tap Forgot the password on the Sign in screen. Nothing was sent.</div>
-        <div class="inline-actions stacked"><button class="btn" data-act="hide-apply">Back to Sign in</button></div>` : ""}
+      ${applyNameTaken ? `<div class="inline-actions stacked"><button class="btn" data-act="hide-apply">Sign in</button><button class="btn ghost" data-act="apply-name-ok">Continue anyway</button></div>` : ""}
+      ${applyInUse ? `<div class="inline-actions stacked"><button class="btn" data-act="hide-apply">Back to Sign in</button></div>` : ""}
       <div class="note tip">Other members of the public group see your <b>full name</b> and your <b>handicap index</b>, and nothing else. Your rounds stay private.</div>
       ${auto ? stepsBlock([
         "You send this application.",
@@ -1085,11 +1094,11 @@ async function finishApplyHere() {
       linkProblem = { email: db.applyLinkEmail() || fields.email };
       db.dropApplyLink();
     } else if (/no-such-account/.test(code)) {
-      flashMsg("There is no Scorecard account for that email, so there is no password to change. Nothing was created.");
+      showMessage("There is no Scorecard account for that email, so there is no password to change. Nothing was created.");
     } else if (/invalid-email|user-mismatch/.test(code)) {
-      flashMsg("That is not the email the link was sent to. Type the email you applied with.");
+      showMessage("That is not the email the link was sent to. Type the email you applied with.");
     } else {
-      flashMsg(`Nothing was saved: ${code || "no connection"}. Check the connection and tap Save my password again.`);
+      showMessage(`Nothing was saved: ${code || "no connection"}. Check the connection and tap Save my password again.`);
     }
     return render();
   }
@@ -1098,7 +1107,7 @@ async function finishApplyHere() {
   if (finished.passwordFailed) {
     /* Signed in from the link, password not saved: rule 4 shows Create your
        password again, now and at every start, until it is saved. */
-    flashMsg("Your email is confirmed, but the password was not saved. Type it again and tap Save my password.");
+    showMessage("Your email is confirmed, but the password was not saved. Type it again and tap Save my password.");
     return render();
   }
   if (finished.reset) {
@@ -1144,8 +1153,8 @@ async function afterPasswordCreated() {
 async function createPasswordHere() {
   const password = (view.querySelector('[name="password"]') || {}).value || "";
   const again = (view.querySelector('[name="password-again"]') || {}).value || "";
-  if (password.length < 6) { render(); formMessage("The password needs at least six characters.", "password"); return; }
-  if (password !== again) { render(); formMessage(again ? "The two passwords are not the same. Type them again." : "Type the password again in the second box.", "password-again"); return; }
+  if (password.length < 6) { render(); showMessage("The password needs at least six characters.", "password"); return; }
+  if (password !== again) { render(); showMessage(again ? "The two passwords are not the same. Type them again." : "Type the password again in the second box.", "password-again"); return; }
   joining = true;
   busy("Saving your password");
   render();
@@ -1154,7 +1163,7 @@ async function createPasswordHere() {
   } catch (err) {
     joining = false; idleAll();
     const code = String((err && (err.code || err.message)) || "");
-    flashMsg(/weak-password/.test(code) ? "That password is too weak. Pick a longer one." :
+    showMessage(/weak-password/.test(code) ? "That password is too weak. Pick a longer one." :
       /requires-recent-login/.test(code) ? "For your safety, open the link from your email again, then create your password." :
       `Nothing was saved: ${code || "no connection"}. Tap Save my password again.`);
     return render();
@@ -1168,11 +1177,11 @@ async function submitApplicationHere() {
   const fullName = ((view.querySelector('[name="apply-name"]') || {}).value || "").trim();
   const email = ((view.querySelector('[name="apply-email"]') || {}).value || "").trim();
   joinForm.name = fullName; authForm = { email, password: "" };
-  if (fullName.length < 2) { formMessage("Type your full name.", "apply-name"); return; }
-  if (!email) { formMessage("Type your email address.", "apply-email"); return; }
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { formMessage("That email does not look right. Check it for a typo.", "apply-email"); return; }
+  if (fullName.length < 2) { showMessage("Type your full name.", "apply-name"); return; }
+  if (!email) { showMessage("Type your email address.", "apply-email"); return; }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { showMessage("That email does not look right. Check it for a typo.", "apply-email"); return; }
   const agreed = view.querySelector('[name="ap-agree"]');
-  if (!agreed || !agreed.checked) { formMessage("Tick the box to agree to the Code of Conduct and the Privacy policy.", "ap-agree"); return; }
+  if (!agreed || !agreed.checked) { showMessage("Tick the box to agree to the Code of Conduct and the Privacy policy.", "ap-agree"); return; }
   joining = true;
   busy("Sending your application");
   render();
@@ -1184,6 +1193,7 @@ async function submitApplicationHere() {
     applyNameTaken = fullName;
     joining = false; idle(); render();
     if (agreed) { const box = view.querySelector('[name="ap-agree"]'); if (box) box.checked = true; }
+    showMessage("A golfer with this name already exists. If that's you, sign in instead. Otherwise tap Continue anyway: a person will check your application.", "apply-name");
     return;
   }
   try {
@@ -1199,11 +1209,11 @@ async function submitApplicationHere() {
     applySentTo = email;
   } catch (err) {
     const code = String((err && (err.code || err.message)) || "");
-    if (code.includes("app/in-use")) applyInUse = email;
-    else if (code.includes("app/exists")) formMessage("There is already an application for that email. If it is approved, you will get an email.", "apply-email");
-    else if (code.includes("app/email")) formMessage("That email does not look right. Check it for a typo.", "apply-email");
-    else if (code.includes("app/name")) formMessage("Type your full name (up to 80 characters).", "apply-name");
-    else formMessage(`It was not sent: ${code || "no connection"}. Check the connection and try again.`);
+    if (code.includes("app/in-use")) { applyInUse = email; showMessage("This email already has an account. Sign in with it, or tap Forgot the password on the Sign in screen. Nothing was sent.", "apply-email"); }
+    else if (code.includes("app/exists")) showMessage("There is already an application for that email. If it is approved, you will get an email.", "apply-email");
+    else if (code.includes("app/email")) showMessage("That email does not look right. Check it for a typo.", "apply-email");
+    else if (code.includes("app/name")) showMessage("Type your full name (up to 80 characters).", "apply-name");
+    else showMessage(`It was not sent: ${code || "no connection"}. Check the connection and try again.`);
   } finally {
     joining = false;
     idle();
@@ -1222,7 +1232,7 @@ async function checkPublicApproval() {
   let result;
   try { result = await db.joinPublicIfApproved(); }
   catch (e) {
-    flashMsg("Your approval for the public group was found, but joining did not finish. Open the app again to retry.");
+    showMessage("Your approval for the public group was found, but joining did not finish. Open the app again to retry.");
     return;
   }
   /* beta.4: an automatic join that stopped part-way finishes here; an
@@ -1358,7 +1368,7 @@ async function approveRequestHere(key) {
   catch (e) {
     idleAll();
     const code = String((e && (e.code || e.message)) || "");
-    flashMsg(code.includes("app/declined") ? "That request was declined already."
+    showMessage(code.includes("app/declined") ? "That request was declined already."
       : code.includes("app/gone") ? "That request no longer exists."
       : `It was not approved: ${code || "no connection"}. Nothing was changed.`);
     return render();
@@ -1377,7 +1387,7 @@ async function approveRequestHere(key) {
   } catch (e) {
     await db.releaseGroupRequest(key);
     idleAll();
-    flashMsg(`The group was not created: ${String((e && (e.code || e.message)) || "no connection")}. Tap Approve to try again.`);
+    showMessage(`The group was not created: ${String((e && (e.code || e.message)) || "no connection")}. Tap Approve to try again.`);
     return render();
   }
   try {
@@ -1411,7 +1421,7 @@ async function approveRequestHere(key) {
     flashMsg(`"${req.groupName}" is created. Send the email to ${req.email}.`);
   } catch (e) {
     idleAll();
-    flashMsg(`"${req.groupName}" is created and the request is approved, but the invitation could not be prepared. Open the group, then Admin, and send an admin invitation.`);
+    showMessage(`"${req.groupName}" is created and the request is approved, but the invitation could not be prepared. Open the group, then Admin, and send an admin invitation.`);
     render();
   }
 }
@@ -1701,10 +1711,10 @@ function readNewAccountFields() {
   const password = (view.querySelector('[name="password"]') || {}).value || "";
   const again = (view.querySelector('[name="password-again"]') || {}).value || "";
   authForm = { email, password: "" };
-  if (!email) { formMessage("Type your email address.", "email"); return null; }
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { formMessage("That email does not look right. Check it for a typo.", "email"); return null; }
-  if (password.length < 6) { formMessage("The password needs at least six characters.", "password"); return null; }
-  if (password !== again) { formMessage(again ? "The two passwords are different. Type them again." : "Type the password again in the second box.", "password-again"); return null; }
+  if (!email) { showMessage("Type your email address.", "email"); return null; }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { showMessage("That email does not look right. Check it for a typo.", "email"); return null; }
+  if (password.length < 6) { showMessage("The password needs at least six characters.", "password"); return null; }
+  if (password !== again) { showMessage(again ? "The two passwords are different. Type them again." : "Type the password again in the second box.", "password-again"); return null; }
   return { email, password };
 }
 
@@ -1777,7 +1787,6 @@ async function signOutForLink() {
   busy("Signing out");
   try { await db.signOutHere(); } finally { idleAll(); }
   /* Item 8: nothing of the old account stays on screen. */
-  sheetEl.classList.remove("pop-centre");
   sheetEl.hidden = true;
   /* The link stays on this device for the new person. */
   linkAnswer = null; groupState = "unknown"; accountMode = null; authForm = { email: "", password: "" };
@@ -1799,10 +1808,10 @@ async function undoAccountIfNotJoined(inv, why) {
     linkAnswer = null; groupState = "unknown"; accountMode = "create";
     if (why) {
       render();
-      formMessage(`${why} Nothing was kept: the new account was removed again. Ask whoever runs the group for a fresh link.`);
+      showMessage(`${why} Nothing was kept: the new account was removed again. Ask whoever runs the group for a fresh link.`);
       return;
     }
-    flashMsg("Nothing was kept: the new account was removed again. Tap Join to try once more.");
+    showMessage("Nothing was kept: the new account was removed again. Tap Join to try once more.");
   }
   render();
 }
@@ -1911,11 +1920,11 @@ function enterInSteps({ course, tee, golfer, ags, diff, ch, ready2, pickableGame
         ${courseFindPanel()}
         ${course ? `<p class="step-ask" style="margin-top:1.2rem">From which tees?</p>
           <div class="tee-grid">
-            ${course.tees.map((t) => `<button class="tee-choice ${t.id === form.teeId ? "picked" : ""}" data-tee="${t.id}">
+            ${teesToShow(course).map((t) => `<button class="tee-choice ${t.id === form.teeId ? "picked" : ""}" data-tee="${t.id}">
               <span class="name">${esc(t.name)}</span>
               <span class="sub">${(+t.rating).toFixed(1)} / ${t.slope} · par ${t.par}</span>
             </button>`).join("")}
-          </div>` : ""}
+          </div>${teesChangeButton(course)}` : ""}
       </div>`;
     }
 
@@ -2092,9 +2101,9 @@ function screenEnter() {
     ${course ? `<div>
       <div class="eyebrow">Tees</div>
       <div class="tees">
-        ${course.tees.map((t) => `<button class="tee ${t.id === form.teeId ? "on" : ""}" data-tee="${t.id}">
+        ${teesToShow(course).map((t) => `<button class="tee ${t.id === form.teeId ? "on" : ""}" data-tee="${t.id}">
           <b>${esc(t.name)}</b><span class="sub">${(+t.rating).toFixed(1)} / ${t.slope} · par ${t.par}</span></button>`).join("")}
-      </div>
+      </div>${teesChangeButton(course)}
     </div>` : ""}
 
     ${pickableGames.length ? `<div>
@@ -3126,15 +3135,13 @@ function screenManage() {
             : "";
           return `<div class="roster-row">
             <div class="roster-name">
-              <span class="name">${esc(g.name)}</span>
+              <span class="name">${esc(g.name)}${joined ? ` <span class="joined-tick" title="Joined">✓</span>` : ""}</span>
               <span class="sub">${g.handicapIndex == null ? "no index yet" : `index ${(+g.handicapIndex).toFixed(1)}`} · ${g.roundCount || 0} round${g.roundCount === 1 ? "" : "s"}${
                 waiting ? ` · <span class="waiting">invited ${esc(invitedOn)}, not joined yet</span>` : ""}</span>
             </div>
             <div class="roster-actions">
             ${joined
-              ? (db.isOwner()
-                  ? `<button class="rowbtn wide" data-reinvite="${g.id}" title="Let them join again">Joined ✓</button>`
-                  : `<button class="rowbtn wide" disabled>Joined ✓</button>`)
+              ? ""   /* item 14: the tick beside the name says it; "Let them join again" is under ··· */
               /* The public group is joined by application only, never by invitation. */
               : db.isPublicGroup() ? ""
               : (waiting
@@ -3147,6 +3154,7 @@ function screenManage() {
             </div>
             ${moreOpen === g.id ? `<div class="roster-more">
               <button class="rowbtn" data-rename="${g.id}">Rename</button>
+              ${joined && db.isOwner() ? `<button class="rowbtn" data-reinvite="${g.id}">Let them join again</button>` : ""}
               <button class="rowbtn warn" data-del-golfer="${g.id}">Remove from this group</button>
             </div>` : ""}
           </div>`;
@@ -3270,12 +3278,18 @@ function waitingCount() {
     + (db.isPublicGroup() ? applications.length + publicReports.length : 0);
 }
 
+/* Willy, 6 Nov 2026: close to real time — Just now, 12 min ago, Today 8:41 am,
+   Yesterday 9:10 pm, then days. */
+const clock = (ms) => new Date(ms).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }).toLowerCase();
 const daysAgo = (ms) => {
   if (!ms) return "";
+  const mins = Math.floor((Date.now() - ms) / 60000);
+  if (mins < 2) return "Just now";
+  if (mins < 60) return `${mins} min ago`;
   const start = new Date(); start.setHours(0, 0, 0, 0);
-  if (ms >= start.getTime()) return "Today";
+  if (ms >= start.getTime()) return `Today ${clock(ms)}`;
   const d = Math.ceil((start.getTime() - ms) / 86400000);
-  return d <= 1 ? "Yesterday" : `${d} days ago`;
+  return d <= 1 ? `Yesterday ${clock(ms)}` : `${d} days ago`;
 };
 const seenMs = (m) => (m && m.lastSeenAt ? (typeof m.lastSeenAt.toMillis === "function" ? m.lastSeenAt.toMillis()
   : (m.lastSeenAt.seconds ? m.lastSeenAt.seconds * 1000 : 0)) : (m && m.lastSeen) || 0);
@@ -3354,10 +3368,14 @@ function ownerSummary(data) {
   const now = Date.now();
   const startToday = new Date(); startToday.setHours(0, 0, 0, 0);
   const people = new Map();
+  const names = data.golferNames || {};
   for (const m of data.members) {
-    const p = people.get(m.uid) || { uid: m.uid, name: m.displayName, lastSeen: 0, groups: [] };
+    const p = people.get(m.uid) || { uid: m.uid, name: "", lastSeen: 0, groups: [] };
     p.lastSeen = Math.max(p.lastSeen, m.lastSeen || 0);
-    if (!p.name && m.displayName) p.name = m.displayName;
+    /* The golfer's own name first; an email only if there is nothing else. */
+    const golferName = m.golferId && names[m.golferId];
+    if (golferName) p.name = golferName;
+    else if (!p.name || (p.name.includes("@") && m.displayName && !m.displayName.includes("@"))) p.name = m.displayName || p.name;
     p.groups.push(m.assocId);
     people.set(m.uid, p);
   }
@@ -3897,7 +3915,7 @@ async function saveBackup() {
         backupStatus.hidden = false;
         backupStatus.textContent = message + " You can use Email or Copy, or retry Downloads.";
       } else {
-        flashMsg(message + " Try Email or Copy instead.");
+        showMessage(message + " Try Email or Copy instead.");
       }
     }
     return;
@@ -3951,7 +3969,7 @@ function downloadBackup() {
     sheetEl.hidden = true;
     flashMsg("Saved to this device's downloads folder.");
   } catch {
-    flashMsg("This browser wouldn't save the file. Use Email or Copy instead.");
+    showMessage("This browser wouldn't save the file. Use Email or Copy instead.");
   }
 }
 
@@ -3996,10 +4014,10 @@ function askForBackupFile() {
         const result = db.restoreBackup(found);
         flashMsg(`Restoring ${found.rounds.length} round${found.rounds.length === 1 ? "" : "s"} and ${found.golfers.length} golfer${found.golfers.length === 1 ? "" : "s"}. ${result.queued} change${result.queued === 1 ? "" : "s"} queued — nothing was deleted.`);
       } catch {
-        flashMsg("That file isn't a Scorecard backup. Pick the .txt file the app saved.");
+        showMessage("That file isn't a Scorecard backup. Pick the .txt file the app saved.");
       }
     };
-    reader.onerror = () => flashMsg("Couldn't read that file.");
+    reader.onerror = () => showMessage("Couldn't read that file.");
     reader.readAsText(file);
   };
   picker.click();
@@ -4463,7 +4481,7 @@ sheetEl.addEventListener("click", async (e) => {
     sheetEl.hidden = true;
     busy("Sending the report");
     try { await db.reportGolfer({ golferId: id, displayName: golfer.name || "", reason }); flashMsg("Report sent to the people who run the public group. Thank you."); }
-    catch { flashMsg("The report was not sent. Check the connection and try again."); }
+    catch { showMessage("The report was not sent. Check the connection and try again."); }
     finally { idle(); }
     return render();
   }
@@ -4480,7 +4498,7 @@ sheetEl.addEventListener("click", async (e) => {
     const a = applications.find((x) => x.key === id);
     const name = ((sheetEl.querySelector('[name="approve-name"]') || {}).value || "").trim();
     if (!a) { sheetEl.hidden = true; return render(); }
-    if (name.length < 2) { flashMsg("Type their golfer name"); return; }
+    if (name.length < 2) { showMessage("Type their golfer name"); return; }
     sheetEl.hidden = true;
     busy(`Approving ${a.fullName}`);
     try {
@@ -4494,11 +4512,11 @@ sheetEl.addEventListener("click", async (e) => {
             : `${a.fullName} is approved. The sign-in link to create a password has gone to ${a.email}.`);
     } catch (err) {
       const code = String((err && (err.code || err.message)) || "");
-      if (code.includes("name-taken")) { flashMsg(`The name "${name}" is already used. Add a middle initial or a nickname and approve again.`); openApproveSheet(id); }
-      else if (code.includes("app/busy")) flashMsg("Another reviewer is approving this application right now. Nothing was changed.");
-      else if (code.includes("app/rejected")) flashMsg("This application was rejected, so it cannot be approved.");
-      else if (code.includes("app/gone")) flashMsg("This application no longer exists.");
-      else flashMsg(`The approval did not finish: ${code || "no connection"}. Tap Finish to complete it — it is safe to repeat.`);
+      if (code.includes("name-taken")) showMessage(`The name "${name}" is already used. Add a middle initial or a nickname and approve again.`, "", () => openApproveSheet(id));
+      else if (code.includes("app/busy")) showMessage("Another reviewer is approving this application right now. Nothing was changed.");
+      else if (code.includes("app/rejected")) showMessage("This application was rejected, so it cannot be approved.");
+      else if (code.includes("app/gone")) showMessage("This application no longer exists.");
+      else showMessage(`The approval did not finish: ${code || "no connection"}. Tap Finish to complete it — it is safe to repeat.`);
     } finally { idle(); }
     return render();
   }
@@ -4576,35 +4594,43 @@ function openNotice({ title, detail, advice, action }) {
   </div>`;
 }
 
-/* Item 11 (Willy, 5 Nov 2026): on a long form the bar at the top is out of
-   sight, so a message about the form is a pop-up in the middle of the screen
-   that stays until OK. After OK, the field to fix (if any) is outlined and
-   brought into view. Only the message's place changes; the checks are the same. */
-let formFixField = "";
-function formMessage(text, field) {
-  formFixField = field || "";
-  sheetEl.hidden = false;
-  sheetEl.dataset.report = "";
-  sheetEl.classList.add("pop-centre");
-  sheetEl.innerHTML = `<div class="sheet-body centred" role="alertdialog" aria-modal="true">
-    <p class="lead" style="color:inherit;font-size:17px">${esc(text)}</p>
-    <div class="inline-actions stacked">
-      <button class="btn" data-form-ok="1">OK</button>
-    </div>
+/* showMessage (Willy, 6 Nov 2026): EVERY error or warning message goes
+   through this one function. It is a pop-up in the middle of the screen, on
+   its own layer above everything (a box that is open stays open under it),
+   and it stays until OK. After OK, the field to fix (if named) is outlined and
+   brought into view, and `after` (if given) runs. */
+let popField = "", popAfter = null;
+function showMessage(message, field, after) {
+  popField = field || ""; popAfter = typeof after === "function" ? after : null;
+  let el = document.getElementById("popmsg");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "popmsg"; el.className = "popmsg";
+    el.addEventListener("click", (e) => { if (e.target.closest("[data-pop-ok]")) popClosed(); });
+    document.body.appendChild(el);
+  }
+  el.innerHTML = `<div class="popmsg-body" role="alertdialog" aria-modal="true">
+    <p class="popmsg-text">${esc(String(message || ""))}</p>
+    <button class="btn" data-pop-ok="1">OK</button>
   </div>`;
+  el.hidden = false;
+  try { el.querySelector("[data-pop-ok]").focus({ preventScroll: true }); } catch {}
 }
-function formMessageClosed() {
-  sheetEl.classList.remove("pop-centre");
-  sheetEl.hidden = true;
-  const name = formFixField; formFixField = "";
-  if (!name) return;
-  const el = view.querySelector(`[name="${name}"]`);
-  if (!el) return;
-  el.classList.add("needs-fix");
-  el.addEventListener("input", () => el.classList.remove("needs-fix"), { once: true });
-  el.addEventListener("change", () => el.classList.remove("needs-fix"), { once: true });
-  try { el.scrollIntoView({ block: "center", behavior: "smooth" }); } catch { el.scrollIntoView(); }
-  try { el.focus({ preventScroll: true }); } catch {}
+function popClosed() {
+  const el = document.getElementById("popmsg");
+  if (el) el.hidden = true;
+  const name = popField, after = popAfter; popField = ""; popAfter = null;
+  if (name) {
+    const f = view.querySelector(`[name="${name}"]`) || sheetEl.querySelector(`[name="${name}"]`);
+    if (f) {
+      f.classList.add("needs-fix");
+      f.addEventListener("input", () => f.classList.remove("needs-fix"), { once: true });
+      f.addEventListener("change", () => f.classList.remove("needs-fix"), { once: true });
+      try { f.scrollIntoView({ block: "center", behavior: "smooth" }); } catch { f.scrollIntoView(); }
+      try { f.focus({ preventScroll: true }); } catch {}
+    }
+  }
+  if (after) after();
 }
 
 function openProblem({ title, detail, advice, fatal = false }) {
@@ -4875,7 +4901,10 @@ function renderNow() {
         const role = me && me.role;
         const email = db.currentEmail();
         const parts = [];
-        if (me && me.displayName) parts.push(me.displayName);
+        /* Item 14 (Willy, 6 Nov 2026): the person's name, never an email. */
+        const mineName = (() => { const gid = me && me.golferId; const g = gid && typeof golferById === "function" ? golferById(gid) : null; return g && g.name; })();
+        const shown = mineName || (me && me.displayName);
+        if (shown && !String(shown).includes("@")) parts.push(shown);
         if (role === "owner" || role === "admin") parts.push(role);
         who.textContent = parts.join(" · ");
         who.title = email || "";
@@ -5131,15 +5160,15 @@ view.addEventListener("click", async (e) => {
         typed = `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6, 8)}`;
       }
       if (!typed) {
-        flashMsg("Type the date as year, month, day — for example 2025 05 18");
+        showMessage("Type the date as year, month, day — for example 2025 05 18");
         return render();
       }
       const [y, m, d] = typed.split("-").map(Number);
       const real = new Date(Date.UTC(y, m - 1, d));
       if (real.getUTCFullYear() !== y || real.getUTCMonth() !== m - 1 || real.getUTCDate() !== d) {
-        flashMsg("That is not a real date"); return render();
+        showMessage("That is not a real date"); return render();
       }
-      if (typed > today()) { flashMsg("A round cannot have been played in the future"); return render(); }
+      if (typed > today()) { showMessage("A round cannot have been played in the future"); return render(); }
       form.date = typed;
       calendarOpen = false; calendarMonth = null; calPick = null;
     }
@@ -5189,7 +5218,7 @@ view.addEventListener("click", async (e) => {
   const d = t.dataset;
 
   if (d.go) { tab = d.go; return render(); }
-  if (d.tee) { form.teeId = d.tee; return render(); }
+  if (d.tee) { form.teeId = d.tee; teesOpen = false; return render(); }
   if (d.dropRound) {
     busy("Removing from the game");
     try {
@@ -5321,7 +5350,7 @@ view.addEventListener("click", async (e) => {
     if (why === null) return;
     busy("Withdrawing the course");
     try { await db.withdrawCourse(c.id, why); openCourse = null; flashMsg(`${c.name} is withdrawn for every group.`); }
-    catch (e) { flashMsg(`It was not withdrawn: ${String((e && (e.code || e.message)) || "no connection")}.`); }
+    catch (e) { showMessage(`It was not withdrawn: ${String((e && (e.code || e.message)) || "no connection")}.`); }
     finally { idleAll(); }
     return render();
   }
@@ -5331,7 +5360,7 @@ view.addEventListener("click", async (e) => {
     /* Refused rather than hidden: a course this group has played would take its
        rounds out of every picker, and an old round could not then be edited. */
     if (d.hideCourse && rounds.some((r) => r.courseId === id)) {
-      flashMsg("This group has rounds on that course, so it stays on the list.");
+      showMessage("This group has rounds on that course, so it stays on the list.");
       return render();
     }
     note(d.hideCourse ? "hiding a course" : "bringing a course back");
@@ -5364,7 +5393,7 @@ view.addEventListener("click", async (e) => {
     try {
       const done = r ? await db.deleteRoundAndRebuild(r) : (db.deleteRound(d.confirmDel), { ok: true });
       flashMsg(done && done.queued ? "Round deleted on this phone; The Scorecard is updated, with the index, when the signal returns." : "Round deleted, and the index updated.");
-    } catch (e) { flashMsg(String((e && e.code) || "") === "round/conflict" ? e.message : `Nothing was deleted: ${String((e && (e.code || e.message)) || "no connection")}. Try again.`); }
+    } catch (e) { showMessage(String((e && e.code) || "") === "round/conflict" ? e.message : `Nothing was deleted: ${String((e && (e.code || e.message)) || "no connection")}. Try again.`); }
     finally { idle(); }
     return render();
   }
@@ -5450,7 +5479,7 @@ view.addEventListener("click", async (e) => {
   switch (d.act) {
     case "terms-accept": {
       const tick = view.querySelector("[data-terms-tick]");
-      if (!tick || !tick.checked) { flashMsg("Tick \u201cI have read and agree\u201d first"); return; }
+      if (!tick || !tick.checked) { showMessage("Tick \u201cI have read and agree\u201d first"); return; }
       termsAcceptedNow = true;
       termsState = "";
       try { localStorage.setItem(TERMS_KEY, JSON.stringify({ version: TERMS_VERSION, at: Date.now() })); } catch { /* asked again next time */ }
@@ -5496,7 +5525,7 @@ view.addEventListener("click", async (e) => {
         }
       } catch {
         idleAll();
-        flashMsg("Couldn't check just now. Try again in a moment.");
+        showMessage("Couldn't check just now. Try again in a moment.");
       } finally { idleAll(); }
       return render();
     }
@@ -5538,8 +5567,8 @@ view.addEventListener("click", async (e) => {
     case "set-admin-password": {
       const email = ((view.querySelector('[name="promote-email"]') || {}).value || "").trim();
       const password = (view.querySelector('[name="promote-password"]') || {}).value || "";
-      if (!email) { flashMsg("Type your email address"); return render(); }
-      if (password.length < 6) { flashMsg("The password needs at least six characters"); return render(); }
+      if (!email) { showMessage("Type your email address"); return render(); }
+      if (password.length < 6) { showMessage("The password needs at least six characters"); return render(); }
 
       busy("Setting your password");
       try {
@@ -5555,7 +5584,7 @@ view.addEventListener("click", async (e) => {
     case "set-password": {
       const field = view.querySelector('[name="password"]');
       const secret = field ? field.value : "";
-      if ((secret || "").length < 6) { flashMsg("The password needs at least six characters"); return; }
+      if ((secret || "").length < 6) { showMessage("The password needs at least six characters"); return; }
       joining = true;
       busy("Setting the password");
       render();
@@ -5624,10 +5653,10 @@ view.addEventListener("click", async (e) => {
     }
     case "reset-password": {
       const address = ((view.querySelector('[name="email"]') || {}).value || authForm.email).trim();
-      if (!address) { flashMsg("Type your email address first"); return; }
+      if (!address) { showMessage("Type your email address first"); return; }
       busy("Sending the reset link");
       try { await db.sendPasswordReset(address); flashMsg(`Link sent to ${address}. Open the email "Sign in to The Scorecard" on this phone and tap the link: The Scorecard opens and asks for your new password.`); }
-      catch { flashMsg("Couldn't send the reset link. Check the email address."); }
+      catch { showMessage("Couldn't send the reset link. Check the email address."); }
       finally { idleAll(); }
       return render();
     }
@@ -5648,7 +5677,7 @@ view.addEventListener("click", async (e) => {
       }
       /* Fall back to typing a name, rather than joining as the wrong person. */
       invitedGolfer = null;
-      flashMsg("Type the name you play under instead.");
+      showMessage("Type the name you play under instead.");
       return render();
     }
     case "accept-named": return acceptNamedHere();
@@ -5663,7 +5692,7 @@ view.addEventListener("click", async (e) => {
       showCodeEntry = true; accountMode = null; return render();
     case "code-continue": {
       const typed = ((view.querySelector('[name="join-code"]') || {}).value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
-      if (!typed) { flashMsg("Type the group code"); return render(); }
+      if (!typed) { showMessage("Type the group code"); return render(); }
       joinForm.code = typed;
       signedOutStep = null; showCodeEntry = true; accountMode = null;
       return render();
@@ -5717,16 +5746,16 @@ view.addEventListener("click", async (e) => {
       if (link && link.kind === "invite") { db.clearJoinLink(); invitedGolfer = null; }
       if (link && link.kind === "signin") db.dropApplyLink();
       linkAnswer = null;
-      flashMsg("Nothing was changed. The link was set aside on this device.");
+      showMessage("Nothing was changed. The link was set aside on this device.");
       if (!db.currentAssociation()) await settleGroup(db.recallAssociation());
       return render();
     }
     case "send-new-link": {
       const address = ((view.querySelector('[name="email"]') || {}).value || "").trim();
-      if (!address) { flashMsg("Type your email address first"); return render(); }
+      if (!address) { showMessage("Type your email address first"); return render(); }
       busy("Sending a new link");
       try { await db.sendNewLink(address); flashMsg(`A new link has gone to ${address}. Open it on this device. It sometimes lands in junk mail.`); }
-      catch (e) { flashMsg(`It was not sent: ${String((e && (e.code || e.message)) || "no connection")}. Try again.`); }
+      catch (e) { showMessage(`It was not sent: ${String((e && (e.code || e.message)) || "no connection")}. Try again.`); }
       finally { idleAll(); }
       return render();
     }
@@ -5741,7 +5770,7 @@ view.addEventListener("click", async (e) => {
     case "send-confirmation": {
       busy("Sending the confirmation email");
       try { await db.sendEmailConfirmation(); confirmationSent = true; flashMsg("Sent. Open the link in the email, then tap Continue."); }
-      catch (e) { flashMsg(`It was not sent: ${String((e && (e.code || e.message)) || "no connection")}.`); }
+      catch (e) { showMessage(`It was not sent: ${String((e && (e.code || e.message)) || "no connection")}.`); }
       finally { idle(); }
       return render();
     }
@@ -5749,11 +5778,11 @@ view.addEventListener("click", async (e) => {
       busy("Checking");
       try {
         const ok = await db.refreshEmailState();
-        if (!ok) { flashMsg("Not confirmed yet. Open the link in the email first."); return render(); }
+        if (!ok) { showMessage("Not confirmed yet. Open the link in the email first."); return render(); }
         const result = await db.joinPublicIfApproved();
         if (result && result.joined) { await start(db.PUBLIC_ID); tab = "enter"; flashMsg("Welcome to the public group. Post your rounds on the Enter tab."); }
-        else flashMsg("Your email is confirmed. There is no approval for it yet — you will get an email when there is.");
-      } catch { flashMsg("That did not finish. Check the connection and try again."); }
+        else showMessage("Your email is confirmed. There is no approval for it yet — you will get an email when there is.");
+      } catch { showMessage("That did not finish. Check the connection and try again."); }
       finally { idle(); }
       return render();
     }
@@ -5774,6 +5803,7 @@ view.addEventListener("click", async (e) => {
     case "toggle-course-list": showCourseList = !showCourseList; return render();
     /* Batch 5, step 24: Find another course. */
     case "cf-open": courseFind = { q: "", busy: false, msg: "", lib: [], ext: [], check: null }; return render();
+    case "tees-change": teesOpen = true; return render();
     case "cf-close": courseFind = null; return render();
     case "cf-back": courseFind = { ...courseFind, check: null }; return render();
     case "cf-find": return courseFindRun();
@@ -5805,7 +5835,7 @@ view.addEventListener("click", async (e) => {
     case "restore-group": {
       busy("Bringing the group back");
       try { await db.hideGroup(d.id, false); flashMsg("The group is back, exactly as it was."); await loadOwnerCockpitHere(); }
-      catch (e) { flashMsg(`Nothing was changed: ${String((e && (e.code || e.message)) || "no connection")}.`); }
+      catch (e) { showMessage(`Nothing was changed: ${String((e && (e.code || e.message)) || "no connection")}.`); }
       finally { idleAll(); }
       return render();
     }
@@ -5813,14 +5843,14 @@ view.addEventListener("click", async (e) => {
       if (!window.confirm("Remove this group for good? A backup of its rounds is taken first and offered to you as a file. This cannot be undone.")) return;
       busy("Removing the group");
       try { await db.deleteGroup(d.id); cockpitGroup = null; flashMsg("The group is removed. Its backup was kept on this device."); await loadOwnerCockpitHere(); }
-      catch (e) { flashMsg(`It was not removed: ${String((e && (e.code || e.message)) || "no connection")}.`); }
+      catch (e) { showMessage(`It was not removed: ${String((e && (e.code || e.message)) || "no connection")}.`); }
       finally { idleAll(); }
       return render();
     }
     case "open-as-app-owner": {
       busy("Opening the group");
       try { await start(d.id); tab = "enter"; cockpitGroup = null; flashMsg("Opened as the app owner. This visit is recorded on the group."); }
-      catch (e) { flashMsg(`It could not be opened: ${String((e && (e.code || e.message)) || "no connection")}.`); }
+      catch (e) { showMessage(`It could not be opened: ${String((e && (e.code || e.message)) || "no connection")}.`); }
       finally { idleAll(); }
       return render();
     }
@@ -5829,24 +5859,24 @@ view.addEventListener("click", async (e) => {
       busy("Changing the switch");
       try { appSettings = await db.saveApplicationSettings({ mode: d.id, dailyLimit: appSettings.dailyLimit });
         flashMsg(appSettings.mode === "auto" ? "The switch is on Auto." : "The switch is on Manual."); }
-      catch (e) { flashMsg(`The switch did not change: ${String((e && (e.code || e.message)) || "no connection")}.`); }
+      catch (e) { showMessage(`The switch did not change: ${String((e && (e.code || e.message)) || "no connection")}.`); }
       finally { idle(); }
       return render();
     }
     case "block-add": {
       const input = view.querySelector(`[name="block-${d.kind}"]`);
       const value = ((input || {}).value || "").trim();
-      if (!value) { flashMsg("Type what to block first."); return; }
+      if (!value) { showMessage("Type what to block first."); return; }
       busy("Adding to the block list");
       try { const key = await db.addBlock(d.kind, value); flashMsg(`${key} is on the block list.`); }
-      catch (e) { flashMsg(`It was not added: ${String((e && (e.code || e.message)) || "no connection")}.`); }
+      catch (e) { showMessage(`It was not added: ${String((e && (e.code || e.message)) || "no connection")}.`); }
       finally { idle(); }
       return render();
     }
     case "unblock": {
       busy("Removing from the block list");
       try { await db.removeBlock(d.kind, d.id); flashMsg(`${d.id} is off the block list.`); }
-      catch (e) { flashMsg(`It was not removed: ${String((e && (e.code || e.message)) || "no connection")}.`); }
+      catch (e) { showMessage(`It was not removed: ${String((e && (e.code || e.message)) || "no connection")}.`); }
       finally { idle(); }
       return render();
     }
@@ -5861,14 +5891,14 @@ view.addEventListener("click", async (e) => {
       if (!r) return render();
       busy("Declining");
       try { await db.declineGroupRequest(r.key); flashMsg(`The request for "${r.groupName}" was declined. No email is sent.`); }
-      catch (e) { flashMsg(`It was not declined: ${String((e && (e.code || e.message)) || "no connection")}.`); }
+      catch (e) { showMessage(`It was not declined: ${String((e && (e.code || e.message)) || "no connection")}.`); }
       finally { idle(); }
       return render();
     }
     case "resend-approval-email": {
       busy("Sending the email");
       try { await db.resendApprovalEmail(d.id); flashMsg(`The password email has gone to ${d.id} again.`); }
-      catch (e) { flashMsg(`It was not sent: ${String((e && (e.code || e.message)) || "no connection")}.`); }
+      catch (e) { showMessage(`It was not sent: ${String((e && (e.code || e.message)) || "no connection")}.`); }
       finally { idle(); }
       return render();
     }
@@ -5921,9 +5951,9 @@ view.addEventListener("click", async (e) => {
       const value = field ? field.value.trim() : "";
       const id = editingIndex;
       editingIndex = null;
-      if (!value) { flashMsg("Type an index, or tap Clear it"); return render(); }
+      if (!value) { showMessage("Type an index, or tap Clear it"); return render(); }
       const clean = model.clampIndex(value);
-      if (clean == null) { flashMsg("That does not look like a handicap index"); return render(); }
+      if (clean == null) { showMessage("That does not look like a handicap index"); return render(); }
       db.setManualIndex(id, clean);
       flashMsg(`Starting index set to ${clean.toFixed(1)}. Real rounds will take over after three.`);
       return render();
@@ -5941,7 +5971,7 @@ view.addEventListener("click", async (e) => {
     case "save-new-group": {
       const field = view.querySelector('[name="new-group-name"]');
       const name = (field ? field.value : "").trim();
-      if (!name) { flashMsg("Give the group a name"); return; }
+      if (!name) { showMessage("Give the group a name"); return; }
       newGroupDraft = false;
       busy(`Creating ${name}`);
       try {
@@ -6013,7 +6043,7 @@ view.addEventListener("click", async (e) => {
       const course = courses.find((c) => c.id === game.courseId);
       const tees = course ? course.tees : [];
       const tee = tees.find((t) => t.id === fastEntry.teeId) || tees[0];
-      if (!tee) { flashMsg("This course has no tees yet."); return render(); }
+      if (!tee) { showMessage("This course has no tees yet."); return render(); }
 
       /* Gather what was typed, straight from the fields — the panel is not
          redrawn between keystrokes, so the DOM is the source of truth. */
@@ -6036,7 +6066,7 @@ view.addEventListener("click", async (e) => {
         entries.push({ golfer: g, gross, typedIndex });
       }
 
-      if (!entries.length) { flashMsg("No scores typed in yet."); return render(); }
+      if (!entries.length) { showMessage("No scores typed in yet."); return render(); }
 
       busy(`Posting ${entries.length} round${entries.length === 1 ? "" : "s"}`);
       let posted = 0;
@@ -6110,7 +6140,7 @@ view.addEventListener("click", async (e) => {
       idleAll();
 
       if (!preview.changes.length) {
-        flashMsg("Nothing to change — every round already has the right handicap.");
+        showMessage("Nothing to change — every round already has the right handicap.");
         return render();
       }
 
@@ -6138,8 +6168,8 @@ view.addEventListener("click", async (e) => {
       const date = (view.querySelector('[name="edit-game-date"]') || {}).value || "";
       const end = (view.querySelector('[name="edit-game-end"]') || {}).value || "";
       const courseId = (view.querySelector('[name="edit-game-course"]') || {}).value || "";
-      if (!date) { flashMsg("A game needs a first day"); return; }
-      if (end && end < date) { flashMsg("The last day cannot come before the first"); return; }
+      if (!date) { showMessage("A game needs a first day"); return; }
+      if (end && end < date) { showMessage("The last day cannot come before the first"); return; }
 
       busy("Saving the game");
       try {
@@ -6154,7 +6184,7 @@ view.addEventListener("click", async (e) => {
     }
     case "add-to-game": {
       const ids = [...view.querySelectorAll('[name="add-round"]:checked')].map((b) => b.value);
-      if (!ids.length) { flashMsg("Nothing ticked"); return; }
+      if (!ids.length) { showMessage("Nothing ticked"); return; }
       busy("Adding to the game");
       try {
         await db.setGameRounds({ gameId: openGame, addRoundIds: ids });
@@ -6173,7 +6203,7 @@ view.addEventListener("click", async (e) => {
         const r = await db.deleteGame(id);
         openGame = null; editingGame = false;
         flashMsg(`Game deleted. ${r.rounds} round${r.rounds === 1 ? "" : "s"} taken out of it, still in each golfer's history.${r.queued ? " (Saved to The Scorecard when the signal returns.)" : ""}`);
-      } catch (e) { flashMsg(`Nothing was deleted: ${String((e && (e.code || e.message)) || "no connection")}.`); }
+      } catch (e) { showMessage(`Nothing was deleted: ${String((e && (e.code || e.message)) || "no connection")}.`); }
       finally { idleAll(); }
       return render();
     }
@@ -6303,7 +6333,7 @@ view.addEventListener("click", async (e) => {
       try { await db.signOutEverywhere(); }
       catch {
         idleAll();
-        flashMsg("Couldn't sign out. Try again.");
+        showMessage("Couldn't sign out. Try again.");
         return render();
       }
       /* No idle() on success: signOutEverywhere reloads the page, and the card
@@ -6336,7 +6366,7 @@ view.addEventListener("click", async (e) => {
     case "rename-group": {
       const field = view.querySelector('[name="assoc-name"]');
       const name = (field ? field.value : "").trim();
-      if (!name) { flashMsg("Give the group a name"); return; }
+      if (!name) { showMessage("Give the group a name"); return; }
       db.updateAssociation({ name });
       flashMsg(`Renamed to ${name}.`);
       return render();
@@ -6349,10 +6379,10 @@ view.addEventListener("click", async (e) => {
     case "save-key": {
       const field = view.querySelector('[name="lookupkey"]');
       const key = (field ? field.value : "").trim();
-      if (!key) { flashMsg("Paste the key first"); return; }
+      if (!key) { showMessage("Paste the key first"); return; }
       busy("Saving the key");
       try { const r = await db.saveCourseKey(key); keyInfo = { last4: r.last4 }; editingKey = false; flashMsg(`Key saved, ends in ${r.last4}.`); }
-      catch (e) { flashMsg(`The key was not saved: ${String((e && (e.code || e.message)) || "no connection")}.`); }
+      catch (e) { showMessage(`The key was not saved: ${String((e && (e.code || e.message)) || "no connection")}.`); }
       finally { idleAll(); }
       return render();
     }
@@ -6399,11 +6429,6 @@ sheetEl.addEventListener("click", async (e) => {
    * them join again" did nothing at all. An action button is never a close
    * button, so it must be allowed through. */
   const ACTIONS = "[data-pw],[data-reset-invite],[data-recalc],[data-invite],[data-pick],[data-paste],[data-problem],[data-send],[data-quick],[data-share-toggle]";
-  /* Item 11: a form message closes only with its OK button. */
-  if (sheetEl.classList.contains("pop-centre")) {
-    if (e.target.closest("[data-form-ok]")) formMessageClosed();
-    return;
-  }
   if (!e.target.closest(ACTIONS)
       && (e.target === sheetEl || e.target.closest("[data-close]"))) {
     sheetEl.hidden = true;
@@ -6431,8 +6456,8 @@ sheetEl.addEventListener("click", async (e) => {
     }
     const email = ((sheetEl.querySelector('[name="pw-email"]') || {}).value || "").trim();
     const secret = (sheetEl.querySelector('[name="pw-secret"]') || {}).value || "";
-    if (!email) { flashMsg("Type your email address"); return; }
-    if (secret.length < 6) { flashMsg("The password needs at least six characters"); return; }
+    if (!email) { showMessage("Type your email address"); return; }
+    if (secret.length < 6) { showMessage("The password needs at least six characters"); return; }
 
     sheetEl.hidden = true;
     busy("Saving your password");
@@ -6529,7 +6554,7 @@ sheetEl.addEventListener("click", async (e) => {
       return;
     }
     const ids = [...sheetEl.querySelectorAll('[name="pick-golfer"]:checked')].map((b) => b.value);
-    if (!ids.length) { flashMsg("Nobody ticked"); return; }
+    if (!ids.length) { showMessage("Nobody ticked"); return; }
     sheetEl.hidden = true;
     busy("Adding them to this group");
     try {
@@ -6669,7 +6694,7 @@ sheetEl.addEventListener("click", async (e) => {
       render();
       busy("Signing out");
       try { await db.signOutEverywhere(); }
-      catch { idleAll(); flashMsg("Couldn't sign out. Try again."); render(); }
+      catch { idleAll(); showMessage("Couldn't sign out. Try again."); render(); }
       return;   /* signOutEverywhere reloads the page, taking the card with it */
     }
     return;
@@ -6686,7 +6711,7 @@ sheetEl.addEventListener("click", async (e) => {
       /* Both off leaves nothing to send, so the last one turned off comes back. */
       if (toggling.dataset.shareToggle === "gross") shareGameGross = true;
       else shareGameNet = true;
-      flashMsg("A result needs at least one of net or gross.");
+      showMessage("A result needs at least one of net or gross.");
     }
 
     const board = model.gameLeaderboard(rounds.filter((r) => r.gameId === openGame), allGolfers);
@@ -6706,7 +6731,7 @@ sheetEl.addEventListener("click", async (e) => {
     } catch {
       resetting.disabled = false;
       resetting.textContent = "Reset my password";
-      flashMsg("Couldn't send the reset link. Check the email address.");
+      showMessage("Couldn't send the reset link. Check the email address.");
     }
     return;
   }
@@ -6757,7 +6782,7 @@ sheetEl.addEventListener("click", async (e) => {
   if (e.target.closest("[data-newgroup]")) {
     const field = sheetEl.querySelector('[name="new-group-name"]');
     const name = (field ? field.value : "").trim();
-    if (!name) { flashMsg("Give the group a name"); return; }
+    if (!name) { showMessage("Give the group a name"); return; }
     const box = sheetEl.querySelector('[name="new-owner-plays"]');
     const playing = box ? box.checked : true;
     sheetEl.hidden = true;
@@ -6823,18 +6848,18 @@ sheetEl.addEventListener("click", async (e) => {
             selection.addRange(range);
           }
           flashMsg("Selected the text — press and hold it, then tap Copy.");
-        } catch { flashMsg("Copying was refused. Select the text above and copy it by hand."); }
+        } catch { showMessage("Copying was refused. Select the text above and copy it by hand."); }
       }
     }
     return;
   }
 
   if (how === "native") {
-    if (!platform.canShare()) { flashMsg("This device has no share sheet. Use one of the other buttons."); return; }
+    if (!platform.canShare()) { showMessage("This device has no share sheet. Use one of the other buttons."); return; }
     try { await platform.share({ text }); }
     catch (err) {
       /* Cancelling is not a failure and should say nothing. */
-      if (err && err.name !== "AbortError") flashMsg("Sharing did not open. Try Email or WhatsApp.");
+      if (err && err.name !== "AbortError") showMessage("Sharing did not open. Try Email or WhatsApp.");
     }
     return;
   }
@@ -6845,7 +6870,7 @@ sheetEl.addEventListener("click", async (e) => {
 /* Joins or creates, whichever fits, then lands on Enter. */
 async function begin() {
   const name = ((view.querySelector('[name="join-name"]') || {}).value || joinForm.name).trim();
-  if (!name) { flashMsg("Type the name you play under"); return render(); }
+  if (!name) { showMessage("Type the name you play under"); return render(); }
   joinForm.name = name;
   const invite = db.readJoinLink();
   if (invite) return acceptInvite();
@@ -6857,8 +6882,8 @@ async function begin() {
 async function signIn() {
   const email = ((view.querySelector('[name="email"]') || {}).value || authForm.email).trim();
   const password = (view.querySelector('[name="password"]') || {}).value || "";
-  if (!email) { formMessage("Type your email address.", "email"); return; }
-  if (password.length < 6) { formMessage("The password needs at least six characters.", "password"); return; }
+  if (!email) { showMessage("Type your email address.", "email"); return; }
+  if (password.length < 6) { showMessage("The password needs at least six characters.", "password"); return; }
   authForm = { email, password: "" };
   joining = true;
   busy("Signing in");
@@ -7065,7 +7090,7 @@ async function acceptInvite() {
   /* Every path that waits on Firebase raises the veil, without exception. */
   const invite = db.readJoinLink();
   const name = ((view.querySelector('[name="join-name"]') || {}).value || joinForm.name).trim();
-  if (!name) { flashMsg("Type the name you play under"); return; }
+  if (!name) { showMessage("Type the name you play under"); return; }
   joining = true;
   busy("Joining the group");
   render();
@@ -7120,8 +7145,8 @@ function finishJoining() {
 async function joinByCode() {
   const name = ((view.querySelector('[name="join-name"]') || {}).value || joinForm.name).trim();
   const code = ((view.querySelector('[name="join-code"]') || {}).value || joinForm.code).trim();
-  if (!name) { flashMsg("Type the name you play under"); return; }
-  if (!code) { flashMsg("Type the group code"); return; }
+  if (!name) { showMessage("Type the name you play under"); return; }
+  if (!code) { showMessage("Type the group code"); return; }
 
   joining = true;
   busy("Checking the code");
@@ -7130,7 +7155,7 @@ async function joinByCode() {
   if (!assocId) {
     joining = false;
     idleAll();
-    flashMsg("No group has that code. Codes are six characters — check it, or ask for the invitation link instead.");
+    showMessage("No group has that code. Codes are six characters — check it, or ask for the invitation link instead.");
     return render();
   }
   const result = await db.joinAssociation({ associationId: assocId, code, displayName: name });
@@ -7166,7 +7191,7 @@ async function createGroup(name, groupName) {
     if (playing) {
       try { await db.linkGolferForMember(name); }
       catch (e) { if (String((e && e.code) || "") !== "golfer/name") throw e;
-        flashMsg("The group is ready, but you are not on its roster yet: add yourself under Manage with the name you play under."); }
+        showMessage("The group is ready, but you are not on its roster yet: add yourself under Manage with the name you play under."); }
     }
     await start(created.id);
     joining = false;
@@ -7248,7 +7273,7 @@ async function openOtherGroupPicker() {
 async function addGolfer() {
   const input = view.querySelector('[name="new-golfer"]');
   const name = (input ? input.value : "").trim();
-  if (!name) { flashMsg("Type a name first"); return; }
+  if (!name) { showMessage("Type a name first"); return; }
   /* The veil goes up FIRST — before any check — so every outcome looks the
      same and none of them can be tapped through. Returning early on a
      duplicate used to skip the veil entirely, so that case alone showed
@@ -7283,7 +7308,7 @@ async function addGolfer() {
     if (input) input.value = "";
   } catch (e) {
     const code = String((e && (e.code || e.message)) || "");
-    flashMsg(code.includes("already")
+    showMessage(code.includes("already")
       ? `${name} already exists. Use "Add from my other groups" to bring them in with their rounds.`
       : "Couldn't add them — the message above says why.");
   } finally { idleAll(); }
@@ -7293,7 +7318,7 @@ async function addGolfer() {
 async function saveRename() {
   const input = view.querySelector('[name="rename-golfer"]');
   const next = (input ? input.value : "").trim();
-  if (!next) { flashMsg("Type a name first"); return; }
+  if (!next) { showMessage("Type a name first"); return; }
   const id = editingGolfer;
   note("renaming a golfer");
   editingGolfer = null;
@@ -7311,8 +7336,8 @@ async function saveRename() {
   }
   idle();
   if (result.ok) flashMsg(`Renamed to ${next}. That is their name in every group.`);
-  else if (result.reason === "TAKEN") flashMsg(`Another golfer is already called ${next}. Names have to be unique — try adding an initial.`);
-  else flashMsg("Couldn't rename them.");
+  else if (result.reason === "TAKEN") showMessage(`Another golfer is already called ${next}. Names have to be unique — try adding an initial.`);
+  else showMessage("Couldn't rename them.");
   render();
 }
 
@@ -7321,10 +7346,10 @@ function saveCourse() {
   const c = { ...courseDraft, name: courseDraft.name.trim(),
     tees: courseDraft.tees.filter((t) => t.name.trim() && t.rating && t.slope && t.par)
       .map((t) => (Array.isArray(t.holes) ? { ...t, holes: t.holes.map((h) => ({ par: Number(h.par), yards: h.yards === "" || h.yards == null ? null : Number(h.yards), si: Number(h.si) })) } : t)) };
-  if (!c.name || !c.tees.length) { flashMsg("A course needs a name and at least one complete tee"); return; }
+  if (!c.name || !c.tees.length) { showMessage("A course needs a name and at least one complete tee"); return; }
   /* Batch 5, step 24: typed hole by hole, every hole needs its par and handicap number. */
   if (courseDraft.byHole && c.tees.some((t) => !Array.isArray(t.holes) || t.holes.some((h) => !(h.par >= 3 && h.par <= 6) || !(h.si >= 1 && h.si <= 18)) || new Set(t.holes.map((h) => h.si)).size !== 18)) {
-    flashMsg("Fill in every hole's par and handicap number (1 to 18, each once) for each tee."); return;
+    showMessage("Fill in every hole's par and handicap number (1 to 18, each once) for each tee."); return;
   }
 
   /* A tee with rounds on it must survive the save even if the filter above
@@ -7335,7 +7360,7 @@ function saveCourse() {
     const before = (courses.find((x) => x.id === c.id) || {}).tees || [];
     const lost = before.filter((t) => roundsOnTee(c.id, t.id) > 0 && !c.tees.some((n) => n.id === t.id));
     if (lost.length) {
-      flashMsg(`${lost.map((t) => t.name).join(", ")} has rounds on it and cannot be removed.`);
+      showMessage(`${lost.map((t) => t.name).join(", ")} has rounds on it and cannot be removed.`);
       return;
     }
   }
@@ -7350,7 +7375,7 @@ function saveCourse() {
 }
 
 function saveGame() {
-  if (!gameDraft.courseId) { flashMsg("Pick the course"); return; }
+  if (!gameDraft.courseId) { showMessage("Pick the course"); return; }
   note("creating a game");
   db.addGame({ date: gameDraft.date, courseId: gameDraft.courseId, name: gameDraft.name });
   gameDraft = null;
@@ -7470,8 +7495,14 @@ async function start(assocId) {
   groupState = "some";
   association = await db.loadAssociation(assocId);
   if (association) /* batch 5: the key is no longer read by the app */
-  /* beta.4: "last seen" for the cockpit (at most twice a day; quiet). */
+  /* "last seen" for the cockpit (at most every 10 minutes; quiet). */
   db.stampLastSeen();
+  /* Willy, 6 Nov 2026: coming back to the app (it stays open in the
+     background on a phone) counts as being seen too. */
+  if (!window.__seenOnResume) {
+    window.__seenOnResume = true;
+    document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") db.stampLastSeen(); });
+  }
   /* A new group: the cockpit shows the new group's numbers. */
   ownerCockpit = null; ownerCockpitState = "idle"; cockpitGroup = null; blockWatched = false; blockLists = { emails: [], domains: [], names: [] };
   db.stopWatching();
@@ -7593,7 +7624,7 @@ async function loadInvitedDetails() {
       invitedGroupName = inv.groupName || "";
     } catch (err) {
       note(`invitation read: ${String(err.code || err.message || err)}`);
-      flashMsg("The invitation could not be checked. Reconnect and open the link again.");
+      showMessage("The invitation could not be checked. Reconnect and open the link again.");
     }
     return;
   }
@@ -7648,7 +7679,7 @@ addEventListener("pageshow", (e) => { if (e.persisted) location.reload(); });
   markBoot("ready");
   ready = true;
   render();
-  if (db.offlineCopyUnavailable()) flashMsg("Offline data unavailable on this device — the app needs a connection to show your group.");
+  if (db.offlineCopyUnavailable()) showMessage("Offline data unavailable on this device — the app needs a connection to show your group.");
 
   /* Coming back online on the first screen: look for the groups again. */
   addEventListener("online", async () => {

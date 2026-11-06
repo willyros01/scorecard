@@ -1,12 +1,9 @@
-The Scorecard 2.31.1, 6 November: the fixes from testing 2.31.0 (the rules are the same as 2.31.0; no script to run).
+The Scorecard 2.31.2, 6 November: the fixes from testing build 32.
 
-1. Invitation on a phone where you are signed in: if your account already plays as another golfer, the app signs you out by itself and opens the new person's welcome screen. Otherwise it asks; "No, it's for someone else" signs out and continues at once.
-2. As the group owner: invitation link, then sign out for the new person: no box covers the Join button; Join works.
-3. With the invitation message open, tap an invitation link: the box closes and the link's screen shows.
-4. Forms (apply, request a group, welcome screen, sign in): a mistake (wrong email, second password empty, box not ticked) shows a pop-up in the middle that stays until OK; then the box to fix is outlined.
-5. My rounds: the scoring chart has a colour for each kind of score, by day and by night.
-6. Enter: "Find another course" is the first line of the Course list; there is no separate link.
-7. A Join that fails (for example a replaced invitation) leaves no account behind and says why.
-8. A refused join says why in plain words, never "permission-denied".
+1. Mistakes on any form (wrong email, empty box, name already used) show a pop-up in the middle that stays until OK; the box to fix is then outlined.
+2. Enter: after choosing the tee, only that tee stays; Change shows them all again.
+3. Manage: a joined golfer has a small tick beside the name; "Let them join again" is under the ··· button.
+4. The header shows your name, never your email.
+5. Admin, cockpit: people by their golfer's name; "last seen" says Just now, 12 min ago, Today 8:41 am, Yesterday 9:10 pm.
 
 Report problems with Send a report in the app.

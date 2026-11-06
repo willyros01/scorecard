@@ -153,6 +153,8 @@ allowed "CK1 Willy lists every round"                                         qu
 refused "CK1 an ordinary account cannot list every group"                     query_as "${TO}" "" associations false
 refused "CK1 an ordinary account cannot list every membership"                query_as "${TO}" "" members true
 refused "CK1 an ordinary account cannot list every round"                     query_as "${TO}" "" rounds true
+allowed "CK1 Willy lists every group's directory (golfer names, 2.31.2)"     query_as "${TW}" "" directory true
+refused "CK1 an ordinary account cannot list every group's directory"         query_as "${TO}" "" directory true
 refused "CK1 Willy still cannot change a group he does not own"               write_as "${TW}" "associations/G2" '{"name":"Renamed"}'
 
 echo "== CK2 last seen: your own membership, that field only, the server's time"
