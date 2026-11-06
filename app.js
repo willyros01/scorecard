@@ -7461,6 +7461,12 @@ async function start(assocId) {
   if (association) /* batch 5: the key is no longer read by the app */
   /* beta.4: "last seen" for the cockpit (at most twice a day; quiet). */
   db.stampLastSeen();
+  /* Willy, 6 Nov 2026: coming back to the app (it stays open in the
+     background on a phone) counts as being seen too. */
+  if (!window.__seenOnResume) {
+    window.__seenOnResume = true;
+    document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") db.stampLastSeen(); });
+  }
   /* A new group: the cockpit shows the new group's numbers. */
   ownerCockpit = null; ownerCockpitState = "idle"; cockpitGroup = null; blockWatched = false; blockLists = { emails: [], domains: [], names: [] };
   db.stopWatching();

@@ -1502,6 +1502,26 @@ await check("TE1", "items 13 and 14: only the chosen tee stays (Change opens the
   await own.close();
 });
 
+/* Willy, 6 Nov 2026: "Last seen" said Yesterday for someone who opened the app
+   today, because a stamp came at most every 12 hours. A new day stamps again. */
+await check("LS1", "last seen: a member last seen late yesterday who opens the app today is shown as seen today", async () => {
+  const LOU = { email: "lou@example.com", password: "lou-pass-1" };
+  LOU.uid = (await accountByEmail(LOU.email)).localId;
+  const d = new Date(); d.setHours(0, 0, 0, 0);
+  const lateYesterday = new Date(d.getTime() - 60 * 1000).toISOString();
+  const r = await fetch(`${FS}:commit`, { method: "POST", headers: { ...OWNER, "Content-Type": "application/json" },
+    body: JSON.stringify({ writes: [{ update: { name: `projects/${P}/databases/(default)/documents/associations/G1/members/${LOU.uid}`, fields: { lastSeenAt: { timestampValue: lateYesterday } } }, updateMask: { fieldPaths: ["lastSeenAt"] } }] }) });
+  if (!r.ok) throw new Error(`seed: ${r.status}`);
+  const web = await newPage();
+  await web.goto(APP, { waitUntil: "load" });
+  await waitForText(web, /Sign in/);
+  await signIn(web, LOU.email, LOU.password);
+  const end = Date.now() + 20000; let m = null;
+  while (Date.now() < end && !((m = await getDocQuick(`associations/G1/members/${LOU.uid}`)) && m.lastSeenAt && new Date(m.lastSeenAt) >= d)) await web.waitForTimeout(500);
+  if (!m || !(new Date(m.lastSeenAt) >= d)) throw new Error(`still last seen ${m && m.lastSeenAt}`);
+  await web.close();
+});
+
 await check("CF1", "item 6: 'Find another course…' is the first line of the Course list; it opens the search; no separate link", async () => {
   const LOU = { email: "lou@example.com", password: "lou-pass-1" };
   const web = await newPage();

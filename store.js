@@ -1593,7 +1593,10 @@ const LAST_SEEN_EVERY_MS = 12 * 3600 * 1000;
 export async function stampLastSeen() {
   if (!fb || !uid || !assocId || !myMember || isAnonymousSession()) return;
   const at = myMember.lastSeenAt && typeof myMember.lastSeenAt.toMillis === "function" ? myMember.lastSeenAt.toMillis() : 0;
-  if (Date.now() - at < LAST_SEEN_EVERY_MS) return;
+  /* Willy, 6 Nov 2026: "Today" must mean today. A new calendar day always
+     stamps again, even if the last stamp was under 12 hours ago. */
+  const sameDay = at && new Date(at).toDateString() === new Date().toDateString();
+  if (sameDay && Date.now() - at < LAST_SEEN_EVERY_MS) return;
   try {
     await commitTogether([{ op: "update", path: ["associations", assocId, "members", uid],
       data: { lastSeenAt: { __serverTimestamp: true } } }], "note last seen");
