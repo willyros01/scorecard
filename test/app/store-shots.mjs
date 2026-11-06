@@ -75,9 +75,9 @@ const PAR = [4, 4, 3, 5, 4, 4, 3, 4, 5, 4, 3, 5, 4, 4, 4, 3, 4, 5];
 const SI = [7, 3, 15, 1, 11, 5, 17, 9, 13, 8, 16, 2, 10, 4, 12, 18, 6, 14];
 let seed = 7;
 const rnd = () => { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; };
-/* A season of Saturdays, May to October (the 6-month trend needs the spring). */
+/* A season of Saturdays, March to October (the 6-month trend needs the spring). */
 const dates = [];
-for (let t = Date.UTC(2026, 4, 2); t <= Date.UTC(2026, 9, 31); t += 7 * 86400000) dates.push(new Date(t).toISOString().slice(0, 10));
+for (let t = Date.UTC(2026, 2, 28); t <= Date.UTC(2026, 9, 31); t += 7 * 86400000) dates.push(new Date(t).toISOString().slice(0, 10));
 const round1 = (x) => Math.round(x * 10) / 10;
 
 const gameId = "gmFinal";
@@ -163,10 +163,11 @@ for (const d of DEVICES) {
       const card = p.locator('[data-act="show-card"]').first();
       if (await card.count()) { await card.click(); await p.waitForTimeout(800); await shot("3-card"); await p.keyboard.press("Escape").catch(() => {}); await p.locator('[data-close="1"]').first().click().catch(() => {}); }
       await tab(p, "summary"); await shot("4-summary");
-      await tab(p, "games");
-      const g = p.locator('[data-game]').first();
-      if (await g.count()) { await g.click().catch(() => {}); await p.waitForTimeout(800); }
-      await shot("5-games");
+      /* The scoring statistics, under the trend on My rounds (step 25). */
+      await tab(p, "history");
+      const stats = p.locator("text=Scoring ·").first();
+      if (await stats.count()) { await stats.scrollIntoViewIfNeeded(); await p.evaluate(() => window.scrollBy(0, -120)); }
+      await shot("5-stats");
     } else {
       await tab(p, "summary"); await shot("6-summary");
     }

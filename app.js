@@ -2297,8 +2297,12 @@ function screenHistory() {
       ${courseOptions(filter.courseId)}</select>
   </div>
   ${chips ? `<div class="pills">${chips}<button class="linkbtn" data-act="clear-filters">Clear</button></div>` : ""}
-  ${filter.golferId ? trendChart(rounds.filter((r) => r.golferId === filter.golferId)) : ""}
-  ${filter.golferId ? scoringStats(rounds.filter((r) => r.golferId === filter.golferId)) : ""}
+  ${(() => {
+    /* Batch 6: a regular member's own trend and scoring statistics show on
+       My rounds without picking a golfer (there is no golfer list there). */
+    const gid = filter.golferId || (!db.canManage() ? db.myGolferId(golfers) : "");
+    return gid ? `${trendChart(rounds.filter((r) => r.golferId === gid))}${scoringStats(rounds.filter((r) => r.golferId === gid))}` : "";
+  })()}
   ${rows.length === 0 ? empty("No rounds here yet", "Post one from the Enter tab, or widen the filters above.") : `
   <div class="eyebrow" style="display:flex;justify-content:space-between"><span>${rows.length} round${rows.length === 1 ? "" : "s"}</span><span>Differential</span></div>
   <div class="card list">${rows.map((r) => {
