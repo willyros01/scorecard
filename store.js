@@ -1587,16 +1587,14 @@ export async function declineGroupRequest(key) {
 
 /* ======================= beta.4: the cockpit ======================= */
 
-/* "Last seen": the member's own app stamps its membership, at most once every
-   12 hours per group. Quiet if refused (rules not published yet). */
-const LAST_SEEN_EVERY_MS = 12 * 3600 * 1000;
+/* "Last seen": the member's own app stamps its membership when the app is
+   opened or comes back to the front, at most once every 10 minutes per group
+   (Willy, 6 Nov 2026: close to real time). Quiet if refused. */
+const LAST_SEEN_EVERY_MS = 10 * 60 * 1000;
 export async function stampLastSeen() {
   if (!fb || !uid || !assocId || !myMember || isAnonymousSession()) return;
   const at = myMember.lastSeenAt && typeof myMember.lastSeenAt.toMillis === "function" ? myMember.lastSeenAt.toMillis() : 0;
-  /* Willy, 6 Nov 2026: "Today" must mean today. A new calendar day always
-     stamps again, even if the last stamp was under 12 hours ago. */
-  const sameDay = at && new Date(at).toDateString() === new Date().toDateString();
-  if (sameDay && Date.now() - at < LAST_SEEN_EVERY_MS) return;
+  if (Date.now() - at < LAST_SEEN_EVERY_MS) return;
   try {
     await commitTogether([{ op: "update", path: ["associations", assocId, "members", uid],
       data: { lastSeenAt: { __serverTimestamp: true } } }], "note last seen");

@@ -3278,12 +3278,18 @@ function waitingCount() {
     + (db.isPublicGroup() ? applications.length + publicReports.length : 0);
 }
 
+/* Willy, 6 Nov 2026: close to real time — Just now, 12 min ago, Today 8:41 am,
+   Yesterday 9:10 pm, then days. */
+const clock = (ms) => new Date(ms).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }).toLowerCase();
 const daysAgo = (ms) => {
   if (!ms) return "";
+  const mins = Math.floor((Date.now() - ms) / 60000);
+  if (mins < 2) return "Just now";
+  if (mins < 60) return `${mins} min ago`;
   const start = new Date(); start.setHours(0, 0, 0, 0);
-  if (ms >= start.getTime()) return "Today";
+  if (ms >= start.getTime()) return `Today ${clock(ms)}`;
   const d = Math.ceil((start.getTime() - ms) / 86400000);
-  return d <= 1 ? "Yesterday" : `${d} days ago`;
+  return d <= 1 ? `Yesterday ${clock(ms)}` : `${d} days ago`;
 };
 const seenMs = (m) => (m && m.lastSeenAt ? (typeof m.lastSeenAt.toMillis === "function" ? m.lastSeenAt.toMillis()
   : (m.lastSeenAt.seconds ? m.lastSeenAt.seconds * 1000 : 0)) : (m && m.lastSeen) || 0);
@@ -7463,7 +7469,7 @@ async function start(assocId) {
   groupState = "some";
   association = await db.loadAssociation(assocId);
   if (association) /* batch 5: the key is no longer read by the app */
-  /* beta.4: "last seen" for the cockpit (at most twice a day; quiet). */
+  /* "last seen" for the cockpit (at most every 10 minutes; quiet). */
   db.stampLastSeen();
   /* Willy, 6 Nov 2026: coming back to the app (it stays open in the
      background on a phone) counts as being seen too. */
