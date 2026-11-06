@@ -3362,10 +3362,14 @@ function ownerSummary(data) {
   const now = Date.now();
   const startToday = new Date(); startToday.setHours(0, 0, 0, 0);
   const people = new Map();
+  const names = data.golferNames || {};
   for (const m of data.members) {
-    const p = people.get(m.uid) || { uid: m.uid, name: m.displayName, lastSeen: 0, groups: [] };
+    const p = people.get(m.uid) || { uid: m.uid, name: "", lastSeen: 0, groups: [] };
     p.lastSeen = Math.max(p.lastSeen, m.lastSeen || 0);
-    if (!p.name && m.displayName) p.name = m.displayName;
+    /* The golfer's own name first; an email only if there is nothing else. */
+    const golferName = m.golferId && names[m.golferId];
+    if (golferName) p.name = golferName;
+    else if (!p.name || (p.name.includes("@") && m.displayName && !m.displayName.includes("@"))) p.name = m.displayName || p.name;
     p.groups.push(m.assocId);
     people.set(m.uid, p);
   }

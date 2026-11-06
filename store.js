@@ -1711,10 +1711,17 @@ export async function loadOwnerCockpit() {
   const members = membersSnap.docs.map((d) => {
     const m = d.data() || {};
     return { assocId: (d.ref.parent && d.ref.parent.parent && d.ref.parent.parent.id) || "",
-      uid: m.uid || d.id, role: m.role || "member", displayName: m.displayName || "",
+      uid: m.uid || d.id, role: m.role || "member", displayName: m.displayName || "", golferId: m.golferId || "",
       lastSeen: millisOf(m.lastSeenAt), joinedAt: millisOf(m.joinedAt) };
   }).filter((m) => m.assocId);
-  return { groups, members, rounds, roundsError, since: isoDay(since), me: uid, loadedAt: Date.now() };
+  /* Willy, 6 Nov 2026: people are shown by their golfer's name, not by an
+     email kept as a membership name. One read of the groups' directories. */
+  const golferNames = {};
+  try {
+    const dirSnap = await getDocs(collectionGroup(fb.db, "directory"));
+    for (const d of dirSnap.docs) { const n = (d.data() || {}).displayName; if (n && !golferNames[d.id]) golferNames[d.id] = n; }
+  } catch { /* names fall back to the membership's own */ }
+  return { groups, members, rounds, roundsError, golferNames, since: isoDay(since), me: uid, loadedAt: Date.now() };
 }
 
 /* ======================= beta.4: the applications switch ======================= */

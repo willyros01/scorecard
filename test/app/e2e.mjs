@@ -651,6 +651,9 @@ await check("E18", "the owner cockpit counts every group, and the owner's last s
   let m = null;
   while (Date.now() < end && !((m = await getDocQuick(`associations/${gid}/members/${W.uid}`)) && m.lastSeenAt)) await wil.waitForTimeout(400);
   if (!m || !m.lastSeenAt) throw new Error("last seen was not stamped");
+  /* 2.31.2: the cockpit names people by their golfer's name. */
+  const names = await wil.evaluate(async () => Object.keys((await (await import("/store.js")).loadOwnerCockpit()).golferNames || {}).length);
+  if (!names) throw new Error("the cockpit could not read the golfers' names");
   await wil.locator('[data-act="cockpit-group"][data-id="G1"]').first().click();
   await waitForText(wil, /Back to all groups/);
   if (!/Ada Admin/.test(await text(wil))) throw new Error("the group's members are not listed");
