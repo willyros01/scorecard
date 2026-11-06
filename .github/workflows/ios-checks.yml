@@ -5,7 +5,7 @@ name: iOS branch checks (V1-V6 and web tests)
 # the ci-logs branch of this repo.
 on:
   push:
-    branches: [ios, v2, fix-33]   # fix-33: temporary, removed when merged
+    branches: [ios, v2]
 
 permissions:
   contents: write   # to save the logs, and on the very first run the generated lockfile and bundle
