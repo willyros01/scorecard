@@ -22,7 +22,9 @@ jobs:
       - run: |
           npm ci --no-audit --no-fund
           npm run -s bundle
-      - run: bash .github/scripts/install-browsers.sh
+      - env:
+          TEST_BROWSER: ${{ matrix.browser }}
+        run: bash .github/scripts/install-browsers.sh
       - env:
           TEST_BROWSER: ${{ matrix.browser }}
         run: bash test/ops/run.sh 2>&1 | tee ops.log; test ${PIPESTATUS[0]} -eq 0
