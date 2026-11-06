@@ -1,14 +1,12 @@
-The Scorecard 2.31.0, 5 November: the whole update (batches 1 to 6). Before testing, run r31.txt in Cloud Shell (the 2.31.0 rules).
+The Scorecard 2.31.1, 6 November: the fixes from testing 2.31.0 (the rules are the same as 2.31.0; no script to run).
 
-1. Look: Lake blue, the new icon, day and night (tap Day / Night at the top).
-2. Forgot password (Sign in screen): the email "Sign in to The Scorecard" arrives; its link opens the app at "Choose a new password". (Until release day the link may open a web page first: the email-link switch is the release-day step.)
-3. Invite a golfer (Manage, Show, Invite): their message names the App Store and the Android download; their link opens "Welcome to <group>", email, password twice, Join, and they are in.
-4. Apply to the public group with a name that is already a golfer's: the warning comes at once.
-5. Edit and delete a round: the golfer's index and the group list change at once.
-6. A round from The Marker: its scores are read-only here; notes and game can change. Tap Card under it: the hole-by-hole card.
-7. My rounds: the handicap trend and the scoring statistics under it.
-8. Games: delete a game (Edit, Delete this game): its rounds stay, out of the game.
-9. Enter: only your own courses, and Find another course for any other (search works for every golfer).
-10. Admin (app owner): open a group you are not in; Settings, Course search key: paste a fresh key.
+1. Invitation on a phone where you are signed in: if your account already plays as another golfer, the app signs you out by itself and opens the new person's welcome screen. Otherwise it asks; "No, it's for someone else" signs out and continues at once.
+2. As the group owner: invitation link, then sign out for the new person: no box covers the Join button; Join works.
+3. With the invitation message open, tap an invitation link: the box closes and the link's screen shows.
+4. Forms (apply, request a group, welcome screen, sign in): a mistake (wrong email, second password empty, box not ticked) shows a pop-up in the middle that stays until OK; then the box to fix is outlined.
+5. My rounds: the scoring chart has a colour for each kind of score, by day and by night.
+6. Enter: "Find another course" is the first line of the Course list; there is no separate link.
+7. A Join that fails (for example a replaced invitation) leaves no account behind and says why.
+8. A refused join says why in plain words, never "permission-denied".
 
 Report problems with Send a report in the app.
