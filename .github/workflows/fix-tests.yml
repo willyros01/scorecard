@@ -1,4 +1,4 @@
-name: 2.31.1 fixes: the whole test suite (both browsers)
+name: "2.31.1 fixes - the whole test suite (both browsers)"
 on:
   push:
     branches: [fix-32]
