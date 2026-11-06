@@ -91,7 +91,7 @@ for (const [id, name, base] of PEOPLE) {
     const adjusted = Math.round(diff * t.slope / 113 + t.rating);
     const rid = `r-${id}-${k}`;
     const lastAtMaple = id === "gAlex" ? k >= dates.length - 4 : date === "2026-10-31";
-    const r = { id: rid, golferId: id, assocId: G, date, courseId: c.id, teeId: t.id, gross: adjusted + (rnd() < 0.3 ? 1 : 0), adjusted,
+    const r = { id: rid, golferId: id, assocId: G, date, courseId: c.id, teeId: t.id, courseName: c.name, teeName: t.name, gross: adjusted + (rnd() < 0.3 ? 1 : 0), adjusted,
       differential: diff, rating: t.rating, slope: t.slope, par: t.par, enteredBy: ME.uid, enteredAt: Date.parse(date) };
     if (date === "2026-10-31") r.gameId = gameId;
     if (lastAtMaple && c.id) {
@@ -139,7 +139,7 @@ let made = 0;
 for (const d of DEVICES) {
   for (const night of [false, true]) {
     const ctx = await browser.newContext({ viewport: d.viewport, deviceScaleFactor: d.deviceScaleFactor, isMobile: d.isMobile, hasTouch: d.hasTouch, colorScheme: night ? "dark" : "light" });
-    await ctx.addInitScript(() => { try { localStorage.setItem("golf:terms", JSON.stringify({ version: 1, at: 1 })); } catch {} });
+    await ctx.addInitScript((night) => { try { localStorage.setItem("golf:terms", JSON.stringify({ version: 1, at: 1 })); localStorage.setItem("golf:theme", night ? "dark" : "light"); } catch {} }, night);
     const p = await ctx.newPage();
     await p.goto(APP, { waitUntil: "load" });
     await waitForText(p, /Sign in/);
@@ -148,7 +148,8 @@ for (const d of DEVICES) {
     await p.locator('[data-act="sign-in"]').first().click();
     await waitForText(p, /Saturday Club/i);
     await p.waitForTimeout(2500);
-    if (night) await p.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"));
+    /* The signed-in email line is left out of the pictures. */
+    await p.waitForFunction(() => !/Signed in as/.test(document.body.innerText), null, { timeout: 15000 }).catch(() => {});
     const shot = async (name) => { await p.waitForTimeout(600); await p.screenshot({ path: path.join(OUT, `${d.key}-${night ? "night" : "day"}-${name}.png`) }); made++; console.log(`made ${d.key} ${night ? "night" : "day"} ${name}`); };
     if (!night) {
       await tab(p, "enter"); await shot("1-enter");

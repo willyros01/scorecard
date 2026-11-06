@@ -2074,7 +2074,7 @@ function openRoundCard(r) {
   sheetEl.hidden = false;
   sheetEl.innerHTML = `<div class="sheet-body">
     <div style="display:flex;justify-content:space-between;align-items:center"><h2>${esc((golferById(r.golferId) || {}).name || "The card")}</h2><button class="rowbtn" data-close="1">Close</button></div>
-    <p class="hint">${esc(dateOf(r) || "")} · ${esc(r.courseName || "")}${r.teeName ? ` · ${esc(r.teeName)}` : ""} · gross ${esc(r.gross)}</p>
+    <p class="hint">${esc(typeof r.date === "string" ? r.date : "")} · ${esc(r.courseName || courseName(r.courseId))}${r.teeName ? ` · ${esc(r.teeName)}` : ""} · gross ${esc(r.gross)}</p>
     <div style="overflow-x:auto"><table class="cardcheck" style="border-collapse:collapse;text-align:center">${half(0)}${half(9)}</table></div>
     <p class="hint">Scored in The Marker. Read only: corrections are made in The Marker. X = picked up.</p>
   </div>`;
