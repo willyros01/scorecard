@@ -110,12 +110,22 @@ async function nameClaimedBy(key, golferId) {
 }
 
 /* ---------- look, but change nothing ---------- */
+/* Batch 4, step 3: one line saying what Tidy is looking at right now. */
+function progress(text) {
+  let el = document.getElementById("tidy-progress");
+  if (!el) { el = document.createElement("p"); el.id = "tidy-progress"; el.className = "hint"; (document.querySelector("main") || document.body).prepend(el); }
+  el.textContent = text;
+}
+
 async function inspect() {
   const { collection, getDocs, query, where } = mod;
   findings = [];
 
   /* Every group this account can actually reach. */
-  const owned = await getDocs(query(collection(db, "associations"), where("ownerUid", "==", uid)));
+  /* Batch 4, steps 3 and 9: the app owner checks every group at once. */
+  let appOwner = false;
+  try { const d = await mod.getDoc(mod.doc(db, "appOwners", uid)); appOwner = d.exists() && d.data().active === true; } catch {}
+  const owned = await getDocs(appOwner ? collection(db, "associations") : query(collection(db, "associations"), where("ownerUid", "==", uid)));
   const groups = [];
   for (const doc of owned.docs) {
     const data = doc.data();
@@ -151,6 +161,8 @@ async function inspect() {
   let totalRounds = 0;
 
   for (const group of groups) {
+    /* Batch 4, step 3: say what is being checked, group by group. */
+    progress(`Checking ${group.name}…`);
     let snap;
     try { snap = await getDocs(collection(db, "associations", group.id, "rounds")); } catch { continue; }
     snap.forEach((d) => {
@@ -185,8 +197,10 @@ async function inspect() {
   const golferFixes = [];
   const seenNames = new Map();
 
+  progress(`Checking ${golfers.filter((g) => !g.archived).length} golfers…`);
   for (const golfer of golfers) {
     if (!rosterIds.has(golfer.id)) continue;   /* not in any group we can see */
+    if (golfer.archived) continue;             /* batch 4, step 3: archived golfers are left alone */
 
     const real = roundsByGolfer.get(golfer.id) || [];
     const window = [...real].sort(
@@ -379,6 +393,7 @@ async function inspect() {
   }
 
   if (!findings.length) {
+    progress("");
     findings.push({ kind: "clean", bad: false, title: "Nothing needs fixing", detail: `Checked ${golfers.length} golfers and ${totalRounds} rounds across ${groups.length} group${groups.length === 1 ? "" : "s"}.` });
   }
 

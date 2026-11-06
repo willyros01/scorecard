@@ -1,12 +1,14 @@
-The Scorecard 2.31.0 beta 1, 5 November: batch 1, the new look only.
+The Scorecard 2.31.0, 5 November: the whole update (batches 1 to 6). Before testing, run r31.txt in Cloud Shell (the 2.31.0 rules).
 
-Nothing else has changed: every screen works exactly as in 2.30.0.
+1. Look: Lake blue, the new icon, day and night (tap Day / Night at the top).
+2. Forgot password (Sign in screen): the email "Sign in to The Scorecard" arrives; its link opens the app at "Choose a new password". (Until release day the link may open a web page first: the email-link switch is the release-day step.)
+3. Invite a golfer (Manage, Show, Invite): their message names the App Store and the Android download; their link opens "Welcome to <group>", email, password twice, Join, and they are in.
+4. Apply to the public group with a name that is already a golfer's: the warning comes at once.
+5. Edit and delete a round: the golfer's index and the group list change at once.
+6. A round from The Marker: its scores are read-only here; notes and game can change. Tap Card under it: the hole-by-hole card.
+7. My rounds: the handicap trend and the scoring statistics under it.
+8. Games: delete a game (Edit, Delete this game): its rounds stay, out of the game.
+9. Enter: only your own courses, and Find another course for any other (search works for every golfer).
+10. Admin (app owner): open a group you are not in; Settings, Course search key: paste a fresh key.
 
-1. The app icon on the Home Screen is the new one: a green with a flag and a 12.4 badge, on Lake blue.
-2. The launch screen shows the new icon on a pale blue background.
-3. The header bar is Lake blue, with a green trim line under it.
-4. Buttons, links and highlights are blue instead of green.
-5. Night colours: tap Auto at the top and choose Night. The app turns dark blue, with a light green trim line. Everything stays easy to read.
-6. Go through Enter, History, Summary, Games, Manage and Settings, day and night. Look for anything still green or hard to read.
-
-No Firebase rule, index or data change. Report problems with Send a report in the app.
+Report problems with Send a report in the app.

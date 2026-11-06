@@ -108,6 +108,18 @@ async function waitForText(page, re, ms = 20000) {
   while (Date.now() < end) { if (re.test(await text(page))) return; await page.waitForTimeout(300); }
   throw new Error(`text ${re} did not appear; the screen says: ${(await text(page)).replace(/\s+/g, " ").slice(0, 300)}`);
 }
+/* Batch 2: the welcome screen's Join finishes joining by itself for a new
+   account; signing in to an existing account still shows the invitation. */
+async function acceptIfAsked(page) {
+  const end = Date.now() + 20000;
+  while (Date.now() < end) {
+    const btn = page.locator('[data-act="accept-named"]');
+    if (await btn.count() && await btn.first().isEnabled().catch(() => false)) { await btn.first().click(); return "asked"; }
+    if (await page.evaluate(async () => !!(await import("/store.js")).currentAssociation()).catch(() => false)) return "joined";
+    await page.waitForTimeout(300);
+  }
+  throw new Error("neither joined nor shown the invitation");
+}
 async function signIn(page, email, password) {
   await page.fill('[name="email"]', email);
   await page.fill('[name="password"]', password);
@@ -357,7 +369,7 @@ await check("E5", "build 25 (E1): approval sends the Sign in link, not the reset
   if ((await signInCodes(APPLICANT.email)).some((c) => c.requestType === "PASSWORD_RESET")) throw new Error("the reset-password email was sent");
   applicantLink = await latestSignInLink(APPLICANT.email);
   await pat.goto(applicantLink, { waitUntil: "load" });
-  await waitForText(pat, /Create your password/);
+  await waitForText(pat, /Create your password|Welcome to the public group/);
   if ((await pat.inputValue('[name="email"]')) !== APPLICANT.email) throw new Error("the email is not filled in from the link");
   await pat.fill('[name="password"]', APPLICANT.password);
   await pat.fill('[name="password-again"]', APPLICANT.password);
@@ -444,14 +456,13 @@ await check("E11", "a named private invitation: create an account, then join as 
   await ivy.fill('[name="password"]', "ivy-pass-1");
   await ivy.fill('[name="password-again"]', "ivy-pass-1");
   await ivy.locator('[data-act="create-account"]').click();
-  await waitForText(ivy, /Ivy Invitee/);
-  if (!/Saturday Group/i.test(await text(ivy))) throw new Error("the group name is not shown on the invitation");
+  await acceptIfAsked(ivy);
+  await waitForText(ivy, /Welcome to Saturday Group/i);
   const blocked = await ivy.evaluate(async () => {
     const db = await import("/store.js");
     return db.invitationFor("G1", "gJ").then((x) => x === null);
   });
   if (!blocked) throw new Error("an invitation record exists for a golfer never invited");
-  await ivy.locator('[data-act="accept-named"]').click();
   const end = Date.now() + 20000;
   while (Date.now() < end && (await ivy.evaluate(async () => (await import("/store.js")).currentAssociation())) !== "G1") await ivy.waitForTimeout(300);
   const uid = (await accountByEmail("ivy@example.com")).localId;
@@ -470,6 +481,10 @@ await check("E12", "an admin invites regular members only: no Admin choice on th
   await signIn(ada, A1.email, A1.password);
   await waitForText(ada, /Saturday Group/i);
   await tab(ada, "manage");
+  /* Batch 5: the golfer list opens closed on Manage; Show opens it. */
+  await ada.locator('[data-act="toggle-golfer-list"]').click();
+  await ada.locator('[data-invite-golfer="gJ"]').first().waitFor({ timeout: 20000 })
+    .catch(async () => { throw new Error(`no Invite button for Jay; the screen says: ${(await text(ada)).replace(/\s+/g, " ").slice(0, 600)}`); });
   await ada.locator('[data-invite-golfer="gJ"]').first().click();
   await waitForText(ada, /Invite Jay Unjoined/);
   if (await ada.locator('[name="invite-role"][value="admin"]').count()) throw new Error("the admin choice is offered to an admin");
@@ -611,7 +626,7 @@ await check("E18", "the owner cockpit counts every group, and the owner's last s
   await waitForText(wil, /Members, all groups/);
   if (wil.errors.length) throw new Error(wil.errors.join(" | "));
 });
-await check("E19", "the owner's Members tab is People as before, and Settings holds Group, Backup, Course lookup and Account", async () => {
+await check("E19", "the owner's Members tab is People as before, and Settings holds Group, Backup and Account (the key box is the app owner's)", async () => {
   await subtab(wil, "members");
   await waitForText(wil, /People/);
   const t = await text(wil);
@@ -619,7 +634,8 @@ await check("E19", "the owner's Members tab is People as before, and Settings ho
   await subtab(wil, "settings");
   await waitForText(wil, /Backup/);
   const s2 = await text(wil);
-  if (!/Course lookup/.test(s2)) throw new Error("Course lookup is missing from Settings");
+  /* Batch 5, step 31: the course search key box is the app owner's only. */
+  if (/Course search key/.test(s2)) throw new Error("a group owner who is not the app owner sees the course search key box");
   if (await wil.locator('[data-act="admin-tab"]').count() !== 4) throw new Error("the owner should see four tabs");
 });
 await check("E20", "a group admin sees the mini cockpit of their own group, and two tabs only", async () => {
@@ -674,6 +690,9 @@ async function applyAndOpenLink(name, email) {
   await p.fill('[name="apply-email"]', email);
   await p.locator('[name="ap-agree"]').check();
   await p.locator('[data-act="submit-application"]').click();
+  /* Batch 2, step 29: a taken name is said first; Continue anyway goes on. */
+  await waitForText(p, /Check your email|A golfer with this name already exists/);
+  if (/A golfer with this name already exists/.test(await text(p))) await p.locator('[data-act="apply-name-ok"]').click();
   await waitForText(p, /Check your email/);
   if (await accountByEmail(email)) throw new Error("an account was created before the link was tapped");
   const r = await fetch(`${AUTH_ADMIN}/oobCodes`);
@@ -682,7 +701,7 @@ async function applyAndOpenLink(name, email) {
   const code = codes[codes.length - 1].oobCode;
   const q = await newPage();
   await q.goto(`${APP}&apply=1&apiKey=fake-api-key&mode=signIn&oobCode=${encodeURIComponent(code)}&lang=en`, { waitUntil: "load" });
-  await waitForText(q, /Create your password/);
+  await waitForText(q, /Create your password|Welcome to the public group/);
   await q.fill('[name="email"]', email);
   await q.fill('[name="password"]', "auto-pass-1");
   await q.fill('[name="password-again"]', "auto-pass-1");
@@ -692,7 +711,7 @@ async function applyAndOpenLink(name, email) {
 await check("E22", "Auto: the applicant taps the link, chooses a password and is in the public group by themselves", async () => {
   await turnSwitch("auto");
   const q = await applyAndOpenLink("Gwen Auto", "gwen.auto@example.com");
-  await waitForText(q, /Welcome to the public group/, 30000);
+  await waitForText(q, /Post your rounds on the Enter tab/, 30000);
   const acct = await accountByEmail("gwen.auto@example.com");
   if (!acct || !acct.emailVerified) throw new Error("no confirmed account");
   const uid = acct.localId;
@@ -1022,8 +1041,7 @@ await check("E30", "Delete my account: signed out, gone, golfer and rounds kept;
   await back.fill('[name="password"]', "zed-new-pass-1");
   await back.fill('[name="password-again"]', "zed-new-pass-1");
   await back.locator('[data-act="create-account"]').click();
-  await waitForText(back, /Zed Leaver/);
-  await back.locator('[data-act="accept-named"]').click();
+  await acceptIfAsked(back);
   const end = Date.now() + 20000;
   while (Date.now() < end && (await back.evaluate(async () => (await import("/store.js")).currentAssociation())) !== "G1") await back.waitForTimeout(300);
   const nUid = (await accountByEmail(Z.email) || {}).localId;
@@ -1130,8 +1148,7 @@ for (const mode of ["web", "native-immediate", "native-delayed"]) {
     await page.fill('[name="password"]', password);
     await page.fill('[name="password-again"]', password);
     await page.locator('[data-act="create-account"]').click();
-    await waitForText(page, new RegExp("Logout " + mode));
-    await page.locator('[data-act="accept-named"]').click();
+    await acceptIfAsked(page);
     await page.waitForFunction(async () => (await import("/store.js")).currentAssociation() === "G1");
     await page.locator('[data-tab="summary"]').waitFor();
     await Promise.all([
@@ -1286,8 +1303,7 @@ for (const mode of ["web", "native"]) {
     await waitForText(page, /You.re invited/);
     await page.fill('[name="email"]',email); await page.fill('[name="password"]',password); await page.fill('[name="password-again"]',password);
     await page.locator('[data-act="create-account"]').click();
-    await page.locator('[data-act="accept-named"]').waitFor();
-    await page.locator('[data-act="accept-named"]').click();
+    await acceptIfAsked(page);
     await page.locator('[data-tab="summary"]').waitFor();
     await Promise.all([page.waitForNavigation({waitUntil:"load"}),page.evaluate(async()=> (await import("/store.js")).signOutEverywhere())]);
     await page.locator('[data-act="sign-in"]').first().waitFor();
@@ -1355,6 +1371,9 @@ await check("E34", "favourite courses: starred on the web, first in the app's co
   const tee = { id: "t1", name: "White", rating: 70.1, slope: 125, par: 72 };
   await put("courses/cA", { id: "cA", name: "Alder Creek", tees: [tee], createdBy: W.uid });
   await put("courses/cZ", { id: "cZ", name: "Zephyr Links", tees: [tee], createdBy: W.uid });
+  /* Batch 5, step 24: Enter lists only the golfer's own courses, so Lou has played both. */
+  await put("associations/G1/rounds/r-lou-a", { id: "r-lou-a", golferId: "gL", assocId: "G1", date: "2026-09-10", gross: 92, differential: 18, courseId: "cA" });
+  await put("associations/G1/rounds/r-lou-z", { id: "r-lou-z", golferId: "gL", assocId: "G1", date: "2026-09-11", gross: 93, differential: 19, courseId: "cZ" });
   const web = await newPage();
   await web.goto(APP, { waitUntil: "load" });
   await waitForText(web, /Sign in/);
@@ -1397,7 +1416,7 @@ await check("E34", "favourite courses: starred on the web, first in the app's co
 await check("B25-1", "E3: the same sign-in link opened again: 'This link no longer works', email filled in, and signing in there works", async () => {
   const again = await newPage();
   await again.goto(applicantLink, { waitUntil: "load" });
-  await waitForText(again, /Create your password/);
+  await waitForText(again, /Create your password|Welcome to the public group/);
   await again.fill('[name="password"]', "another-pass-9");
   await again.fill('[name="password-again"]', "another-pass-9");
   await again.locator('[data-act="finish-apply"]').click();
@@ -1426,13 +1445,13 @@ if (cutsConnections) await check("B25-2", "E1 rule 4: the password not saved (co
   const isUpdate = (url) => String(url).includes("accounts:update");
   await nina.route(isUpdate, (r) => r.abort());
   await nina.goto(await latestSignInLink(N.email), { waitUntil: "load" });
-  await waitForText(nina, /Create your password/);
+  await waitForText(nina, /Create your password|Welcome to the public group/);
   await nina.fill('[name="password"]', N.password);
   await nina.fill('[name="password-again"]', N.password);
   await nina.locator('[data-act="finish-apply"]').click();
   await waitForText(nina, /password was not saved/);
   await nina.reload({ waitUntil: "load" });
-  await waitForText(nina, /Create your password/);
+  await waitForText(nina, /Create your password|Welcome to the public group/);
   if (!new RegExp(N.email.replace(/\./g, "\\.")).test(await text(nina))) throw new Error("the signed-in email is not shown");
   await nina.unroute(isUpdate);
   await nina.fill('[name="password"]', N.password);
@@ -1478,7 +1497,7 @@ await check("B25-3", "E2: a sign-in link for another email on a signed-in device
   await rex.goto(link, { waitUntil: "load" });
   await waitForText(rex, /This link is for a new person/).catch((e) => { throw new Error(`second opening, after Cancel: ${e.message}`); });
   await rex.locator('[data-act="link-sign-out"]').click();
-  await waitForText(rex, /Create your password/);
+  await waitForText(rex, /Create your password|Welcome to the public group/);
   if ((await rex.inputValue('[name="email"]')) !== NEW.email) throw new Error("the new person's email is not filled in");
   await rex.fill('[name="password"]', NEW.password);
   await rex.fill('[name="password-again"]', NEW.password);
@@ -1510,9 +1529,8 @@ await check("B25-4", "E2: an invitation on a signed-in device asks 'Is this invi
   await rex.fill('[name="password"]', "kim-pass-1");
   await rex.fill('[name="password-again"]', "kim-pass-1");
   await rex.locator('[data-act="create-account"]').click();
-  await waitForText(rex, /Kim Invitee/);
+  await acceptIfAsked(rex);
   if (/Is this invitation for you/.test(await text(rex))) throw new Error("asked the new person again");
-  await rex.locator('[data-act="accept-named"]').click();
   await rex.waitForFunction(async () => (await import("/store.js")).currentAssociation() === "G1", null, { timeout: 20000 });
   const kim = await accountByEmail("kim@example.com");
   const endK = Date.now() + 15000;
@@ -1555,6 +1573,272 @@ await check("B25-7", "E5: the new wording — request a group; no 'Only create a
   await page.locator('[data-act="show-choose"]').click();
   await waitForText(page, /Request your own group/);
   if (/Start your own group|start a group/.test(await text(page))) throw new Error("the old wording is still shown");
+  await page.close();
+});
+
+/* ================= Batch 2 (2.31.0): getting in ================= */
+
+/* Step 1: Forgot password sends the app's own sign-in link (never Firebase's
+   reset email); the link opens "Choose a new password"; groups stay. */
+await check("GI1", "Forgot password: a sign-in link, never the reset email; the app's own Choose a new password; the new password works", async () => {
+  const P = { email: "forgot.me@example.com", password: "old-pass-1" };
+  await joinedPerson("gForgot", "Forgot Me", P.email, P.password);
+  const page = await newPage();
+  await page.goto(APP, { waitUntil: "load" });
+  await waitForText(page, /Sign in/);
+  await page.evaluate(async (e) => (await import("/store.js")).sendPasswordReset(e), P.email);
+  const codes = await signInCodes(P.email);
+  if (codes.some((c) => c.requestType === "PASSWORD_RESET")) throw new Error("Firebase's reset email was sent");
+  const mine = codes.filter((c) => c.requestType === "EMAIL_SIGNIN");
+  if (!mine.length) throw new Error("no sign-in link was sent");
+  const code = mine[mine.length - 1].oobCode;
+  await page.waitForTimeout(2000);   /* an account made seconds ago must never be taken for a new one */
+  /* As the email arrives with the action URL on the join page: our values sit inside continueUrl. */
+  const cont = `${APP}&apply=1&e=${encodeURIComponent(P.email)}&reset=1`;
+  const q = await newPage();
+  await q.goto(`${APP}&apiKey=fake-api-key&mode=signIn&oobCode=${encodeURIComponent(code)}&lang=en&continueUrl=${encodeURIComponent(cont)}`, { waitUntil: "load" });
+  await waitForText(q, /Choose a new password/);
+  if ((await q.inputValue('[name="email"]')) !== P.email) throw new Error("the email is not filled in from the link");
+  await q.fill('[name="password"]', "new-pass-2");
+  await q.fill('[name="password-again"]', "new-pass-2");
+  await q.locator('[data-act="finish-apply"]').click();
+  await waitForText(q, /Your new password is saved/, 30000);
+  await q.waitForFunction(async () => (await import("/store.js")).currentAssociation() === "G1", null, { timeout: 20000 });
+  if (await getDocQuick(`associations/PUBLIC/members/${(await accountByEmail(P.email)).localId}`)) throw new Error("joined the public group");
+  const ok = await fetch(`${AUTH}/accounts:signInWithPassword?key=fake-api-key`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: P.email, password: "new-pass-2", returnSecureToken: true }) });
+  if (!ok.ok) throw new Error("the new password does not work");
+  await page.close(); await q.close();
+});
+
+await check("GI2", "Forgot password for an email with no account: says so, and no account is left behind", async () => {
+  const email = "nobody.here@example.com";
+  const page = await newPage();
+  await page.goto(APP, { waitUntil: "load" });
+  await waitForText(page, /Sign in/);
+  await page.evaluate(async (e) => (await import("/store.js")).sendPasswordReset(e), email);
+  const mine = (await signInCodes(email)).filter((c) => c.requestType === "EMAIL_SIGNIN");
+  if (!mine.length) throw new Error("no link");
+  const q = await newPage();
+  await q.goto(`${APP}&apply=1&e=${encodeURIComponent(email)}&reset=1&apiKey=fake-api-key&mode=signIn&oobCode=${encodeURIComponent(mine[mine.length - 1].oobCode)}&lang=en`, { waitUntil: "load" });
+  await waitForText(q, /Choose a new password/);
+  await q.fill('[name="password"]', "whatever-1");
+  await q.fill('[name="password-again"]', "whatever-1");
+  await q.locator('[data-act="finish-apply"]').click();
+  await waitForText(q, /There is no Scorecard account for that email/, 30000);
+  if (await accountByEmail(email)) throw new Error("an account was left behind");
+  await page.close(); await q.close();
+});
+
+/* Step 29: the taken-name warning, before anything is saved or sent. */
+await check("GI3", "applying with a name that is taken: warned before anything is sent; Sign in goes back; Continue anyway sends it for a person", async () => {
+  await put("golferNames/taken-name", { golferId: "gTakenName", name: "Taken Name" });
+  const email = "taken.again@example.com";
+  const p = await newPage();
+  await p.goto(APP, { waitUntil: "load" });
+  await waitForText(p, /Become a member or request a group/);
+  await p.locator('[data-act="show-choose"]').click();
+  await p.locator('[data-act="show-apply"]').click();
+  await p.fill('[name="apply-name"]', "Taken Name");
+  await p.fill('[name="apply-email"]', email);
+  await p.locator('[name="ap-agree"]').check();
+  await p.locator('[data-act="submit-application"]').click();
+  await waitForText(p, /A golfer with this name already exists/);
+  if (await getDocQuick(`publicApplications/${email}`)) throw new Error("the application was saved before the warning");
+  if ((await signInCodes(email)).length) throw new Error("a link was sent before the warning");
+  if (!(await p.locator('[data-act="apply-name-ok"]').count()) || !(await p.locator('[data-act="hide-apply"]').count())) throw new Error("no Sign in / Continue anyway");
+  await p.locator('[data-act="apply-name-ok"]').click();
+  await waitForText(p, /Check your email|waits for a person|read by a person/);
+  if (!(await getDocQuick(`publicApplications/${email}`))) throw new Error("Continue anyway did not send the application");
+  await p.close();
+});
+
+/* Step 2: one welcome screen; step 4: the whole first journey on a fresh
+   phone — Terms of Use first, then the invitation's welcome, then the group. */
+await check("GI4", "fresh phone: Terms of Use, then Welcome to the group (email, password twice, Join), then straight into the group", async () => {
+  await put("golfers/gFresh", { name: "Fresh Phone", nameKey: "fresh-phone", linkedUid: null, groups: ["G1"] });
+  await put("golferNames/fresh-phone", { golferId: "gFresh", name: "Fresh Phone" });
+  await put("associations/G1/roster/gFresh", { golferId: "gFresh" });
+  const url = await freshInvitation("gFresh");
+  if (!/&g=Saturday%20Group/.test(url)) throw new Error(`the link does not carry the group's name: ${url}`);
+  globalThis.__termsFresh = true;
+  const page = await newPage();
+  globalThis.__termsFresh = false;
+  await page.goto(`${APP}&${new URL(url).search.slice(1)}`, { waitUntil: "load" });
+  await waitForText(page, /Terms of Use/);
+  if (await page.locator('[data-act="create-account"]').count()) throw new Error("the welcome screen came before the terms");
+  await page.locator("#termsTick").check();
+  await page.locator('[data-act="terms-accept"]').click();
+  await waitForText(page, /Welcome to Saturday Group/);
+  if (!/Password again/i.test(await text(page)) || !/\bJoin\b/.test(await text(page))) throw new Error("not the welcome screen");
+  await page.fill('[name="email"]', "fresh.phone@example.com");
+  await page.fill('[name="password"]', "fresh-pass-1");
+  await page.fill('[name="password-again"]', "fresh-pass-1");
+  await page.locator('[data-act="create-account"]').click();
+  await page.waitForFunction(async () => (await import("/store.js")).currentAssociation() === "G1", null, { timeout: 30000 });
+  await waitForText(page, /Welcome to Saturday Group\. Post your rounds/);
+  const uid = (await accountByEmail("fresh.phone@example.com")).localId;
+  if ((await getDoc("golfers/gFresh")).linkedUid !== uid) throw new Error("the golfer is not linked");
+  await page.close();
+});
+
+/* ================= Batch 3 (2.31.0): safe saving ================= */
+
+/* A document with nested arrays and maps decoded (getDoc decodes one level). */
+const deepValue = (v) => v == null ? v : "arrayValue" in v ? (v.arrayValue.values || []).map(deepValue)
+  : "mapValue" in v ? Object.fromEntries(Object.entries(v.mapValue.fields || {}).map(([k, x]) => [k, deepValue(x)]))
+  : "integerValue" in v ? Number(v.integerValue) : "doubleValue" in v ? Number(v.doubleValue) : "nullValue" in v ? null : Object.values(v)[0];
+async function getDeep(docPath) {
+  const r = await fetch(`${FS}/${docPath}`, { headers: OWNER });
+  if (r.status === 404) return null;
+  const j = await r.json();
+  return Object.fromEntries(Object.entries(j.fields || {}).map(([k, v]) => [k, deepValue(v)]));
+}
+/* A page signed in as the owner, in G1. */
+async function ownerInG1() {
+  const page = await newPage();
+  await page.goto(APP, { waitUntil: "load" });
+  await waitForText(page, /Sign in/);
+  await signIn(page, W.email, W.password);
+  /* Signed in for real (the group remembered on the device can come first). */
+  await page.waitForFunction(async () => { const db = await import("/store.js"); return !!db.status().uid && !!db.currentAssociation(); }, null, { timeout: 20000 });
+  await page.evaluate(async () => (await import("/store.js")).setAssociation("G1"));
+  await page.waitForTimeout(800);
+  return page;
+}
+
+await check("SS1", "editing then deleting a round: round, golfer window and count, and group list change in ONE commit", async () => {
+  const P = { email: "ss.one@example.com", password: "ss-one-pass-1" };
+  await joinedPerson("gSS1", "Sam Safe", P.email, P.password);   /* one round r-gSS1, differential 14.0 */
+  await put("golfers/gSS1", { name: "Sam Safe", nameKey: "sam-safe", linkedUid: null, groups: ["G1"], roundCount: 1,
+    recentWindow: [{ roundId: "r-gSS1", date: "2026-09-05", differential: 14.0, assocId: "G1" }], handicapIndex: null });
+  const page = await ownerInG1();
+  const r1 = await page.evaluate(async () => (await import("/store.js")).saveRoundChange({ roundId: "r-gSS1", golferId: "gSS1",
+    change: { gross: 97, adjusted: 96, differential: 21.5 } }).then((x) => ({ ok: x.ok, queued: !!x.queued }), (e) => ({ error: String(e.code || e.message) })));
+  if (!r1.ok || r1.queued) throw new Error(`edit: ${JSON.stringify(r1)}`);
+  const g = await getDeep("golfers/gSS1");
+  const entry = (g.recentWindow || []).find((e) => e.roundId === "r-gSS1");
+  if (!entry || entry.differential !== 21.5) throw new Error(`window not updated: ${JSON.stringify(g.recentWindow)}`);
+  if (Number((await getDoc("associations/G1/rounds/r-gSS1")).gross) !== 97) throw new Error(`round not updated: ${JSON.stringify(await getDoc("associations/G1/rounds/r-gSS1"))}`);
+  const dir = await getDoc("associations/G1/directory/gSS1");
+  if (!dir || !dir.updatedAt || dir.displayName !== "Sam Safe") throw new Error(`group list not written: ${JSON.stringify(dir)}`);
+  const r2 = await page.evaluate(async () => (await import("/store.js")).saveRoundChange({ roundId: "r-gSS1", golferId: "gSS1", change: "delete" }).then((x) => x.ok, (e) => String(e.code || e.message)));
+  if (r2 !== true) throw new Error(`delete: ${r2}`);
+  const g2 = await getDeep("golfers/gSS1");
+  if (await getDocQuick("associations/G1/rounds/r-gSS1")) throw new Error("round not deleted");
+  if ((g2.recentWindow || []).some((e) => e.roundId === "r-gSS1") || g2.roundCount !== 0) throw new Error(`golfer not rebuilt: ${JSON.stringify(g2)}`);
+  await page.close();
+});
+
+await check("SS2", "a round from The Marker: its scores cannot be changed in The Scorecard (rules); its notes can", async () => {
+  await put("golfers/gSS2", { name: "Mark Locked", nameKey: "mark-locked", linkedUid: null, groups: ["G1"], roundCount: 1,
+    recentWindow: [{ roundId: "r-mk", date: "2026-10-01", differential: 12.0, assocId: "G1" }] });
+  await put("associations/G1/roster/gSS2", { golferId: "gSS2" });
+  await put("associations/G1/rounds/r-mk", { id: "r-mk", golferId: "gSS2", assocId: "G1", date: "2026-10-01", gross: 88, adjusted: 87, differential: 12.0,
+    enteredVia: "marker", cardId: "card-1", holes: [4,4,3,5,4,4,3,4,5,4,3,5,4,4,4,3,4,5], notes: "" });
+  const page = await ownerInG1();
+  const bad = await page.evaluate(async () => (await import("/store.js")).saveRoundChange({ roundId: "r-mk", golferId: "gSS2", change: { gross: 80, adjusted: 80, differential: 5 } }).then(() => "saved", (e) => String(e.code || e.message)));
+  if (bad === "saved") throw new Error("a Marker round's score was changed");
+  if ((await getDoc("associations/G1/rounds/r-mk")).gross !== 88) throw new Error("the score changed");
+  const ok = await page.evaluate(async () => (await import("/store.js")).saveRoundChange({ roundId: "r-mk", golferId: "gSS2", change: { notes: "windy" } }).then((x) => x.ok, (e) => String(e.code || e.message)));
+  if (ok !== true) throw new Error(`notes refused: ${ok}`);
+  if ((await getDoc("associations/G1/rounds/r-mk")).notes !== "windy") throw new Error("notes not saved");
+  await page.close();
+});
+
+await check("SS3", "deleting a game: the game and the game id on its rounds go in one commit; the rounds stay", async () => {
+  await put("associations/G1/games/gmDel", { id: "gmDel", assocId: "G1", date: "2026-10-02", endDate: null, courseId: "", name: "Gone Game", createdBy: W.uid });
+  await put("associations/G1/rounds/r-gm1", { id: "r-gm1", golferId: "gD1", assocId: "G1", date: "2026-10-02", gross: 90, differential: 15, gameId: "gmDel" });
+  await put("associations/G1/rounds/r-gm2", { id: "r-gm2", golferId: "gD2", assocId: "G1", date: "2026-10-02", gross: 91, differential: 16, gameId: "gmDel" });
+  const page = await ownerInG1();
+  const r = await page.evaluate(async () => (await import("/store.js")).deleteGame("gmDel").then((x) => x, (e) => ({ error: String(e.code || e.message) })));
+  if (!r.ok || r.rounds !== 2) {
+    /* Which part was refused? (diagnosis) */
+    const parts = await page.evaluate(async () => {
+      const db = await import("/store.js");
+      const out = {};
+      try { await db.callForTest?.("noop"); } catch {}
+      return out;
+    }).catch(() => ({}));
+    const t = await idToken(W.email, W.password);
+    const one = await writeAs(t, "associations/G1/rounds/r-gm1", { id: "r-gm1", golferId: "gD1", assocId: "G1", date: "2026-10-02", gross: 90, differential: 15, gameId: null });
+    const del = await deleteAs(t, "associations/G1/games/gmDel");
+    throw new Error(`${JSON.stringify(r)}; round write alone ${one}, game delete alone ${del} ${JSON.stringify(parts)}`);
+  }
+  if (await getDocQuick("associations/G1/games/gmDel")) throw new Error("the game is still there");
+  for (const id of ["r-gm1", "r-gm2"]) { const x = await getDoc(`associations/G1/rounds/${id}`); if (!x || x.gameId !== null) throw new Error(`${id}: ${JSON.stringify(x)}`); }
+  await page.close();
+});
+
+await check("SS4", "a new group puts the creator's existing golfer on its roster; no golfer named after the email", async () => {
+  /* The app owner is the one who creates groups (group creators are set by
+     his scripts); his own golfer, already in G1. */
+  await put("golfers/gWillyOwn", { name: "Owner Golfer", nameKey: "owner-golfer", linkedUid: W.uid, groups: ["G1"], roundCount: 0 });
+  await put("golferNames/owner-golfer", { golferId: "gWillyOwn", name: "Owner Golfer" });
+  await put("associations/G1/roster/gWillyOwn", { golferId: "gWillyOwn" });
+  const page = await ownerInG1();
+  const out = await page.evaluate(async (email) => {
+    const db = await import("/store.js");
+    let g;
+    try { g = await db.createAssociation({ name: "Second Group", displayName: "Owner" }); }
+    catch (e) { const st = db.status(); return { error: `creating the group: ${e.code || e.message} | ${JSON.stringify(st.error || st.lastError || st).slice(0, 300)}` }; }
+    db.setAssociation(g.id);
+    try { const mine = await db.linkGolferForMember(email); return { id: g.id, golfer: mine && mine.id }; }
+    catch (e) { return { error: `linking the golfer: ${e.code || e.message}` }; }
+  }, W.email).catch((e) => ({ error: String(e.message || e) }));
+  if (out.error) throw new Error(out.error);
+  /* Earlier tests may have linked another golfer to the owner: any golfer
+     already linked to the creator is the right one, never a new one. */
+  const mine = (await list("golfers")).filter((g) => g.linkedUid === W.uid).map((g) => g.id);
+  if (!mine.includes(out.golfer)) throw new Error(`linked ${out.golfer}, not one of the creator's golfers (${mine.join(", ")})`);
+  if (!(await getDocQuick(`associations/${out.id}/roster/${out.golfer}`))) throw new Error("not on the new roster");
+  if ((await list("golfers")).some((g) => g.name === W.email)) throw new Error("a golfer named after the email was created");
+  if (!((await getDeep(`golfers/${out.golfer}`)).groups || []).includes(out.id)) throw new Error("the golfer does not list the new group");
+  await page.close();
+});
+
+/* ================= Batch 4 (2.31.0): admin tools ================= */
+
+await check("AT1", "the app owner opens a group they are not in, as its owner; the visit is recorded; nobody else can", async () => {
+  const B = { email: "app.owner@example.com", password: "boss-pass-1" };
+  B.uid = await signUp(B.email, B.password);
+  await put(`appOwners/${B.uid}`, { active: true });
+  const t = await idToken(B.email, B.password);
+  /* the rules: owner powers in G1 without a membership */
+  if (await writeAs(t, "associations/G1/directory/gBossCheck", { golferId: "gBossCheck", displayName: "Boss Check", handicapIndex: null, updatedAt: 1 }) !== 200) throw new Error("the app owner could not act as an admin of G1");
+  const page = await newPage();
+  await page.goto(APP, { waitUntil: "load" });
+  await waitForText(page, /Sign in/);
+  await signIn(page, B.email, B.password);
+  await page.waitForFunction(async () => !!(await import("/store.js")).status().uid, null, { timeout: 20000 });
+  await page.waitForTimeout(1500);   /* the app's own start after signing in settles first */
+  const m = await page.evaluate(async () => { const db = await import("/store.js"); return db.loadMembership("G1"); });
+  if (!m || m.role !== "owner" || !m.appOwner) throw new Error(`membership: ${JSON.stringify(m)}`);
+  const log = await list("associations/G1/ownerLog");
+  if (!log.some((x) => x.uid === B.uid)) throw new Error("the visit was not recorded");
+  const rt = await idToken(R1.email, R1.password);
+  if (await writeAs(rt, "associations/G1/ownerLog/fake", { uid: R1.uid, at: 1, what: "x" }) === 200) throw new Error("a member could write the owner log");
+  await page.close();
+});
+
+await check("AT2", "deleting a group only hides it, in one commit; a member still reads their rounds; only the app owner brings it back", async () => {
+  await put("associations/G9", { name: "Hide Me", ownerUid: W.uid, joinCode: "HIDE01" });
+  await put(`associations/G9/members/${W.uid}`, { uid: W.uid, role: "owner", displayName: "Owner" });
+  await put(`associations/G9/members/${R1.uid}`, { uid: R1.uid, role: "member", displayName: "Rex", golferId: "gR" });
+  await put("associations/G9/rounds/r-hide", { id: "r-hide", golferId: "gR", assocId: "G9", date: "2026-10-04", gross: 90, differential: 15 });
+  const page = await ownerInG1();
+  const r = await page.evaluate(async () => (await import("/store.js")).hideGroup("G9").then((x) => x.ok, (e) => String(e.code || e.message)));
+  if (r !== true) throw new Error(`hide: ${r}`);
+  const g = await getDoc("associations/G9");
+  if (!g || g.hidden !== true) throw new Error("not hidden");
+  if (!(await getDocQuick("associations/G9/rounds/r-hide"))) throw new Error("a round was removed");
+  const rt = await idToken(R1.email, R1.password);
+  const read = await fetch(`http://127.0.0.1:8080/v1/projects/${P}/databases/(default)/documents/associations/G9/rounds/r-hide`, { headers: { Authorization: `Bearer ${rt}` } });
+  if (read.status !== 200) throw new Error(`the member cannot read their round: ${read.status}`);
+  const back = await page.evaluate(async () => (await import("/store.js")).hideGroup("G9", false).then(() => "restored", (e) => String(e.code || e.message)));
+  if (back === "restored") throw new Error("the group's owner brought it back (only the app owner may)");
+  const bt = await idToken("app.owner@example.com", "boss-pass-1");
+  const patch = await fetch(`http://127.0.0.1:8080/v1/projects/${P}/databases/(default)/documents/associations/G9?updateMask.fieldPaths=hidden`, { method: "PATCH", headers: { Authorization: `Bearer ${bt}`, "Content-Type": "application/json" }, body: JSON.stringify({ fields: { hidden: { booleanValue: false } } }) });
+  if (patch.status !== 200) throw new Error(`the app owner could not bring it back: ${patch.status}`);
   await page.close();
 });
 

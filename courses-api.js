@@ -10,6 +10,12 @@
 
 const KEY_STORE = "golf:courselookup";
 
+/* Batch 5, step 31 (Willy, 1 Nov 2026): the search goes through The Marker's
+   Cloudflare server, which holds the key (GolfCourseAPI's terms: never in an
+   app). Members share its daily limit. The app hands in the caller. */
+let worker = null;
+export const setWorkerCaller = (fn) => { worker = fn; };
+
 /* The key is stored once on the group document in Firestore and handed to this
    module when the group loads. Everybody in the group gets it automatically —
    nobody types it, and there is no file to keep in step. Only the owner can
@@ -23,7 +29,8 @@ const AUTH = (key) => ({ Authorization: "Key " + key });
 
 const savedKey = () => { try { return localStorage.getItem(KEY_STORE) || ""; } catch { return ""; } };
 export const getKey = () => sharedKey || savedKey();
-export const hasKey = () => !!getKey();
+/* With the server, every signed-in golfer can search. */
+export const hasKey = () => !!worker;
 export function setKey(k) {
   try { k && k.trim() ? localStorage.setItem(KEY_STORE, k.trim()) : localStorage.removeItem(KEY_STORE); } catch {}
 }
@@ -123,10 +130,16 @@ function normalize(c) {
 
 /* Throws a short code the UI turns into a sentence. */
 export async function search(query) {
-  const key = getKey();
-  if (!key) throw new Error("NO_KEY");
   if (!query || query.trim().length < 3) throw new Error("TOO_SHORT");
   if (!navigator.onLine) throw new Error("OFFLINE");
+  if (worker) {
+    const data = await worker(`/search?q=${encodeURIComponent(query.trim())}`).catch((e) => { throw new Error(workerCode(e)); });
+    const found = (data.courses || []).map((c) => ({ ...c, id: String(c.providerId || c.id || "") })).filter((c) => c.id);
+    if (!found.length) throw new Error("NO_MATCH");
+    return found.slice(0, 12);
+  }
+  const key = getKey();
+  if (!key) throw new Error("NO_KEY");
 
   let res;
   try {
@@ -159,10 +172,17 @@ export async function search(query) {
  * So this is not an optimisation — it is the only way to get a rating and a
  * slope at all. */
 export async function courseById(id) {
-  const key = getKey();
-  if (!key) throw new Error("NO_KEY");
   if (!id) throw new Error("NO_MATCH");
   if (!navigator.onLine) throw new Error("OFFLINE");
+  if (worker) {
+    const data = await worker(`/course?id=${encodeURIComponent(String(id).trim())}`).catch((e) => { throw new Error(workerCode(e)); });
+    const c = data.course || {};
+    const course = { ...c, id: String(c.providerId || id), tees: (c.tees || []).filter((t) => t && t.rating && t.slope && !t.withdrawn) };
+    if (!course.tees.length) throw new Error("NO_RATINGS");
+    return course;
+  }
+  const key = getKey();
+  if (!key) throw new Error("NO_KEY");
 
   let res;
   try {
@@ -217,8 +237,18 @@ export async function searchWide(query) {
   return merged.slice(0, 10);
 }
 
+/* The server's answers, as this module's codes. */
+function workerCode(e) {
+  const m = String((e && e.message) || e);
+  if (m === "LIMIT") return "LIMIT";
+  if (["OFFLINE", "UNREACHABLE", "TOO_SHORT", "NO_MATCH", "NO_RATINGS"].includes(m)) return m;
+  if (m === "SIGN_IN" || m === "NOT_SET_UP") return "UNREACHABLE";
+  return m || "UNREACHABLE";
+}
+
 export function explain(code) {
   switch (String(code)) {
+    case "LIMIT": return "Today's course searches are used up (100 a day for each golfer). Try again tomorrow, or enter the tees by hand.";
     case "NO_KEY": return "Course search is not set up yet. Type the rating and slope off the scorecard for now — it takes about twenty seconds.";
     case "TOO_SHORT": return "Type at least three letters of the course or club name.";
     case "OFFLINE": return "You're offline, so lookup isn't available. Enter the tees by hand — everything else works.";

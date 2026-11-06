@@ -461,7 +461,7 @@ for (const [name, type] of browsers) {
     await check(`B2-${tag}`, `${name}: an invitation while signed out asks to create an account first`, async () => {
       await waitForText(page, /You.re invited/);
       const t = await bodyText(page);
-      if (!/Create account/.test(t)) throw new Error("no Create account button");
+      if (!/\bJoin\b/.test(t)) throw new Error("no Join button on the welcome screen");
       if (/Type the name you play under/.test(t)) throw new Error("the invitation was shown before an account");
     });
     await check(`B3-${tag}`, `${name}: two different passwords are refused before anything is created`, async () => {

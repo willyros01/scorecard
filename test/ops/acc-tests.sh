@@ -98,7 +98,7 @@ refused "ACC1 anonymous cannot read an unclaimed golfer"                     get
 refused "ACC1 anonymous cannot read an invitation"                           get_as "${TA}" "associations/G1/invites/gU"
 refused "ACC1 anonymous cannot read courses"                                 get_as "${TA}" "courses/c1"
 refused "ACC1 anonymous cannot read a join code"                             get_as "${TA}" "joinCodes/ABC123"
-refused "ACC1 anonymous cannot look up a golfer name"                        get_as "${TA}" "golferNames/alice-guest"
+allowed "ACC1 a single golfer-name check is open (batch 2: the applicant's taken-name warning)" get_as "${TA}" "golferNames/alice-guest"
 refused "ACC1 anonymous cannot post a round"                                 write_as "${TA}" "associations/G1/rounds/rNew" '{"golferId":"gA","assocId":"G1"}'
 refused "ACC1 anonymous cannot create a group"                               write_as "${TA}" "associations/Gnew" "{\"name\":\"Mine\",\"ownerUid\":\"${A}\"}"
 refused "ACC1 anonymous cannot create a golfer"                              write_as "${TA}" "golfers/gNew" '{"name":"New Person","linkedUid":null}'

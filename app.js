@@ -2,13 +2,16 @@ import * as db from "./store.js";
 import * as model from "./model.js";
 import * as lookup from "./courses-api.js";
 import * as platform from "./platform.js";
+/* Batch 5, step 31: course search through The Marker's server (key never on a phone). */
+lookup.setWorkerCaller((path) => db.callMarkerWorker(path));
 
 const VERSION = (typeof self !== "undefined" && self.APP_VERSION) || "dev";
 const ONE_TIME_INVITATION_NOTICE = "This invitation link is for one-time use only. Once you join, it cannot be used again.";
 /* 2.30.0 (Willy, Oct 1 and 11): every invitation starts by sending iPhone and iPad users to the App Store. */
 const APP_STORE_URL = "https://apps.apple.com/app/id6817462903";
-const APP_STORE_STEP = `Step 1 — on an iPhone or iPad, download The Scorecard from the App Store first: ${APP_STORE_URL}` +
-  (platform.isAndroid() ? "\nAndroid or Fire tablet: install the Android test APK from https://www.cuberoot-systems.com/downloads/scorecard.apk (available after Android release)." : "");
+/* Batch 2: Android too (the signed download on the Cuberoot site). */
+const ANDROID_URL = "https://www.cuberoot-systems.com/downloads/scorecard.apk";
+const APP_STORE_STEP = `Step 1 — download The Scorecard first.\niPhone or iPad, from the App Store: ${APP_STORE_URL}\nAndroid: ${ANDROID_URL}`;
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -240,6 +243,7 @@ let fastEntry = null;   /* { scores: {golferId: "97"}, indexes: {golferId: "14.2
    redraw — a dialog that reappears is worse than one that is missed. */
 let toldAboutPromotion = false;
 let editingGame = false;
+let confirmGameDelete = null;   /* Batch 3: the game whose deletion is being confirmed */
 let invitedGolfer = null;
 let invitedGroupName = "";
 /* Build 25, Fixes E2–E4 (Willy, 13 and 22 Oct 2026).
@@ -273,6 +277,8 @@ let returnTo = (() => {
 let signedOutStep = null;
 let applySentTo = "";           /* signed out: the application just sent */
 let applySentAuto = false;      /* beta.4: that application got the sign-in link (Auto) */
+let applyNameTaken = "";        /* Batch 2, step 29: the name typed is already a golfer's */
+let applyNameOk = "";           /* "Continue anyway" was tapped for this name */
 let applyInUse = "";            /* beta.4: the email typed already has an account */
 let applySettings = null;       /* beta.4: { mode, dailyLimit }, read when the form opens */
 let requestSentTo = "";         /* signed out: the group request just sent */
@@ -302,6 +308,8 @@ let courseDraft = null;
 let showHidden = false;   /* Courses screen: reveal the hidden ones so they can be brought back. */
 let gameDraft = null;
 let finder = { q: "", results: [], busy: false, msg: "" };
+/* Batch 5, step 24 (Willy, 28 Oct): Manage opens with both lists closed, every time. */
+let showGolferList = false, showCourseList = false;
 let rankPeriod = { year: String(new Date().getFullYear()), month: "" };
 let editingRound = null;
 let confirmId = null;
@@ -333,23 +341,73 @@ const sortedCourses = () => {
    website. "Played most" counts the rounds this account can see here (an
    admin's group, a member's own). The chosen course is selected once only. */
 function courseOptions(selectedId) {
-  const list = sortedCourses();
+  /* Batch 5, step 24 (Willy, 28 Oct 2026): only the golfer's own courses —
+     ★ favourites, then my courses, most played first. Any other course is one
+     search away ("Find another course"). */
+  const list = sortedCourses().filter((c) => !c.withdrawn);
   const favs = db.favouriteCourses();
-  const fav = list.filter((c) => favs.includes(c.id));
   const counts = {};
   for (const r of rounds || []) if (r && r.courseId) counts[r.courseId] = (counts[r.courseId] || 0) + 1;
-  const most = list.filter((c) => !favs.includes(c.id) && counts[c.id])
-    .sort((a, b) => counts[b.id] - counts[a.id] || byName(a, b)).slice(0, 3);
+  const mineIds = new Set([...db.myCourses(), ...Object.keys(counts), ...list.filter((c) => c.createdBy === db.status().uid).map((c) => c.id)]);
+  if (selectedId) mineIds.add(selectedId);
+  const fav = list.filter((c) => favs.includes(c.id));
+  const mine = list.filter((c) => !favs.includes(c.id) && mineIds.has(c.id))
+    .sort((a, b) => (counts[b.id] || 0) - (counts[a.id] || 0) || byName(a, b));
   let chosen = false;
   const opt = (c) => {
     const on = !chosen && c.id === selectedId;
     if (on) chosen = true;
     return `<option value="${c.id}" ${on ? "selected" : ""}>${esc(c.name)}</option>`;
   };
-  if (!fav.length && !most.length) return list.map(opt).join("");
   return (fav.length ? `<optgroup label="\u2605 My favourites">${fav.map(opt).join("")}</optgroup>` : "")
-    + (most.length ? `<optgroup label="Played most">${most.map(opt).join("")}</optgroup>` : "")
-    + `<optgroup label="All courses">${list.map(opt).join("")}</optgroup>`;
+    + (mine.length ? `<optgroup label="My courses">${mine.map(opt).join("")}</optgroup>` : "");
+}
+
+/* Batch 5, step 24: "Find another course", for every golfer. Two parts:
+   courses already in The Scorecard (searched first), then the golf course
+   database through The Marker's server. Check the course, then use it. */
+let courseFind = null;   /* { q, busy, msg, lib: [], ext: [], check: null } */
+function courseFindPanel() {
+  const f = courseFind;
+  if (!f) return `<div class="style-switch"><button class="linkbtn" data-act="cf-open">Find another course</button></div>`;
+  if (f.check) {
+    const c = f.check;
+    return `<div class="card padded">
+      <div class="eyebrow">Check the course</div>
+      <p class="lead" style="margin:0.2rem 0"><b>${esc(c.name)}</b>${c.where ? ` · ${esc(c.where)}` : ""}</p>
+      ${(c.tees || []).map((t) => `<div class="teeline"><span>${esc(t.name)}</span><span>${(+t.rating).toFixed(1)} / ${t.slope} · par ${t.par}</span></div>`).join("")}
+      <p class="hint">Course details may contain errors. A club's own scorecard, verified from pictures, corrects them.</p>
+      <div class="inline-actions stacked"><button class="btn" data-act="cf-use" ${f.busy ? "disabled" : ""}>${f.busy ? "Saving…" : "Use this course"}</button>
+      <button class="btn ghost" data-act="cf-back">Back to the results</button></div>
+    </div>`;
+  }
+  return `<div class="card padded">
+    <div class="eyebrow">Find another course</div>
+    <div class="inline-form" style="padding:0">
+      <input name="cf-q" class="inline-input" value="${esc(f.q)}" placeholder="Course name or town" autocomplete="off">
+      <div class="inline-actions"><button class="btn compact" data-act="cf-find" ${f.busy ? "disabled" : ""}>${f.busy ? "Searching…" : "Find"}</button></div>
+    </div>
+    ${f.msg ? `<p class="hint">${esc(f.msg)}</p>` : ""}
+    ${f.lib.length ? `<div class="eyebrow">Already in The Scorecard</div><div class="results list">${f.lib.map((c, i) => `<button class="list-row" data-act="cf-lib" data-id="${i}"><span class="grow"><span class="name">${esc(c.name)}</span><br><span class="sub">${c.tees.length} tee${c.tees.length === 1 ? "" : "s"}</span></span><span class="chev">›</span></button>`).join("")}</div>` : ""}
+    ${f.ext.length ? `<div class="eyebrow">From the golf course database</div><div class="results list">${f.ext.map((c, i) => `<button class="list-row" data-act="cf-ext" data-id="${i}"><span class="grow"><span class="name">${esc(c.name)}</span><br><span class="sub">${esc(c.where || "")}</span></span><span class="chev">›</span></button>`).join("")}</div>` : ""}
+    <div class="style-switch"><button class="linkbtn" data-act="cf-close">Close</button></div>
+  </div>`;
+}
+async function courseFindRun() {
+  const q = ((view.querySelector('[name="cf-q"]') || {}).value || courseFind.q).trim();
+  courseFind = { ...courseFind, q, busy: true, msg: "Searching…", lib: [], ext: [] };
+  render();
+  const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+  const mineIds = new Set([...db.favouriteCourses(), ...db.myCourses()]);
+  const lib = courses.filter((c) => c && !c.withdrawn && !mineIds.has(c.id) && words.every((w) => `${c.name} ${c.location || ""}`.toLowerCase().includes(w))).slice(0, 12);
+  let ext = [], msg = "";
+  try {
+    const names = new Set(courses.map((c) => String(c.name || "").trim().toLowerCase()));
+    ext = (await lookup.searchWide(q)).filter((c) => !names.has(String(c.name || "").trim().toLowerCase()));
+  } catch (e) { msg = lib.length ? "The golf course database could not be reached just now; these are the courses already in The Scorecard." : lookup.explain(e && e.message); }
+  if (!lib.length && !ext.length && !msg) msg = "No course matched. Try the club name, or just the town.";
+  courseFind = { ...courseFind, busy: false, msg, lib, ext };
+  render();
 }
 
 /* The star under a chosen course: add it to, or take it off, my favourites. */
@@ -377,7 +435,8 @@ function shownIndex(golfer) {
 /* Whether an index came from real rounds or a typed-in starting figure, so a
    screen can say so rather than passing off an estimate as a calculation. */
 const indexSource = (golfer) => model.effectiveIndex(golfer).source;
-const courseById = (id) => courses.find((c) => c.id === id);
+/* Batch 3, Fix 5: an empty id finds nothing, never a course without its own id. */
+const courseById = (id) => (id ? courses.find((c) => c.id === id) : undefined);
 
 /* ================= appearance ================= */
 
@@ -922,6 +981,8 @@ function screenApply() {
       <input class="field" name="apply-name" value="${esc(joinForm.name || "")}" placeholder="e.g. Willy Rosales" autocomplete="name" maxlength="80">
       <label class="lbl">Email</label>
       <input class="field" name="apply-email" type="email" value="${esc(authForm.email || "")}" placeholder="you@example.com" autocomplete="email" autocapitalize="none" maxlength="254">
+      ${applyNameTaken ? `<div class="note warn in-use"><b>A golfer with this name already exists.</b> If that's you, sign in instead. Otherwise, continue and your application will be checked by a person.</div>
+        <div class="inline-actions stacked"><button class="btn" data-act="hide-apply">Sign in</button><button class="btn ghost" data-act="apply-name-ok">Continue anyway</button></div>` : ""}
       ${applyInUse ? `<div class="note warn in-use"><b>This email already has an account.</b> Sign in with it instead, or tap Forgot the password on the Sign in screen. Nothing was sent.</div>
         <div class="inline-actions stacked"><button class="btn" data-act="hide-apply">Back to Sign in</button></div>` : ""}
       <div class="note tip">Other members of the public group see your <b>full name</b> and your <b>handicap index</b>, and nothing else. Your rounds stay private.</div>
@@ -949,23 +1010,26 @@ function screenApply() {
   </div>`;
 }
 
-/* beta.4: the applicant tapped the link in their email. */
+/* beta.4: the applicant tapped the link in their email.
+   Batch 2 (Willy, 22 Oct 2026): the same welcome screen as an invitation;
+   a Forgot password link shows "Choose a new password" instead. */
 function screenFinishApply() {
+  const reset = db.isResetLink();
+  const email = db.applyLinkEmail() || authForm.email || db.rememberedApplyEmail();
   return `<div class="stack">
     ${flashBar()}
     ${offlineAccountNote()}
     <div class="card padded">
-      <h2 class="panel-title">Create your password</h2>
-      <p class="hint">This link confirms your email. Create a password for The Scorecard and you are done — one time only.</p>
+      <h2 class="panel-title">${reset ? "Choose a new password" : "Welcome to the public group"}</h2>
+      <p class="lead">${reset ? "For your Scorecard account. Your groups and rounds stay as they are." : "Create your password to join. One time only."}</p>
       <label class="lbl">Email</label>
-      <input class="field" name="email" type="email" value="${esc(db.applyLinkEmail() || authForm.email || db.rememberedApplyEmail())}" placeholder="you@example.com" autocomplete="username" autocapitalize="none" ${db.applyLinkEmail() ? "readonly" : ""}>
-      <label class="lbl">New password</label>
-      <input class="field" name="password" type="password" placeholder="At least 6 characters" autocomplete="new-password">
-      <label class="lbl">The same password again</label>
+      <input class="field" name="email" type="email" value="${esc(email)}" placeholder="you@example.com" autocomplete="username" autocapitalize="none" ${db.applyLinkEmail() ? "readonly" : ""}>
+      <label class="lbl">${reset ? "New password" : "Password"}</label>
+      <input class="field" name="password" type="password" placeholder="Not your email password" autocomplete="new-password">
+      <label class="lbl">Password again</label>
       <input class="field" name="password-again" type="password" placeholder="At least 6 characters" autocomplete="new-password">
-      <p class="hint"><b>Not your email password.</b> Pick a different one, for The Scorecard only.</p>
       <div class="inline-actions stacked">
-        <button class="btn" data-act="finish-apply" ${joining ? "disabled" : ""}>${joining ? "Saving…" : "Save my password"}</button>
+        <button class="btn" data-act="finish-apply" ${joining ? "disabled" : ""}>${joining ? "Saving…" : reset ? "Save my new password" : "Join"}</button>
       </div>
     </div>
     ${versionBlock()}
@@ -988,6 +1052,8 @@ async function finishApplyHere() {
       /* E3: expired or already used — never a dead end. */
       linkProblem = { email: db.applyLinkEmail() || fields.email };
       db.dropApplyLink();
+    } else if (/no-such-account/.test(code)) {
+      flashMsg("There is no Scorecard account for that email, so there is no password to change. Nothing was created.");
     } else if (/invalid-email|user-mismatch/.test(code)) {
       flashMsg("That is not the email the link was sent to. Type the email you applied with.");
     } else {
@@ -1001,6 +1067,12 @@ async function finishApplyHere() {
     /* Signed in from the link, password not saved: rule 4 shows Create your
        password again, now and at every start, until it is saved. */
     flashMsg("Your email is confirmed, but the password was not saved. Type it again and tap Save my password.");
+    return render();
+  }
+  if (finished.reset) {
+    /* Forgot password: the person's own groups, nothing joined. */
+    await settleGroup(db.recallAssociation());
+    flashMsg("Your new password is saved. Use it on every device.");
     return render();
   }
   await afterPasswordCreated();
@@ -1072,6 +1144,15 @@ async function submitApplicationHere() {
   busy("Sending your application");
   render();
   applyInUse = "";
+  /* Batch 2, step 29 (Willy, 1 Nov 2026): a name that is already a golfer's
+     is said at once, before anything is saved or sent. */
+  applyNameTaken = "";
+  if (applyNameOk !== fullName && await db.nameTaken(fullName)) {
+    applyNameTaken = fullName;
+    joining = false; idle(); render();
+    if (agreed) { const box = view.querySelector('[name="ap-agree"]'); if (box) box.checked = true; }
+    return;
+  }
   try {
     await db.submitApplication({ fullName, email });
     /* beta.4: with the switch on Auto and a plain name, the sign-in link goes
@@ -1431,15 +1512,21 @@ function screenSignedOut(invite) {
     : showCodeEntry ? "Join with a code" : "Sign in";
 
   if (joiningSomething && mode === "create") {
+    /* Batch 2 (Willy, 22 Oct 2026): one welcome screen for invited golfers
+       and approved applicants — "Welcome to <group>", email, password twice,
+       Join. An open invitation also asks the name they play under. */
+    const openInvite = invite && !invite.golferId && !adminOnly;
     return `<div class="stack">
       ${flashBar()}
       ${offlineAccountNote()}
       <div class="card padded">
-        <h2 class="panel-title">${heading}</h2>
-        <p class="lead">${invite ? "Create your account to join." : "Create your account, then type the code."}</p>
+        <h2 class="panel-title">${invite ? `Welcome to ${esc(invite.groupHint || "your group")}` : heading}</h2>
+        <p class="lead">${invite ? (adminOnly ? "You\u2019re invited to help run a group. Create your password to join." : "You\u2019re invited. Create your password to join.") : "Create your account, then type the code."}</p>
+        ${openInvite ? `<label class="lbl">Your name</label>
+        <input class="field" name="join-name" value="${esc(joinForm.name)}" placeholder="e.g. Willy Rosales" autocomplete="name">` : ""}
         ${newAccountFields()}
         <div class="inline-actions stacked">
-          <button class="btn" data-act="create-account" ${joining ? "disabled" : ""}>${joining ? "Creating your account…" : "Create account"}</button>
+          <button class="btn" data-act="create-account" ${joining ? "disabled" : ""}>${joining ? "Joining…" : invite ? "Join" : "Create account"}</button>
         </div>
         <p class="hint"><button class="linkbtn" data-act="account-mode-signin">Have an account? Sign in</button></p>
         ${showCodeEntry && !invite ? `<div class="inline-actions stacked"><button class="btn ghost" data-act="hide-code">Back</button></div>` : ""}
@@ -1603,6 +1690,10 @@ async function createAccountHere() {
     await loadInvitedDetails();
     joining = false;
     flashMsg("Account created. Use this email and password on your other devices.");
+    /* Batch 2: the welcome screen's Join finishes joining too, no second screen. */
+    const inv = db.readJoinLink();
+    if (inv && inv.golferId && invitedGolfer) { idle(); await acceptNamedHere(); return; }
+    if (inv && !inv.golferId && inv.role !== "admin" && joinForm.name.trim()) { idle(); await acceptInvite(); return; }
   } catch (err) {
     const code = String((err && (err.code || err.message)) || "");
     if (code.includes("email-already-in-use")) {
@@ -1658,6 +1749,7 @@ async function upgradeAccount() {
 }
 
 let editingKey = false;
+let keyInfo = undefined;   /* batch 5: { last4 } of the saved course search key */
 let showCodeEntry = false;
 let joining = false;
 
@@ -1732,6 +1824,7 @@ function enterInSteps({ course, tee, golfer, ags, diff, ch, ready2, pickableGame
           ${courseOptions(form.courseId)}
         </select>
         ${favouriteToggle(course)}
+        ${courseFindPanel()}
         ${course ? `<p class="step-ask" style="margin-top:1.2rem">From which tees?</p>
           <div class="tee-grid">
             ${course.tees.map((t) => `<button class="tee-choice ${t.id === form.teeId ? "picked" : ""}" data-tee="${t.id}">
@@ -1867,6 +1960,8 @@ function screenEnter() {
 
   /* Both layouts are built from the SAME values computed above — course, tee,
      golfer, ready2. Nothing about what is required or what is saved differs. */
+  /* Batch 3, Fix 1: a Marker round's scores are read-only here. */
+  const lockedMarker = !!(editingRound && (rounds.find((r) => r.id === editingRound) || {}).enteredVia === "marker");
   if (currentEnterStyle() === "steps" && !editingRound) {
     return enterInSteps({ course, tee, golfer, ags, diff, ch, ready2, pickableGames });
   }
@@ -1874,6 +1969,8 @@ function screenEnter() {
   return `<div class="stack">
     ${flashBar()}
     ${editingRound ? `<div class="note warn">Editing a posted round <button class="linkbtn" data-act="cancel-round-edit">Cancel</button></div>` : ""}
+    ${db.groupHidden() ? `<div class="note warn"><b>This group was deleted by its owner.</b> Its rounds are kept and still count for each golfer's handicap. Nothing new can be posted here.</div>` : ""}
+    ${lockedMarker ? `<div class="note tip"><b>Scored in The Marker.</b> Correct the scores in The Marker (Correct this card). Here you can change the notes and the game.</div>` : ""}
     ${db.canManage() ? "" : `<div class="style-switch"><button class="linkbtn" data-act="enter-steps">Switch to one step at a time</button></div>`}
 
     <div class="row">
@@ -1904,6 +2001,7 @@ function screenEnter() {
         ${courseOptions(form.courseId)}
       </select>
       ${favouriteToggle(course)}
+      ${courseFindPanel()}
     </div>
 
     ${course ? `<div>
@@ -1924,9 +2022,9 @@ function screenEnter() {
 
     <div class="row">
       <div><div class="eyebrow">Gross score</div>
-        <input class="field score" name="gross" inputmode="numeric" value="${form.gross}" placeholder="—"></div>
+        <input class="field score" name="gross" inputmode="numeric" value="${form.gross}" placeholder="—" ${lockedMarker ? "readonly" : ""}></div>
       <div><div class="eyebrow">Adjusted</div>
-        <input class="field score" name="adjusted" inputmode="numeric" value="${form.adjusted}" placeholder="${form.gross || "same"}"></div>
+        <input class="field score" name="adjusted" inputmode="numeric" value="${form.adjusted}" placeholder="${form.gross || "same"}" ${lockedMarker ? "readonly" : ""}></div>
     </div>
     <p class="hint">Adjusted gross caps each hole at net double bogey. Leave it blank if it matches your gross.</p>
 
@@ -1960,6 +2058,64 @@ const courseName = (id) => { const c = courseById(id); return c ? c.name : "Unkn
  * No chart library: one would add a download, a build step and another thing to
  * break, for a line and some dots. Every value here is one the app already
  * calculates. */
+/* Batch 6, step 10: a Marker round's card, read only, with the pars as played. */
+function openRoundCard(r) {
+  const par = Array.isArray(r.holePar) && r.holePar.length === 18 ? r.holePar : null;
+  const si = Array.isArray(r.holeSi) && r.holeSi.length === 18 ? r.holeSi : null;
+  const cell = (v, p) => {
+    const n = Number(v);
+    const cls = v === "X" ? "" : p && n < p ? "color:var(--pine);font-weight:800" : p && n > p ? "color:var(--pencil)" : "";
+    return `<td style="${cls}">${esc(v == null ? "·" : v)}</td>`;
+  };
+  const half = (from) => `<tr><th>Hole</th>${Array.from({ length: 9 }, (_, i) => `<th>${from + i + 1}</th>`).join("")}</tr>
+    ${par ? `<tr><th>Par</th>${par.slice(from, from + 9).map((p) => `<td>${p}</td>`).join("")}</tr>` : ""}
+    ${si ? `<tr><th>HCP</th>${si.slice(from, from + 9).map((p) => `<td>${p ?? ""}</td>`).join("")}</tr>` : ""}
+    <tr><th>Score</th>${r.holes.slice(from, from + 9).map((v, i) => cell(v, par && par[from + i])).join("")}</tr>`;
+  sheetEl.hidden = false;
+  sheetEl.innerHTML = `<div class="sheet-body">
+    <div style="display:flex;justify-content:space-between;align-items:center"><h2>${esc((golferById(r.golferId) || {}).name || "The card")}</h2><button class="rowbtn" data-close="1">Close</button></div>
+    <p class="hint">${esc(typeof r.date === "string" ? r.date : "")} · ${esc(r.courseName || courseName(r.courseId))}${r.teeName ? ` · ${esc(r.teeName)}` : ""} · gross ${esc(r.gross)}</p>
+    <div style="overflow-x:auto"><table class="cardcheck" style="border-collapse:collapse;text-align:center">${half(0)}${half(9)}</table></div>
+    <p class="hint">Scored in The Marker. Read only: corrections are made in The Marker. X = picked up.</p>
+  </div>`;
+}
+
+/* Batch 6, step 25 (Willy, 29 Oct 2026): simple scoring statistics from the
+   golfer's Marker rounds still in The Scorecard. Kept small. A picked-up hole
+   counts as double bogey or worse; rounds entered as a total are left out. */
+function scoringStats(list) {
+  const marker = list.filter((r) => Array.isArray(r.holes) && r.holes.length === 18 && Array.isArray(r.holePar) && r.holePar.length === 18);
+  if (!marker.length) return "";
+  const k = { eagle: 0, birdie: 0, par: 0, bogey: 0, double: 0 };
+  const by = { 3: [], 4: [], 5: [] };
+  let holes = 0;
+  for (const r of marker) r.holes.forEach((v, i) => {
+    const p = Number(r.holePar[i]);
+    if (!p) return;
+    holes++;
+    if (v === "X") { k.double++; return; }
+    const n = Number(v);
+    if (!Number.isFinite(n)) return;
+    const d = n - p;
+    if (d <= -2) k.eagle++; else if (d === -1) k.birdie++; else if (d === 0) k.par++; else if (d === 1) k.bogey++; else k.double++;
+    if (by[p]) by[p].push(n);
+  });
+  const max = Math.max(1, ...Object.values(k));
+  const bar = (label, n) => `<div style="display:grid;grid-template-columns:9em 1fr 3em;gap:8px;align-items:center;margin:4px 0">
+    <span>${label}</span><span style="background:var(--tint);border-radius:6px;height:14px"><span style="display:block;height:14px;border-radius:6px;background:var(--pine);width:${Math.round((n / max) * 100)}%"></span></span><b style="text-align:right">${n}</b></div>`;
+  const avg = (p) => {
+    const a = by[p];
+    if (!a.length) return `<div class="tile"><b style="display:block;font-size:1.3em">–</b><span>Par ${p}s</span></div>`;
+    const m = a.reduce((x, y) => x + y, 0) / a.length;
+    return `<div class="tile"><b style="display:block;font-size:1.3em">${m.toFixed(2)}</b><span>Par ${p}s · ${m - p >= 0 ? "+" : ""}${(m - p).toFixed(2)}</span></div>`;
+  };
+  return `<section class="panel"><div class="card padded">
+    <div class="eyebrow">Scoring · ${marker.length} Marker round${marker.length === 1 ? "" : "s"}, ${holes} holes</div>
+    ${bar("Eagles or better", k.eagle)}${bar("Birdies", k.birdie)}${bar("Pars", k.par)}${bar("Bogeys", k.bogey)}${bar("Double bogeys or worse", k.double)}
+    <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:10px;text-align:center">${avg(3)}${avg(4)}${avg(5)}</div>
+  </div></section>`;
+}
+
 function trendChart(list) {
   /* Wrapped whole. A chart is decoration — it must never be able to stop
      somebody reading their rounds, which is exactly what it did. */
@@ -2141,7 +2297,12 @@ function screenHistory() {
       ${courseOptions(filter.courseId)}</select>
   </div>
   ${chips ? `<div class="pills">${chips}<button class="linkbtn" data-act="clear-filters">Clear</button></div>` : ""}
-  ${filter.golferId ? trendChart(rounds.filter((r) => r.golferId === filter.golferId)) : ""}
+  ${(() => {
+    /* Batch 6: a regular member's own trend and scoring statistics show on
+       My rounds without picking a golfer (there is no golfer list there). */
+    const gid = filter.golferId || (!db.canManage() ? db.myGolferId(golfers) : "");
+    return gid ? `${trendChart(rounds.filter((r) => r.golferId === gid))}${scoringStats(rounds.filter((r) => r.golferId === gid))}` : "";
+  })()}
   ${rows.length === 0 ? empty("No rounds here yet", "Post one from the Enter tab, or widen the filters above.") : `
   <div class="eyebrow" style="display:flex;justify-content:space-between"><span>${rows.length} round${rows.length === 1 ? "" : "s"}</span><span>Differential</span></div>
   <div class="card list">${rows.map((r) => {
@@ -2152,8 +2313,13 @@ function screenHistory() {
           <div><span class="sub">${esc(dateOf(r) || "no date")}</span> <span class="name">${esc((golferById(r.golferId) || {}).name || "Unknown")}</span></div>
           <div class="small truncate">${esc(r.courseName || "Unknown course")}${r.teeName ? ` · ${esc(r.teeName)}` : ""}</div>
           <div class="sub">${r.gross == null ? "—" : r.gross}${r.adjusted != null && r.adjusted !== r.gross ? ` (adj ${r.adjusted})` : ""}${r.courseHandicap != null ? ` · net ${model.netScore(r)}` : ""}${Number.isFinite(+r.rating) && r.slope ? ` · ${(+r.rating).toFixed(1)}/${r.slope}` : ""}</div>
-          ${r.gameId ? `<div class="sub">in game: ${esc((games.find((g) => g.id === r.gameId) || {}).name || courseName((games.find((g) => g.id === r.gameId) || {}).courseId))}</div>` : ""}
+          ${(() => {
+            /* Batch 3, Fix 4: a game that no longer exists shows nothing (Willy, 26 Oct). */
+            const gm = r.gameId ? games.find((g) => g.id === r.gameId) : null;
+            return gm ? `<div class="sub">in game: ${esc(gm.name || courseName(gm.courseId))}</div>` : "";
+          })()}
           ${r.notes ? `<div class="small muted" style="font-style:italic">${esc(r.notes)}</div>` : ""}
+          ${Array.isArray(r.holes) && r.holes.length === 18 ? `<button class="linkbtn" data-act="show-card" data-id="${esc(r.id)}" aria-label="Show the hole-by-hole card">▦ Card</button>` : ""}
         </div>
         <div style="text-align:right">
           <span class="stamp sm">${Number.isFinite(+r.differential) ? (+r.differential).toFixed(1) : "—"}</span>
@@ -2546,6 +2712,14 @@ function gameDetail(gameId) {
       <div class="inline-actions stacked">
         <button class="btn" data-act="save-game-edit">Save the changes</button>
       </div>
+      ${(() => {
+        /* Batch 3, Fix 4: deleting a game is one commit and frees its rounds. */
+        const n = rounds.filter((r) => r.gameId === game.id).length;
+        return confirmGameDelete === game.id
+          ? `<div class="note warn"><b>Delete the game?</b> Its ${n} round${n === 1 ? "" : "s"} stay in each golfer's history and still count for their handicap; they are only taken out of the game.</div>
+             <div class="inline-actions stacked"><button class="btn danger" data-act="delete-game">Yes, delete the game</button><button class="btn ghost" data-act="delete-game-cancel">Keep it</button></div>`
+          : `<div class="inline-actions stacked"><button class="btn ghost warn" data-act="delete-game-ask">Delete this game</button></div>`;
+      })()}
     </div>` : ""}
   </section>
 
@@ -2807,9 +2981,10 @@ function screenManage() {
   return `${flashBar()}
   ${safe("Set a password", passwordPrompt)}
   <section class="panel">
-    <div class="panel-head"><h2 class="panel-title">Golfers in this group</h2><span class="panel-count">${golfers.length || ""}</span></div>
+    <div class="panel-head"><h2 class="panel-title">Golfers in this group · ${golfers.length}</h2>
+      <button class="linkbtn" data-act="toggle-golfer-list">${showGolferList ? "Hide" : "Show"}</button></div>
     <div class="card">
-      ${golfers.length ? `<div class="list">
+      ${!showGolferList ? "" : golfers.length ? `<div class="list">
         ${sortedGolfers().map((g) => {
           /* The starting-index editor, shown in place of the row while open —
              the same shape as the rename editor below it. This branch was
@@ -2903,10 +3078,12 @@ function screenManage() {
   </section>
 
   <section class="panel">
-    <div class="panel-head"><h2 class="panel-title">Courses</h2>
-      ${courseDraft ? "" : `<button class="linkbtn" data-act="new-course">Add a course</button>`}</div>
-    ${courses.length ? `<div class="card list">
-      ${allCoursesForList().filter((c) => showHidden || !db.hiddenCourses().includes(c.id)).map((c) => {
+    <div class="panel-head"><h2 class="panel-title">Courses · ${allCoursesForList().filter((c) => !c.withdrawn).length}</h2>
+      <button class="linkbtn" data-act="toggle-course-list">${showCourseList ? "Hide" : "Show"}</button></div>
+    ${courseDraft ? "" : `<div class="inline-actions"><button class="linkbtn" data-act="new-course">Add a course</button></div>`}
+    ${courseDraft ? courseEditor() : ""}
+    ${!showCourseList ? "" : courses.length ? `<div class="card list">
+      ${allCoursesForList().filter((c) => !c.withdrawn && (showHidden || !db.hiddenCourses().includes(c.id))).map((c) => {
         const open = openCourse === c.id;
         const used = rounds.some((r) => r.courseId === c.id);
         const hidden = db.hiddenCourses().includes(c.id);
@@ -2922,6 +3099,7 @@ function screenManage() {
             ${db.canManage() ? `<div class="inline-actions">
               ${mine ? `<button class="rowbtn" data-edit-course="${c.id}">Edit</button>`
                 : `<span class="hint">Entered by somebody else, so it cannot be edited here.</span>`}
+              <button class="rowbtn" data-withdraw-course="${c.id}">Withdraw</button>
               ${db.isOwner()
                 ? (hidden
                     ? `<button class="rowbtn" data-unhide-course="${c.id}">Unhide</button>`
@@ -2937,7 +3115,6 @@ function screenManage() {
     ${db.hiddenCourses().length ? `<div class="style-switch"><button class="linkbtn" data-act="toggle-hidden-courses">${
       showHidden ? "Hide the hidden ones again" : `Show ${db.hiddenCourses().length} hidden course${db.hiddenCourses().length === 1 ? "" : "s"}`
     }</button></div>` : ""}
-    ${courseDraft ? courseEditor() : ""}
   </section>
 
   ${versionBlock()}`;
@@ -3076,6 +3253,7 @@ async function loadOwnerCockpitHere() {
   ownerCockpitState = "loading"; render();
   try {
     ownerCockpit = await db.loadOwnerCockpit();
+    await db.isAppOwner();   /* batch 4: offers Open this group as its owner */
     ownerCockpitState = "ready";
   } catch (e) {
     ownerCockpitState = "failed";
@@ -3217,6 +3395,11 @@ function otherGroupCockpit(groupId) {
   return `<section class="panel">
     <div class="inline-actions"><button class="btn ghost compact" data-act="cockpit-group" data-id="">Back to all groups</button></div>
     <div class="panel-head" style="margin-top:0.8rem"><h2 class="panel-title">${esc(g ? (g.id === db.PUBLIC_ID ? "Public group" : g.name) : "Group")}</h2></div>
+    ${db.appOwnerNow() && g && g.id !== db.currentAssociation() ? `<div class="inline-actions stacked"><button class="btn" data-act="open-as-app-owner" data-id="${esc(g.id)}">Open this group as its owner</button></div>
+      <p class="hint">As the app owner you can do everything its owner can. Each time is recorded on the group.</p>` : ""}
+    ${db.appOwnerNow() && g && g.hidden ? `<div class="note warn"><b>Deleted by its owner</b> (hidden; its rounds still count).</div>
+      <div class="inline-actions stacked"><button class="btn" data-act="restore-group" data-id="${esc(g.id)}">Bring the group back</button>
+      <button class="btn ghost warn" data-act="remove-group-for-good" data-id="${esc(g.id)}">Remove it for good (a backup is taken first)</button></div>` : ""}
     <div class="ck-tiles">
       ${tile(ms.length, "Members")}
       ${tile(ms.filter((m) => m.lastSeen >= week).length, "Active in 7 days")}
@@ -3503,13 +3686,12 @@ function groupSection() {
   <section class="panel">
     <div class="panel-head"><h2 class="panel-title">Delete this group</h2></div>
     <div class="card padded">
-      <p class="hint" style="margin:0 0 0.7rem">Removes <b>${esc(association ? association.name : "")}</b> and every round and game in it. <b>Golfers are not deleted</b> — they are people, and they keep their handicap and their place in your other groups.</p>
+      <p class="hint" style="margin:0 0 0.7rem">Closes <b>${esc(association ? association.name : "")}</b> for everybody. Nothing in it is erased: <b>every round still counts</b> in each golfer's handicap, and each golfer can still see their own rounds, marked (deleted). The app owner can bring the group back.</p>
       ${confirmDeleteGroup ? `
         <div class="note warn">
-          <b>What goes:</b> this group, its ${rounds.length} round${rounds.length === 1 ? "" : "s"} and its ${games.length} game${games.length === 1 ? "" : "s"}.<br>
-          <b>What stays:</b> all ${golfers.length} golfer${golfers.length === 1 ? "" : "s"}, every course, and every round they have played in your other groups. Their handicaps are rebuilt from what remains.
+          <b>What happens:</b> the group closes for all its members. Its ${rounds.length} round${rounds.length === 1 ? "" : "s"} and ${games.length} game${games.length === 1 ? "" : "s"} stay, read only.<br>
+          <b>What stays:</b> all ${golfers.length} golfer${golfers.length === 1 ? "" : "s"}, their handicaps, every course, and their places in your other groups.
         </div>
-        <p class="hint">A copy of the rounds is saved to this device first, and offered to you as a file straight afterwards — so even this is recoverable.</p>
         <div class="inline-actions stacked">
           <button class="btn ghost" data-act="cancel-delete-group">Keep it</button>
           <button class="btn danger" data-act="really-delete-group">Delete ${esc(association ? association.name : "this group")}</button>
@@ -3797,29 +3979,28 @@ function accountSection() {
 }
 
 function lookupSection() {
-  if (!db.isOwner()) return "";
-  const set = lookup.usingSharedKey();
-
+  /* Batch 5, step 31 (Willy, 1 Nov 2026): the key box stays here, for the app
+     owner only. The key is saved where no app can read it; only The Marker's
+     Cloudflare server uses it. Here only its last four characters show. */
+  if (!db.appOwnerNow()) return "";
+  if (keyInfo === undefined) { keyInfo = null; db.courseKeyInfo().then((x) => { keyInfo = x || false; render(); }); }
+  const set = !!(keyInfo && keyInfo.last4);
   if (set && !editingKey) {
     return `<section class="panel">
-      <div class="panel-head"><h2 class="panel-title">Course lookup</h2>
+      <div class="panel-head"><h2 class="panel-title">Course search key</h2>
         <button class="linkbtn" data-act="edit-key">Change</button></div>
       <div class="card padded">
-        <p class="hint" style="margin:0">A search key is saved for the group, so everybody can find courses by name without entering anything.</p>
+        <p class="hint" style="margin:0">Key saved, ends in <b>${esc(keyInfo.last4)}</b>. Every golfer searches through The Marker's server, which holds the key; it is never on a phone.</p>
       </div>
     </section>`;
   }
-
   return `<section class="panel">
-    <div class="panel-head"><h2 class="panel-title">Course lookup</h2></div>
+    <div class="panel-head"><h2 class="panel-title">Course search key</h2></div>
     <div class="card padded">
-      <p class="hint" style="margin:0 0 0.6rem">${set
-        ? "Paste a new key to replace the one saved for the group."
-        : "<b>Not set up yet.</b> Without a key, courses have to be typed in by hand with their rating and slope. With one, anybody in the group can search by name. Get a free key at <b>golfcourseapi.com</b>."}</p>
-      <p class="hint">It is saved once for the whole group. Nobody else has to enter it, and only you can change it.</p>
+      <p class="hint" style="margin:0 0 0.6rem">${set ? "Paste a new key to replace the saved one." : "<b>Not saved yet.</b> Paste the GolfCourseAPI key. It is kept in the database for safe keeping, and only the server can read it."}</p>
       <input class="field mono" name="lookupkey" value="" placeholder="Paste the key here" autocomplete="off">
       <div class="inline-actions stacked">
-        <button class="btn" data-act="save-key">Save for the group</button>
+        <button class="btn" data-act="save-key">Save the key</button>
         ${set ? `<button class="btn ghost" data-act="cancel-key">Cancel</button>` : ""}
       </div>
     </div>
@@ -3831,6 +4012,100 @@ function lookupSection() {
    leaves them naming something the course no longer has. */
 const roundsOnTee = (courseId, teeId) =>
   rounds.filter((r) => r.courseId === courseId && r.teeId === teeId).length;
+
+/* Batch 5, step 24: each hole's par, yards (optional) and handicap number, as
+   in The Marker's "Enter a course yourself". */
+function holesGrid(t, i) {
+  const holes = t.holes || Array.from({ length: 18 }, () => ({ par: "", yards: "", si: "" }));
+  const cell = (h, n, key, ph) => `<input class="field mono" style="padding:4px;min-width:0" data-hole-field="${i}:${n}:${key}" value="${esc(h[key] ?? "")}" placeholder="${ph}" inputmode="numeric" aria-label="Hole ${n + 1} ${key === "si" ? "handicap number" : key}">`;
+  return `<div class="holes-grid" style="display:grid;grid-template-columns:2.2em repeat(3,minmax(0,1fr));gap:4px;margin-top:6px">
+    <b>#</b><b>Par</b><b>Yards</b><b>HCP</b>
+    ${holes.map((h, n) => `<span>${n + 1}</span>${cell(h, n, "par", "4")}${cell(h, n, "yards", "–")}${cell(h, n, "si", "")}`).join("")}
+  </div>`;
+}
+/* Batch 5, step 24: the club's scorecard, by picture (The Marker's Cloudflare
+   reader) or typed in hole by hole. Two separate paths, as in The Marker. */
+let cardScan = null;   /* { busy, msg, reading, scanIds } */
+function scorecardEntry() {
+  const c = cardScan;
+  return `<div class="card padded" style="margin-top:0.8rem">
+    <div class="eyebrow">Or enter it from the club's scorecard</div>
+    ${c && c.reading ? cardCheck(c.reading) : `
+      <div class="inline-actions stacked">
+        <label class="btn ghost" style="text-align:center">Take a photo<input type="file" name="card-photo" accept="image/*" capture="environment" hidden></label>
+        <label class="btn ghost" style="text-align:center">Photos or Files<input type="file" name="card-photo" accept="image/*" hidden></label>
+        <button class="btn ghost" data-act="card-type">Type it in instead</button>
+      </div>`}
+    ${c && c.msg ? `<p class="hint">${esc(c.msg)}</p>` : ""}
+  </div>`;
+}
+/* "Check against the card": the club's card as read, every tee with each
+   hole's yards and OUT/IN, the Handicap and Par rows, ✓ or ✗ on each row. */
+function cardCheck(r) {
+  const sum = (a, from, to) => a.slice(from, to).reduce((x, y) => x + (Number(y) || 0), 0);
+  const row = (label, vals, ok, out, inn) => `<tr><th style="text-align:left">${ok ? "✓" : "<span style='color:var(--pencil)'>✗</span>"} ${esc(label)}</th>${vals.map((v) => `<td style="${v == null ? "color:var(--pencil)" : ""}">${v == null ? "?" : esc(v)}</td>`).join("")}<td><b>${out ?? ""}</b></td><td><b>${inn ?? ""}</b></td></tr>`;
+  const t0 = (r.tees || [])[0] || { holes: [] };
+  const pars = t0.holes.map((h) => h.par), si = t0.holes.map((h) => h.si);
+  const siOk = si.every((x) => x != null) && new Set(si).size === 18;
+  const parOk = pars.every((x) => x != null) && (r.parOut == null || sum(pars, 0, 9) === r.parOut) && (r.parIn == null || sum(pars, 9, 18) === r.parIn);
+  const tees = (r.tees || []).map((t) => {
+    const y = t.holes.map((h) => h.yards);
+    const ok = y.every((x) => x != null) && (t.out == null || sum(y, 0, 9) === t.out) && (t.in == null || sum(y, 9, 18) === t.in) && t.rating && t.slope;
+    return { t, y, ok };
+  });
+  const allOk = parOk && siOk && tees.length && tees.every((x) => x.ok);
+  return `<div style="overflow-x:auto"><table class="cardcheck" style="font-size:0.85rem;border-collapse:collapse">
+    <tr><th></th>${Array.from({ length: 18 }, (_, n) => `<th>${n + 1}</th>`).join("")}<th>OUT</th><th>IN</th></tr>
+    ${tees.map(({ t, y, ok }) => row(`${t.name} ${t.rating ? `${(+t.rating).toFixed(1)}/${t.slope}` : "(no rating)"}`, y, ok, t.out, t.in)).join("")}
+    ${row("Handicap", si, siOk)}
+    ${row("Par", pars, parOk, r.parOut, r.parIn)}
+  </table></div>
+  ${allOk ? "" : `<p class="hint" style="color:var(--pencil)">Anything in red was not read, or does not add up. Take another picture, or correct it by hand.</p>`}
+  <div class="inline-actions stacked">
+    ${allOk ? `<button class="btn" data-act="card-ok" ${cardScan.busy ? "disabled" : ""}>${cardScan.busy ? "Checking…" : "✓ This matches the card"}</button>` : ""}
+    <button class="btn ghost" data-act="card-hand">Correct it by hand instead</button>
+    <button class="btn ghost" data-act="card-again">Read another picture</button>
+  </div>`;
+}
+/* The picture, made smaller on the phone first (long side 1600 pixels). */
+function shrinkPhoto(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const k = Math.min(1, 1600 / Math.max(img.naturalWidth, img.naturalHeight));
+        const cv = document.createElement("canvas");
+        cv.width = Math.max(1, Math.round(img.naturalWidth * k)); cv.height = Math.max(1, Math.round(img.naturalHeight * k));
+        cv.getContext("2d").drawImage(img, 0, 0, cv.width, cv.height);
+        resolve(cv.toDataURL("image/jpeg", 0.85));
+      } catch { reject(new Error("SCAN_BAD_PHOTO")); } finally { URL.revokeObjectURL(url); }
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("SCAN_BAD_PHOTO")); };
+    img.src = url;
+  });
+}
+async function readCardPhoto(file) {
+  cardScan = { ...(cardScan || {}), busy: true, msg: "Reading the card… this takes up to a minute." };
+  render();
+  try {
+    const image = await shrinkPhoto(file);
+    const r = await db.callMarkerWorker("/scan", { method: "POST", body: { image } });
+    const reading = r.scan || {};
+    cardScan = { busy: false, msg: "", reading, scanIds: [...((cardScan && cardScan.scanIds) || []), reading.scanId].filter(Boolean) };
+    if (reading.course && courseDraft && !courseDraft.name) courseDraft.name = reading.course;
+  } catch (e) {
+    const m = String((e && e.message) || e);
+    cardScan = { busy: false, msg: m === "SCAN_LIMIT" ? "Today's picture readings are used up. Type it in instead, or try tomorrow." : m === "SCAN_BAD_PHOTO" ? "That picture could not be opened. Try another." : `The card could not be read (${m}). Try another picture, or type it in.` };
+  }
+  render();
+}
+/* The reading as the editor's tees (rating, slope, par and every hole). */
+function teesFromReading(r) {
+  return (r.tees || []).filter((t) => t.rating && t.slope).map((t) => ({ id: "", name: t.name, rating: String(t.rating), slope: String(t.slope),
+    par: String(t.holes.reduce((a, h) => a + (Number(h.par) || 0), 0) || 72),
+    holes: t.holes.map((h) => ({ par: h.par ?? "", yards: h.yards ?? "", si: h.si ?? "" })) }));
+}
 
 function courseEditor() {
   const d = courseDraft;
@@ -3875,9 +4150,11 @@ function courseEditor() {
         <label>Slope<input class="field mono" data-tee-field="${i}:slope" value="${esc(t.slope)}" inputmode="numeric"></label>
         <label>Par<input class="field mono" data-tee-field="${i}:par" value="${esc(t.par)}" inputmode="numeric"></label>
       </div>
+      ${d.byHole ? holesGrid(t, i) : ""}
     </div>`;
     }).join("")}
     <button class="linkbtn" data-act="add-tee">Add another tee</button>
+    ${editing ? "" : scorecardEntry()}
 
     <div class="inline-actions stacked editor-actions">
       <button class="btn" data-act="save-course">${editing ? "Save changes" : "Save course"}</button>
@@ -4535,6 +4812,7 @@ tabsEl.addEventListener("click", (e) => {
   tab = b.dataset.tab;
   note(`opened ${tab}`);
   if (tab === "enter") editingRound = null;
+  if (tab === "manage") { showGolferList = false; showCourseList = false; }   /* batch 5: closed every time */
   if (tab !== "games") openGame = null;
   render();
 });
@@ -4621,6 +4899,7 @@ view.addEventListener("input", (e) => {
   }
   if (n === "notes") { form.notes = e.target.value; return; }
   if (n === "finder-q") { finder.q = e.target.value; return; }
+  if (n === "cf-q" && courseFind) { courseFind.q = e.target.value; return; }
   if (n === "join-name" || n === "join-name-2") { joinForm.name = e.target.value; return; }
   if (n === "email") { authForm.email = e.target.value; return; }
   if (n === "group-name" || n === "import-group") { joinForm.groupName = e.target.value; return; }
@@ -4628,6 +4907,13 @@ view.addEventListener("input", (e) => {
   if (n === "join-code") { joinForm.code = e.target.value; return; }
   if (n === "owner-plays") { joinForm.ownerPlays = e.target.checked; return; }
   if (n === "g-name") { gameDraft.name = e.target.value; return; }
+  if (e.target.dataset.holeField) {
+    const [i, n, key] = e.target.dataset.holeField.split(":");
+    const t = courseDraft.tees[+i];
+    if (!t.holes) t.holes = Array.from({ length: 18 }, () => ({ par: "", yards: "", si: "" }));
+    t.holes[+n][key] = e.target.value;
+    return;
+  }
   if (e.target.dataset.teeField) {
     const [i, key] = e.target.dataset.teeField.split(":");
     courseDraft.tees[+i][key] = e.target.value;
@@ -4637,6 +4923,8 @@ view.addEventListener("input", (e) => {
 });
 
 view.addEventListener("change", (e) => {
+  /* Batch 5, step 24: a picture of the club's scorecard. */
+  if (e.target.name === "card-photo" && e.target.files && e.target.files[0]) { readCardPhoto(e.target.files[0]); return; }
   const n = e.target.name, v = e.target.value;
   /* Nothing here may touch the input itself.
    *
@@ -4675,6 +4963,7 @@ view.addEventListener("keydown", (e) => {
   if (e.target.name === "new-golfer") { e.preventDefault(); addGolfer(); }
   if (e.target.name === "rename-golfer") { e.preventDefault(); saveRename(); }
   if (e.target.name === "finder-q") { e.preventDefault(); runFinder(); }
+  if (e.target.name === "cf-q") { e.preventDefault(); courseFindRun(); }
 });
 
 view.addEventListener("change", (e) => {
@@ -4894,6 +5183,18 @@ view.addEventListener("click", async (e) => {
     return render();
   }
 
+  /* Batch 5, step 14: withdraw a course for every group, for good. */
+  if (d.withdrawCourse) {
+    const c = courseById(d.withdrawCourse);
+    if (!c) return;
+    const why = window.prompt(`Withdraw ${c.name} for every group, for good? Rounds already posted keep their figures. It can never be used, edited or restored; a corrected course is added as a new one.\n\nWhy (for the record)?`, "Wrong details");
+    if (why === null) return;
+    busy("Withdrawing the course");
+    try { await db.withdrawCourse(c.id, why); openCourse = null; flashMsg(`${c.name} is withdrawn for every group.`); }
+    catch (e) { flashMsg(`It was not withdrawn: ${String((e && (e.code || e.message)) || "no connection")}.`); }
+    finally { idleAll(); }
+    return render();
+  }
   if (d.hideCourse || d.unhideCourse) {
     const id = d.hideCourse || d.unhideCourse;
     const c = courses.find((x) => x.id === id);
@@ -4931,10 +5232,9 @@ view.addEventListener("click", async (e) => {
     confirmId = null;
     busy("Deleting the round");
     try {
-      if (r) await db.deleteRoundAndRebuild(r);
-      else db.deleteRound(d.confirmDel);
-      flashMsg("Round deleted");
-    } catch { flashMsg("Couldn't delete it — the message above says why."); }
+      const done = r ? await db.deleteRoundAndRebuild(r) : (db.deleteRound(d.confirmDel), { ok: true });
+      flashMsg(done && done.queued ? "Round deleted on this phone; The Scorecard is updated, with the index, when the signal returns." : "Round deleted, and the index updated.");
+    } catch (e) { flashMsg(String((e && e.code) || "") === "round/conflict" ? e.message : `Nothing was deleted: ${String((e && (e.code || e.message)) || "no connection")}. Try again.`); }
     finally { idle(); }
     return render();
   }
@@ -5196,7 +5496,7 @@ view.addEventListener("click", async (e) => {
       const address = ((view.querySelector('[name="email"]') || {}).value || authForm.email).trim();
       if (!address) { flashMsg("Type your email address first"); return; }
       busy("Sending the reset link");
-      try { await db.sendPasswordReset(address); flashMsg(`Reset link sent to ${address}. Open it, choose a new password, then sign in with it.`); }
+      try { await db.sendPasswordReset(address); flashMsg(`Link sent to ${address}. Open the email "Sign in to The Scorecard" on this phone and tap the link: The Scorecard opens and asks for your new password.`); }
       catch { flashMsg("Couldn't send the reset link. Check the email address."); }
       finally { idleAll(); }
       return render();
@@ -5221,82 +5521,7 @@ view.addEventListener("click", async (e) => {
       flashMsg("Type the name you play under instead.");
       return render();
     }
-    case "accept-named": {
-      const link = db.readJoinLink();
-      if (!link || !link.golferId) return;
-      joining = true;
-      busy("Joining the group");
-      render();
-      try {
-        /* The role comes from the link. Somebody who has not joined yet cannot
-           read the group document, so asking it is pointless — the rules verify
-           the code against the group when the membership is written. */
-        const role = link.role || "member";
-        const result = link.token
-          ? await db.acceptTokenInvite({ associationId: link.associationId, token: link.token })
-          : await db.acceptNamedInvite({ associationId: link.associationId, code: link.code, golferId: link.golferId, role });
-        joining = false;
-        if (!result.ok) {
-          idleAll();
-          note(`join refused: ${result.reason}`);
-          openProblem({
-            title: result.reason === "USED"
-              ? "This invitation has already been used"
-              : result.reason === "OTHER_GOLFER"
-                ? "You are already in this group as another golfer"
-                : "This invitation belongs to somebody else",
-            detail: result.reason === "USED"
-              ? "An admin invitation works once only. Ask for a fresh one."
-              : result.reason === "OTHER_GOLFER"
-                ? "This sign-in already plays in this group under another name, so it cannot become this golfer as well."
-                : "Somebody has already joined with this link. Ask whoever runs the group to send you your own.",
-            advice: result.reason === "OTHER_GOLFER"
-              ? "Nothing was changed. If this invitation is for you, ask whoever runs the group to sort out the two names."
-              : "Nothing was changed.",
-          });
-          return render();
-        }
-        db.clearJoinLink();
-        await start(link.associationId);
-        tab = "enter";
-        idleAll();
-        if (role === "admin") {
-          /* Said properly rather than as a passing message. An admin without an
-             account can manage everything, but only from this browser — they
-             need to understand that before they walk away from it. */
-          /* The password step happens HERE, as part of joining — not as a
-             pointer to somewhere they have to go and find. An admin who walks
-             away without one is locked out the moment this browser forgets
-             them, and their invitation is already spent. */
-          tab = "manage";
-        }
-        finishJoining();
-      } catch (err) {
-        joining = false;
-        idleAll();
-        /* Say what actually went wrong. Swallowing it left the screen exactly
-           as it was, which reads as the button doing nothing at all. */
-        /* beta.9: each refusal names its step and says what to do. */
-        const code = String((err && (err.code || err.message)) || "");
-        note(`join refused: ${code}`);
-        openProblem({
-          title: code.includes("join/membership-refused") ? "This invitation link no longer works"
-            : code.includes("join/link-refused") ? "You are in the group, but your golfer could not be linked"
-            : "Could not join the group",
-          detail: code.includes("join/membership-refused")
-            ? "The group's code has changed since it was sent, so the link is out of date."
-            : code.includes("join/link-refused")
-              ? "This golfer is still linked to another sign-in."
-              : code || "No detail was given.",
-          advice: code.includes("join/membership-refused")
-            ? "Ask whoever runs the group to tap Send again for you, then use the new link. Nothing was changed."
-            : code.includes("join/link-refused")
-              ? "Ask whoever runs the group to tap Send again for you (that releases the old link), then tap the new link."
-              : "Nothing was changed. Try the link again, or send this report.",
-        });
-      }
-      return render();
-    }
+    case "accept-named": return acceptNamedHere();
     case "join-by-code": return joinByCode();
     case "skip-import": skipImport = true; return render();
     /* Named apart from the Admin tab's "show-code" on purpose: both lived in
@@ -5329,6 +5554,7 @@ view.addEventListener("click", async (e) => {
       return render();
     case "hide-apply": signedOutStep = null; applySentTo = ""; requestSentTo = ""; return render();
     case "submit-application": return submitApplicationHere();
+    case "apply-name-ok": applyNameOk = applyNameTaken; applyNameTaken = ""; return submitApplicationHere();
     case "finish-apply": return finishApplyHere();
     /* Build 25: the entry screens. */
     case "create-password": return createPasswordHere();
@@ -5425,7 +5651,61 @@ view.addEventListener("click", async (e) => {
     case "approve-request": return approveRequestHere(d.id);
     case "admin-tab": adminTab = d.id || "cockpit"; cockpitGroup = null; window.scrollTo && window.scrollTo(0, 0); return render();
     case "cockpit-refresh": return loadOwnerCockpitHere();
+    case "show-card": { const r = rounds.find((x) => x.id === d.id); if (r) openRoundCard(r); return; }
+    case "toggle-golfer-list": showGolferList = !showGolferList; return render();
+    case "toggle-course-list": showCourseList = !showCourseList; return render();
+    /* Batch 5, step 24: Find another course. */
+    case "cf-open": courseFind = { q: "", busy: false, msg: "", lib: [], ext: [], check: null }; return render();
+    case "cf-close": courseFind = null; return render();
+    case "cf-back": courseFind = { ...courseFind, check: null }; return render();
+    case "cf-find": return courseFindRun();
+    case "cf-lib": { const c = courseFind.lib[+d.id]; if (c) courseFind = { ...courseFind, check: { ...c, from: "library" } }; return render(); }
+    case "cf-ext": {
+      const c = courseFind.ext[+d.id];
+      if (!c) return;
+      courseFind = { ...courseFind, busy: true, msg: `Fetching the tees for ${c.name}…` }; render();
+      try { const full = await lookup.courseById(c.id); courseFind = { ...courseFind, busy: false, msg: "", check: { ...full, from: "database" } }; }
+      catch (e) { courseFind = { ...courseFind, busy: false, msg: lookup.explain(e && e.message) }; }
+      return render();
+    }
+    case "cf-use": {
+      const c = courseFind && courseFind.check;
+      if (!c) return;
+      let id = c.from === "library" ? c.id : null;
+      if (!id) {
+        /* The same course by name is used rather than a second copy. */
+        const same = courses.find((x) => !x.withdrawn && String(x.name).trim().toLowerCase() === String(c.name).trim().toLowerCase());
+        id = same ? same.id : db.addCourse({ name: c.name, location: c.where || "", tees: c.tees }).id;
+      }
+      db.addMyCourse(id);
+      form = { ...form, courseId: id, teeId: "" };
+      courseFind = null;
+      flashMsg(`${c.name} is in your courses now. Choose the tees.`);
+      return render();
+    }
     case "cockpit-group": cockpitGroup = d.id || null; window.scrollTo && window.scrollTo(0, 0); return render();
+    case "restore-group": {
+      busy("Bringing the group back");
+      try { await db.hideGroup(d.id, false); flashMsg("The group is back, exactly as it was."); await loadOwnerCockpitHere(); }
+      catch (e) { flashMsg(`Nothing was changed: ${String((e && (e.code || e.message)) || "no connection")}.`); }
+      finally { idleAll(); }
+      return render();
+    }
+    case "remove-group-for-good": {
+      if (!window.confirm("Remove this group for good? A backup of its rounds is taken first and offered to you as a file. This cannot be undone.")) return;
+      busy("Removing the group");
+      try { await db.deleteGroup(d.id); cockpitGroup = null; flashMsg("The group is removed. Its backup was kept on this device."); await loadOwnerCockpitHere(); }
+      catch (e) { flashMsg(`It was not removed: ${String((e && (e.code || e.message)) || "no connection")}.`); }
+      finally { idleAll(); }
+      return render();
+    }
+    case "open-as-app-owner": {
+      busy("Opening the group");
+      try { await start(d.id); tab = "enter"; cockpitGroup = null; flashMsg("Opened as the app owner. This visit is recorded on the group."); }
+      catch (e) { flashMsg(`It could not be opened: ${String((e && (e.code || e.message)) || "no connection")}.`); }
+      finally { idleAll(); }
+      return render();
+    }
     case "set-switch": {
       if (!appSettings || appSettings.mode === d.id) return;
       busy("Changing the switch");
@@ -5566,13 +5846,32 @@ view.addEventListener("click", async (e) => {
 
     case "new-course":
       courseDraft = { id: model.newId(), name: "", tees: [{ id: model.newId(), name: "", rating: "", slope: "", par: "72" }] };
+      cardScan = null;
       finder = { q: "", results: [], busy: false, msg: "" };
       openCourse = null;
       return render();
     case "add-tee": courseDraft.tees.push({ id: model.newId(), name: "", rating: "", slope: "", par: "72" }); return render();
-    case "cancel-course": courseDraft = null; finder = { q: "", results: [], busy: false, msg: "" }; return render();
+    case "cancel-course": courseDraft = null; cardScan = null; finder = { q: "", results: [], busy: false, msg: "" }; return render();
     case "toggle-hidden-courses": showHidden = !showHidden; return render();
     case "save-course": return saveCourse();
+    case "card-type": courseDraft.byHole = true; cardScan = null; return render();
+    case "card-again": cardScan = { scanIds: (cardScan && cardScan.scanIds) || [] }; return render();
+    case "card-hand": courseDraft.tees = teesFromReading(cardScan.reading); courseDraft.byHole = true; cardScan = null; flashMsg("Filled in from the picture. Check every number against the card, then Save."); return render();
+    case "card-ok": {
+      /* Verified by The Marker's server from its own copies of the readings:
+         the club's card then replaces the golf course database's details. */
+      cardScan = { ...cardScan, busy: true }; render();
+      try {
+        const r = await db.callMarkerWorker("/verify", { method: "POST", body: { scanIds: cardScan.scanIds, name: courseDraft.name || cardScan.reading.course || "" } });
+        const v = r.course || {};
+        courseDraft.name = courseDraft.name || v.name || "";
+        courseDraft.tees = teesFromReading({ tees: (v.tees || []).map((t) => ({ ...t, holes: t.holes || [] })) });
+        courseDraft.verified = true;
+        cardScan = null;
+        flashMsg("Verified against the club's card. Tap Save course.");
+      } catch (e) { cardScan = { ...cardScan, busy: false, msg: `Not verified: ${String((e && e.message) || e)}. Take another picture, or correct it by hand.` }; }
+      return render();
+    }
     case "find": return runFinder();
 
     case "new-game": gameDraft = { date: today(), endDate: "", courseId: "", name: "", multiDay: false }; return render();
@@ -5746,7 +6045,20 @@ view.addEventListener("click", async (e) => {
       finally { idleAll(); }
       return render();
     }
-    case "delete-game": db.deleteGame(openGame); openGame = null; flashMsg("Game deleted"); return render();
+    case "delete-game-ask": confirmGameDelete = openGame; return render();
+    case "delete-game-cancel": confirmGameDelete = null; return render();
+    case "delete-game": {
+      const id = openGame;
+      confirmGameDelete = null;
+      busy("Deleting the game");
+      try {
+        const r = await db.deleteGame(id);
+        openGame = null; editingGame = false;
+        flashMsg(`Game deleted. ${r.rounds} round${r.rounds === 1 ? "" : "s"} taken out of it, still in each golfer's history.${r.queued ? " (Saved to The Scorecard when the signal returns.)" : ""}`);
+      } catch (e) { flashMsg(`Nothing was deleted: ${String((e && (e.code || e.message)) || "no connection")}.`); }
+      finally { idleAll(); }
+      return render();
+    }
     case "share-game": {
       const board = model.gameLeaderboard(rounds.filter((r) => r.gameId === openGame), allGolfers);
       const everyoneHasNet = board.length > 0 && board.every((r) => r.net != null);
@@ -5887,14 +6199,14 @@ view.addEventListener("click", async (e) => {
       busy("Deleting the group");
       render();
       try {
-        await db.deleteGroup();
+        await db.hideGroup();
         /* Start again from a clean slate rather than trying to unpick what is
            left in memory. Deleting a group leaves listeners pointing at
            collections that no longer exist, which is why the roster vanished
            from the screen afterwards and only came back after signing out. A
            reload is instant and cannot be half-right. */
         idle();
-        flashMsg("Group deleted. Reloading…");
+        flashMsg("Group deleted (closed; its rounds still count). Reloading…");
         setTimeout(() => location.reload(), 900);
         return;
       } catch {
@@ -5920,10 +6232,10 @@ view.addEventListener("click", async (e) => {
       const field = view.querySelector('[name="lookupkey"]');
       const key = (field ? field.value : "").trim();
       if (!key) { flashMsg("Paste the key first"); return; }
-      db.updateAssociation({ lookupKey: key });
-      lookup.setSharedKey(key);
-      editingKey = false;
-      flashMsg("Saved. Everybody in the group can search for courses now.");
+      busy("Saving the key");
+      try { const r = await db.saveCourseKey(key); keyInfo = { last4: r.last4 }; editingKey = false; flashMsg(`Key saved, ends in ${r.last4}.`); }
+      catch (e) { flashMsg(`The key was not saved: ${String((e && (e.code || e.message)) || "no connection")}.`); }
+      finally { idleAll(); }
       return render();
     }
   }
@@ -6267,7 +6579,7 @@ sheetEl.addEventListener("click", async (e) => {
     try {
       await db.sendPasswordReset(address);
       sheetEl.hidden = true;
-      flashMsg(`Reset link sent to ${address}. Open it, choose a new password, then sign in with it.`);
+      flashMsg(`Link sent to ${address}. Open the email "Sign in to The Scorecard" on this phone and tap the link: The Scorecard opens and asks for your new password.`);
     } catch {
       resetting.disabled = false;
       resetting.textContent = "Reset my password";
@@ -6540,6 +6852,85 @@ function openSignInProblem(error, email) {
   </div>`;
 }
 
+/* Batch 2: accepting a named invitation is its own function, so the welcome
+   screen can finish joining straight after the account is created. */
+async function acceptNamedHere() {
+  const link = db.readJoinLink();
+  if (!link || !link.golferId) return;
+  joining = true;
+  busy("Joining the group");
+  render();
+  try {
+    /* The role comes from the link. Somebody who has not joined yet cannot
+       read the group document, so asking it is pointless — the rules verify
+       the code against the group when the membership is written. */
+    const role = link.role || "member";
+    const result = link.token
+      ? await db.acceptTokenInvite({ associationId: link.associationId, token: link.token })
+      : await db.acceptNamedInvite({ associationId: link.associationId, code: link.code, golferId: link.golferId, role });
+    joining = false;
+    if (!result.ok) {
+      idleAll();
+      note(`join refused: ${result.reason}`);
+      openProblem({
+        title: result.reason === "USED"
+          ? "This invitation has already been used"
+          : result.reason === "OTHER_GOLFER"
+            ? "You are already in this group as another golfer"
+            : "This invitation belongs to somebody else",
+        detail: result.reason === "USED"
+          ? "An admin invitation works once only. Ask for a fresh one."
+          : result.reason === "OTHER_GOLFER"
+            ? "This sign-in already plays in this group under another name, so it cannot become this golfer as well."
+            : "Somebody has already joined with this link. Ask whoever runs the group to send you your own.",
+        advice: result.reason === "OTHER_GOLFER"
+          ? "Nothing was changed. If this invitation is for you, ask whoever runs the group to sort out the two names."
+          : "Nothing was changed.",
+      });
+      return render();
+    }
+    db.clearJoinLink();
+    await start(link.associationId);
+    tab = "enter";
+    idleAll();
+    if (role === "admin") {
+      /* Said properly rather than as a passing message. An admin without an
+         account can manage everything, but only from this browser — they
+         need to understand that before they walk away from it. */
+      /* The password step happens HERE, as part of joining — not as a
+         pointer to somewhere they have to go and find. An admin who walks
+         away without one is locked out the moment this browser forgets
+         them, and their invitation is already spent. */
+      tab = "manage";
+    }
+    finishJoining();
+  } catch (err) {
+    joining = false;
+    idleAll();
+    /* Say what actually went wrong. Swallowing it left the screen exactly
+       as it was, which reads as the button doing nothing at all. */
+    /* beta.9: each refusal names its step and says what to do. */
+    const code = String((err && (err.code || err.message)) || "");
+    note(`join refused: ${code}`);
+    openProblem({
+      title: code.includes("join/membership-refused") ? "This invitation link no longer works"
+        : code.includes("join/link-refused") ? "You are in the group, but your golfer could not be linked"
+        : "Could not join the group",
+      detail: code.includes("join/membership-refused")
+        ? "The group's code has changed since it was sent, so the link is out of date."
+        : code.includes("join/link-refused")
+          ? "This golfer is still linked to another sign-in."
+          : code || "No detail was given.",
+      advice: code.includes("join/membership-refused")
+        ? "Ask whoever runs the group to tap Send again for you, then use the new link. Nothing was changed."
+        : code.includes("join/link-refused")
+          ? "Ask whoever runs the group to tap Send again for you (that releases the old link), then tap the new link."
+          : "Nothing was changed. Try the link again, or send this report.",
+    });
+  }
+  return render();
+}
+
 async function acceptInvite() {
   /* Every path that waits on Firebase raises the veil, without exception. */
   const invite = db.readJoinLink();
@@ -6588,7 +6979,8 @@ function finishJoining() {
     });
     return;
   }
-  flashMsg("You're in. Post your round on the Enter tab.");
+  const g = db.currentAssociationDoc && db.currentAssociationDoc();
+  flashMsg(`Welcome to ${(g && g.name) || "the group"}. Post your rounds on the Enter tab.`);
 }
 
 async function joinByCode() {
@@ -6637,7 +7029,11 @@ async function createGroup(name, groupName) {
     /* Only if they said they play. An organiser who does not play should not
        appear on the roster, and should certainly not get a handicap record
        created for them without being asked. */
-    if (playing) await db.linkGolferForMember(name);
+    if (playing) {
+      try { await db.linkGolferForMember(name); }
+      catch (e) { if (String((e && e.code) || "") !== "golfer/name") throw e;
+        flashMsg("The group is ready, but you are not on its roster yet: add yourself under Manage with the name you play under."); }
+    }
     await start(created.id);
     joining = false;
     idleAll();
@@ -6789,8 +7185,13 @@ async function saveRename() {
 function saveCourse() {
   const editing = !!courseDraft.editing;
   const c = { ...courseDraft, name: courseDraft.name.trim(),
-    tees: courseDraft.tees.filter((t) => t.name.trim() && t.rating && t.slope && t.par) };
+    tees: courseDraft.tees.filter((t) => t.name.trim() && t.rating && t.slope && t.par)
+      .map((t) => (Array.isArray(t.holes) ? { ...t, holes: t.holes.map((h) => ({ par: Number(h.par), yards: h.yards === "" || h.yards == null ? null : Number(h.yards), si: Number(h.si) })) } : t)) };
   if (!c.name || !c.tees.length) { flashMsg("A course needs a name and at least one complete tee"); return; }
+  /* Batch 5, step 24: typed hole by hole, every hole needs its par and handicap number. */
+  if (courseDraft.byHole && c.tees.some((t) => !Array.isArray(t.holes) || t.holes.some((h) => !(h.par >= 3 && h.par <= 6) || !(h.si >= 1 && h.si <= 18)) || new Set(t.holes.map((h) => h.si)).size !== 18)) {
+    flashMsg("Fill in every hole's par and handicap number (1 to 18, each once) for each tee."); return;
+  }
 
   /* A tee with rounds on it must survive the save even if the filter above
      dropped it for an incomplete number — losing it would strand those
@@ -6836,6 +7237,8 @@ async function runFinder() {
 }
 
 function postRound() {
+  /* Batch 4, step 18: a deleted (hidden) group is read only. */
+  if (db.groupHidden() && !db.appOwnerNow()) { flashMsg("This group was deleted by its owner, so nothing new can be posted here."); return; }
   const golfer = golferById(form.golferId);
   const course = courseById(form.courseId);
   const tee = course.tees.find((t) => t.id === form.teeId);
@@ -6856,15 +7259,27 @@ function postRound() {
     const wasSlope = original && Number.isFinite(Number(original.slope)) ? Number(original.slope) : tee.slope;
     /* gameId is written every time, including as null — so a round can be taken
        out of a game as well as moved between them. */
-    db.updateRound(editingRound, {
-      date: form.date, gross: +form.gross, adjusted: ags,
-      differential: model.differential(ags, wasRating, wasSlope),
-      notes: form.notes.trim(), gameId: form.gameId || null,
-    });
-    db.rebuildGolferIndex(golfer.id);
-    editingRound = null;
-    form = { ...form, gross: "", adjusted: "", notes: "" };
-    flashMsg("Round updated");
+    /* Batch 3, Fix 1: a round from The Marker keeps its scores (corrected in
+       The Marker only); its notes and game can still change here. */
+    const fromMarker = !!(original && original.enteredVia === "marker");
+    const change = fromMarker
+      ? { notes: form.notes.trim(), gameId: form.gameId || null }
+      : { date: form.date, gross: +form.gross, adjusted: ags,
+          differential: model.differential(ags, wasRating, wasSlope),
+          notes: form.notes.trim(), gameId: form.gameId || null };
+    /* Batch 3, Fix 2: the round, the golfer's index and the group list in one commit. */
+    const roundId = editingRound;
+    busy("Saving the round");
+    render();
+    db.saveRoundChange({ roundId, change, golferId: (original && original.golferId) || golfer.id })
+      .then((r) => {
+        editingRound = null;
+        form = { ...form, gross: "", adjusted: "", notes: "" };
+        flashMsg(r && r.queued ? "Round updated on this phone; it is saved to The Scorecard, with the index, when the signal returns." : "Round updated, with the index.");
+      })
+      .catch((e) => flashMsg(String((e && e.code) || "") === "round/conflict" ? e.message
+        : `Nothing was saved: ${String((e && (e.code || e.message)) || "no connection")}. Try again.`))
+      .finally(() => { idleAll(); render(); });
     return;
   }
 
@@ -6917,9 +7332,10 @@ async function start(assocId) {
   db.loadFavouriteCourses().then(() => render()).catch(() => {});
   const member = await db.loadMembership(assocId);
   if (!member) return;
+  db.isAppOwner().then((on) => { if (on) render(); }).catch(() => {});   /* batch 4/5: app-owner tools */
   groupState = "some";
   association = await db.loadAssociation(assocId);
-  if (association) lookup.setSharedKey(association.lookupKey || "");
+  if (association) /* batch 5: the key is no longer read by the app */
   /* beta.4: "last seen" for the cockpit (at most twice a day; quiet). */
   db.stampLastSeen();
   /* A new group: the cockpit shows the new group's numbers. */
@@ -6927,7 +7343,7 @@ async function start(assocId) {
   db.stopWatching();
   db.watchAssociation((doc) => {
     association = doc;
-    lookup.setSharedKey(doc.lookupKey || "");
+    /* batch 5: the key is no longer read by the app */
     render();
   });
   db.watchGolfers((list) => { rawGolfers = list; applyBlocks(); render(); scheduleDirectoryRefresh(); });

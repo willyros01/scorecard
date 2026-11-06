@@ -1,0 +1,176 @@
+#!/usr/bin/env bash
+# The Scorecard 2.31.0 — RELEASE SCRIPT (batches 2 to 6 of the plan of 3 Nov 2026), prepared by Claude, Nov 5, 2026
+#
+# Two runs, on two days:
+#   bash r31.txt           NOW, before testing the TestFlight build: the rules.
+#   bash r31.txt release   ON RELEASE DAY, after Apple approves 2.31.0: the
+#                          email links and the old key (2.30.0 phones need
+#                          both until they have 2.31.0).
+#   bash r31.txt verify    checks;   bash r31.txt rollback   puts it all back.
+#
+# What it does (it shows what changes and waits for you to type yes):
+#   1. saves the published database rules and the email link setting, for rollback;
+#   2. (now) publishes the 2.31.0 rules (tested): a taken-name check for
+#      applicants, Marker scores read-only, the app owner acting as owner in
+#      every group, deleting a group only hides it, course withdrawal, the
+#      course search key record no app can read;
+#   3. (release day) points Firebase's email links (approval, Forgot password)
+#      at the Cuberoot join page, so tapping one opens the app;
+#   4. (release day) removes the old readable course search key from the
+#      groups (a copy is kept in the backup folder). Then save a FRESH key in
+#      the app: Settings, Course search key.
+# If publishing or a check fails, everything is put back by itself.
+#
+# Run it in Google Cloud Shell, signed in with the Google account that owns
+# the Firebase project scorecard-f41b8.
+
+# ---------------------------------------------------------------------------
+# THE GOOGLE PROJECT — defined first, before any command runs.
+# ---------------------------------------------------------------------------
+PROJECT_ID="scorecard-f41b8"
+unset CLOUDSDK_CORE_PROJECT GOOGLE_CLOUD_PROJECT
+
+set -Eeuo pipefail
+
+echo "Switching Cloud Shell to project ${PROJECT_ID} ..."
+gcloud config set project "${PROJECT_ID}" --quiet >/dev/null 2>&1 || { echo "ERROR: could not switch to project ${PROJECT_ID}. Nothing changed." >&2; exit 1; }
+CURRENT_PROJECT="$(gcloud config get-value project 2>/dev/null)"
+[[ "${CURRENT_PROJECT}" == "${PROJECT_ID}" ]] || { echo "ERROR: Cloud Shell is on '${CURRENT_PROJECT}', not ${PROJECT_ID}. Nothing changed." >&2; exit 1; }
+echo "OK: Cloud Shell is now on project ${CURRENT_PROJECT}."
+export CLOUDSDK_CORE_PROJECT="${PROJECT_ID}"
+export GOOGLE_CLOUD_PROJECT="${PROJECT_ID}"
+
+MODE="${1:-apply}"
+COMMIT="9cacb4a7db1f5b266187f3ac655c5cf40b2a6b92"     # v2 branch, all tests green: the 2.31.0 rules
+RAW="https://raw.githubusercontent.com/willyros01/scorecard"
+STATE="$(pwd)/scorecard-r31-backup"
+RULES_API="https://firebaserules.googleapis.com/v1"
+IDT_API="https://identitytoolkit.googleapis.com/admin/v2/projects/${PROJECT_ID}/config"
+FS_API="https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents"
+JOIN_PAGE="https://www.cuberoot-systems.com/scorecard/join/"
+
+die(){ echo "ERROR: $*" >&2; exit 1; }
+for c in gcloud curl jq python3; do command -v "$c" >/dev/null || die "$c is unavailable. Run this in Google Cloud Shell."; done
+[[ "${COMMIT}" != "PIN_ME" ]] || die "This copy is not pinned to a tested version yet. Ask Claude for the final r31.txt."
+
+ACCOUNT="$(gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -n1)"
+[[ -n "${ACCOUNT}" ]] || die "No active Google account. Sign in to Cloud Shell first."
+echo
+echo "  Google account : ${ACCOUNT}"
+echo "  Project        : ${PROJECT_ID}"
+echo
+
+token(){ gcloud auth print-access-token; }
+HDR_PROJECT="x-goog-user-project: ${PROJECT_ID}"
+get(){ curl --fail-with-body --silent --show-error -H "Authorization: Bearer $(token)" -H "${HDR_PROJECT}" "$1"; }
+send(){ curl --fail-with-body --silent --show-error -X "$1" -H "Authorization: Bearer $(token)" -H "${HDR_PROJECT}" -H 'Content-Type: application/json' --data-binary "@$3" "$2"; }
+release_ruleset(){ get "${RULES_API}/projects/${PROJECT_ID}/releases/cloud.firestore" | jq -er .rulesetName; }
+save_rules(){ get "${RULES_API}/$1" | jq -er '.source.files[]|select(.name=="firestore.rules")|.content' > "$2"; [[ -s "$2" ]] || die "Empty Firestore rules."; }
+same_rules(){ python3 - "$1" "$2" <<'PYC'
+import sys
+a=open(sys.argv[1]).read().rstrip("\n"); b=open(sys.argv[2]).read().rstrip("\n")
+sys.exit(0 if a==b else 1)
+PYC
+}
+publish_file(){
+  local body="${STATE}/ruleset.json" patch="${STATE}/release.json" ruleset
+  jq -n --rawfile rules "$1" '{source:{files:[{name:"firestore.rules",content:$rules}]}}' > "${body}" || return 1
+  ruleset="$(send POST "${RULES_API}/projects/${PROJECT_ID}/rulesets" "${body}" | jq -er .name)" || return 1
+  [[ -n "${ruleset}" ]] || return 1
+  jq -n --arg name "projects/${PROJECT_ID}/releases/cloud.firestore" --arg ruleset "${ruleset}" '{release:{name:$name,rulesetName:$ruleset},updateMask:"rulesetName"}' > "${patch}" || return 1
+  send PATCH "${RULES_API}/projects/${PROJECT_ID}/releases/cloud.firestore" "${patch}" >/dev/null || return 1
+}
+live_is(){
+  local current
+  current="$(release_ruleset 2>/dev/null)" || return 1
+  get "${RULES_API}/${current}" 2>/dev/null | jq -er '.source.files[]|select(.name=="firestore.rules")|.content' > "${STATE}/rules-live-now.txt" 2>/dev/null || return 1
+  same_rules "$1" "${STATE}/rules-live-now.txt"
+}
+link_page(){ get "${IDT_API}" | jq -r '.notification.sendEmail.callbackUri // ""'; }
+set_link_page(){
+  jq -n --arg u "$1" '{notification:{sendEmail:{callbackUri:$u}}}' > "${STATE}/link.json"
+  send PATCH "${IDT_API}?updateMask=notification.sendEmail.callbackUri" "${STATE}/link.json" >/dev/null
+}
+recover(){
+  local what="$1"
+  echo
+  echo "Something failed during ${what}. Putting everything back automatically ..."
+  if [[ -s "${STATE}/link-before.txt" ]]; then set_link_page "$(cat "${STATE}/link-before.txt")" || true; fi
+  if [[ "${MODE}" == release ]]; then
+    echo "DONE: the email link setting is back as it was; the 2.31.0 rules stay (they were already live)."
+    exit 1
+  fi
+  for i in 1 2 3; do live_is "${STATE}/rules-before.txt" && break; publish_file "${STATE}/rules-before.txt" || true; sleep 3; done
+  if live_is "${STATE}/rules-before.txt"; then
+    echo "DONE: the earlier rules and email link setting are back. The app works as before."
+  else
+    echo "WARNING: could not confirm. Run:  bash r31.txt rollback  and send a screenshot to Claude."
+  fi
+  exit 1
+}
+
+mkdir -p "${STATE}"
+curl --fail --silent --show-error "${RAW}/${COMMIT}/firestore.rules" -o "${STATE}/rules-new.txt" || die "Cannot read the new rules from GitHub. Nothing changed."
+grep -Fq "function markerScoresKept()" "${STATE}/rules-new.txt" || die "The downloaded rules are not the 2.31.0 rules. Nothing changed."
+
+if [[ "${MODE}" == apply ]]; then
+  # 1. Save what is live now.
+  [[ -s "${STATE}/rules-before.txt" ]] || save_rules "$(release_ruleset)" "${STATE}/rules-before.txt"
+  [[ -s "${STATE}/link-before.txt" ]] || link_page > "${STATE}/link-before.txt"
+  echo "OK: the published rules and the email link setting are saved for rollback."
+  echo
+  echo "The change: the 2.31.0 database rules (tested). Phones on 2.30.0 keep working."
+  echo
+  read -r -p "Type yes to go ahead: " ANSWER
+  [[ "${ANSWER}" == "yes" ]] || die "Stopped. Nothing was changed."
+  # 2. The rules.
+  if ! live_is "${STATE}/rules-new.txt"; then
+    publish_file "${STATE}/rules-new.txt" || recover "publishing the rules"
+    sleep 3
+    live_is "${STATE}/rules-new.txt" || { sleep 10; live_is "${STATE}/rules-new.txt"; } || recover "checking the published rules"
+  fi
+  echo "OK: the 2.31.0 rules are live."
+  echo
+  echo "DONE for now. Test the TestFlight build. On release day run:  bash r31.txt release"
+elif [[ "${MODE}" == release ]]; then
+  [[ -s "${STATE}/link-before.txt" ]] || link_page > "${STATE}/link-before.txt"
+  [[ -s "${STATE}/rules-before.txt" ]] || save_rules "$(release_ruleset)" "${STATE}/rules-before.txt"
+  live_is "${STATE}/rules-new.txt" || die "The 2.31.0 rules are not live yet. Run  bash r31.txt  first."
+  echo "The changes (release day, 2.31.0 approved by Apple):"
+  echo "  - email links open the app: ${JOIN_PAGE}"
+  echo "  - the old readable course search key is removed from the groups."
+  echo
+  read -r -p "Type yes to go ahead: " ANSWER
+  [[ "${ANSWER}" == "yes" ]] || die "Stopped. Nothing was changed."
+  # 3. The email links.
+  set_link_page "${JOIN_PAGE}" || recover "setting the email links"
+  [[ "$(link_page)" == "${JOIN_PAGE}" ]] || recover "checking the email links"
+  echo "OK: email links now open the app."
+  # 4. The old key: a copy first, then removed from each group that has one.
+  get "${FS_API}/associations?pageSize=300" > "${STATE}/groups.json" || recover "reading the groups"
+  jq -r '.documents[]? | select(.fields.lookupKey) | .name' "${STATE}/groups.json" > "${STATE}/groups-with-key.txt"
+  n=0
+  while read -r name; do
+    [[ -n "${name}" ]] || continue
+    echo '{}' > "${STATE}/empty.json"
+    send PATCH "https://firestore.googleapis.com/v1/${name}?updateMask.fieldPaths=lookupKey" "${STATE}/empty.json" >/dev/null || recover "removing the old key"
+    n=$((n + 1))
+  done < "${STATE}/groups-with-key.txt"
+  echo "OK: the old key was removed from ${n} group(s); a copy is in ${STATE}/groups.json."
+  echo
+  echo "DONE. Now, in The Scorecard: Settings, Course search key, paste a FRESH key from golfcourseapi.com, Save."
+  echo "Then tell Claude."
+elif [[ "${MODE}" == verify ]]; then
+  live_is "${STATE}/rules-new.txt" || die "The published rules are not the 2.31.0 rules."
+  echo "OK: the 2.31.0 rules are live."
+  if [[ "$(link_page)" == "${JOIN_PAGE}" ]]; then echo "OK: email links open the app."; else echo "Email links: not switched yet (that is the release-day run)."; fi
+elif [[ "${MODE}" == rollback ]]; then
+  [[ -s "${STATE}/rules-before.txt" ]] || die "No saved rules to go back to."
+  publish_file "${STATE}/rules-before.txt" || die "The earlier rules could not be published. Send a screenshot to Claude."
+  [[ -s "${STATE}/link-before.txt" ]] && set_link_page "$(cat "${STATE}/link-before.txt")" || set_link_page "" || true
+  sleep 3
+  live_is "${STATE}/rules-before.txt" || { sleep 10; live_is "${STATE}/rules-before.txt"; } || die "Rollback of the rules did not take. Send a screenshot to Claude."
+  echo "OK: the earlier rules and email link setting are back. (The old key stays removed: save a fresh key in Settings.)"
+else
+  die "Unknown mode ${MODE}. Use: bash r31.txt   or   bash r31.txt release   or   bash r31.txt verify   or   bash r31.txt rollback"
+fi
