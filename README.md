@@ -1,5 +1,8 @@
 ## Current Scorecard web/iOS/Android boundary — 2026-10-15
 
+> **Updated illustrated code documentation (7 Nov 2026):** [APP-CODE-GUIDE.md](APP-CODE-GUIDE.md)
+
+
 - `main` is protected web production and is not the Android port. App Store submission source is `v2` (**2.30.0 / Apple Build 27**, resubmitted 22 Oct 2026; Build 24 withdrawn before review); public App Store approval is **not verified** by the GitHub records.
 - `android` contains the independently signed Fire HD 8 **2.30.1** application. Owner accepted its tested Android baseline on 12 October; Android-only native backup/Downloads and packaging changes must not be blindly merged into web.
 - Keep invitation, membership, role visibility, handicap, account deletion and offline behavior functionally consistent across platforms, with device acceptance evidence; no Firebase/rules or web deployment is implied by this documentation update.
