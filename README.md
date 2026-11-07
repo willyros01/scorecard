@@ -196,3 +196,9 @@ The 500-round cap on `watchRounds` is there on purpose. An unbounded query is ex
 4. Verify the round count matches before anyone else joins
 
 Version 1 stays deployed and working throughout.
+
+
+## Application documentation
+
+- [Illustrated application and architecture guide](APP-CODE-GUIDE.md)
+- [JavaScript function reference](JAVASCRIPT-REFERENCE.md) — function purposes, data contracts, dependencies and technical details.
