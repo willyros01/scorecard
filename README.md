@@ -1,5 +1,8 @@
 ## Current migration/release snapshot — 2026-10-15 (documentation only)
 
+> **Updated illustrated code documentation (7 Nov 2026):** [APP-CODE-GUIDE.md](APP-CODE-GUIDE.md)
+
+
 - **iOS/App Store release source:** `v2` (same source head as `main` at this audit, before docs commits); version **2.30.0**, Apple review **Build 27** (Build 24 withdrawn 22 Oct 2026) per `build/REVIEW-GUIDE-B27.md`, `build/app-store.md` and `build/RELEASE-2.30.0.md`. CI/TestFlight build success is established by those records; **Apple review approval and public App Store release are not established here**. Preserve confidential reviewer credentials in App Store Connect only, never in this repository.
 - `main` is protected web production; the old `ios` branch is a historical migration line, **not the current App Store submission source**. `android` isolates Fire HD 8/Capacitor native adapters and has separate physical acceptance records in `ANDROID-PLAN.md` on that branch. No Android-native code belongs in `v2` without an owner-approved parity change.
 - Live web and iOS must preserve invitation-once semantics, regular login after consumed links, role and privacy rules, user account deletion, legal acceptance, favorites, handicap/ranking logic and very large readable fonts. Do not infer cross-platform functional equivalence from equal version labels; verify behavior on each exact build.
