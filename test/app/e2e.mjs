@@ -2172,32 +2172,36 @@ await check("CAM4", "Manage camera input, cancelled selection and unreadable pho
 
 /* Hold only the remote scan response; the real editor and photo handler run. */
 await check("CAM5", "delayed scorecard reading shows progress, blocks duplicate photos, recovers on error and ignores cancelled responses", async () => {
+  await put("markerConfig/public", { workerUrl: "https://scorecard-scan-test.invalid" });
   const page = await ownerInG1();
   const picture = { name: "card.png", mimeType: "image/png", buffer: Buffer.from(await page.evaluate(() => { const canvas = document.createElement("canvas"); canvas.width = 8; canvas.height = 8; const ctx = canvas.getContext("2d"); ctx.fillStyle = "white"; ctx.fillRect(0, 0, 8, 8); return canvas.toDataURL("image/png").split(",")[1]; }), "base64") };
-  let requests = 0, pending = null;
-  await page.evaluate(() => localStorage.setItem("golf:workerUrl", "https://scorecard-scan-test.invalid"));
-  await page.route("https://scorecard-scan-test.invalid/scan", async route => {
-    requests++;
-    pending = route;
+  // Test-only transport boundary: WebKit cannot reliably intercept remote fetches.
+  // Keep the real editor, image conversion, authentication and worker response parsing.
+  await page.evaluate(() => {
+    const original = window.fetch.bind(window);
+    window.__scanRequests = 0; window.__scanReply = null;
+    window.fetch = (url, options) => {
+      if (String(url) !== "https://scorecard-scan-test.invalid/scan") return original(url, options);
+      window.__scanRequests++;
+      return new Promise(resolve => { window.__scanReply = body => resolve(new Response(JSON.stringify(body), {status:200, headers:{"Content-Type":"application/json"}})); });
+    };
   });
   const progress = () => page.locator('.card-reading-progress[role="status"]');
   const camera = () => page.locator('input[name="card-photo"][capture="environment"]');
   async function startPhoto() {
-    pending = null;
     await camera().setInputFiles(picture);
     await progress().waitFor();
-    const deadline = Date.now() + 10000;
-    while (!pending && Date.now() < deadline) await page.waitForTimeout(50);
-    if (!pending) throw new Error(`photo never reached the controlled scan endpoint: ${(await text(page)).slice(-600)}`);
+    await page.waitForFunction(() => typeof window.__scanReply === "function", null, { timeout: 30000 }).catch(async () => {
+      throw new Error(`scan transport was not reached: ${(await text(page)).replace(/\s+/g, " ").slice(-900)}`);
+    });
     if (await page.locator('input[name="card-photo"]').count()) throw new Error("photo controls still available while reading");
     if (!await page.locator('[data-act="save-course"]').isDisabled()) throw new Error("Save enabled during reading");
     if (!/Reading your scorecard/.test(await progress().innerText())) throw new Error("missing reading message");
   }
   async function reply(body) {
-    const route = pending;
-    pending = null;
-    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
+    await page.evaluate(body => { const reply = window.__scanReply; window.__scanReply = null; reply(body); }, body);
   }
+  const requestCount = () => page.evaluate(() => window.__scanRequests);
   try {
     await tab(page, "manage");
     await page.locator('[data-act="new-course"]').click();
@@ -2210,7 +2214,7 @@ await check("CAM5", "delayed scorecard reading shows progress, blocks duplicate 
       input.dispatchEvent(new Event("change", {bubbles:true})); input.remove();
     });
     await page.waitForTimeout(300);
-    if (requests !== 1 || !await progress().isVisible()) throw new Error("duplicate input interrupted or repeated the reading");
+    if (await requestCount() !== 1 || !await progress().isVisible()) throw new Error("duplicate input interrupted or repeated the reading");
     await reply({ scan: { course: "Progress Test Links", scanId: "scan-1", tees: [] } });
     await page.locator('[data-act="card-again"]').waitFor();
     if (await progress().count()) throw new Error("spinner remained after success");
@@ -2225,10 +2229,9 @@ await check("CAM5", "delayed scorecard reading shows progress, blocks duplicate 
     await reply({ scan: { course: "Stale Reply Must Not Appear", scanId: "old", tees: [] } });
     await page.waitForTimeout(500);
     if (await progress().count() || await camera().count() !== 1 || /Stale Reply Must Not Appear/.test(await text(page))) throw new Error("cancelled scan changed the new editor");
-    if (requests !== 3) throw new Error(`expected three scan requests, got ${requests}`);
+    if (await requestCount() !== 3) throw new Error(`expected three scan requests, got ${await requestCount()}`);
     if (page.errors.length) throw new Error(page.errors.join(" | "));
   } finally {
-    if (pending) await pending.abort().catch(() => {});
     await page.close();
   }
 });
