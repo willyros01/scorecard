@@ -2173,7 +2173,7 @@ await check("CAM4", "Manage camera input, cancelled selection and unreadable pho
 /* Hold only the remote scan response; the real editor and photo handler run. */
 await check("CAM5", "delayed scorecard reading shows progress, blocks duplicate photos, recovers on error and ignores cancelled responses", async () => {
   const page = await ownerInG1();
-  const picture = { name: "card.png", mimeType: "image/png", buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jR1kAAAAASUVORK5CYII=", "base64") };
+  const picture = { name: "card.png", mimeType: "image/png", buffer: Buffer.from(await page.evaluate(() => { const canvas = document.createElement("canvas"); canvas.width = 8; canvas.height = 8; const ctx = canvas.getContext("2d"); ctx.fillStyle = "white"; ctx.fillRect(0, 0, 8, 8); return canvas.toDataURL("image/png").split(",")[1]; }), "base64") };
   let requests = 0, pending = null;
   await page.evaluate(() => localStorage.setItem("golf:workerUrl", "https://scorecard-scan-test.invalid"));
   await page.route("https://scorecard-scan-test.invalid/scan", async route => {
@@ -2188,7 +2188,7 @@ await check("CAM5", "delayed scorecard reading shows progress, blocks duplicate 
     await progress().waitFor();
     const deadline = Date.now() + 10000;
     while (!pending && Date.now() < deadline) await page.waitForTimeout(50);
-    if (!pending) throw new Error("photo never reached the controlled scan endpoint");
+    if (!pending) throw new Error(`photo never reached the controlled scan endpoint: ${(await text(page)).slice(-600)}`);
     if (await page.locator('input[name="card-photo"]').count()) throw new Error("photo controls still available while reading");
     if (!await page.locator('[data-act="save-course"]').isDisabled()) throw new Error("Save enabled during reading");
     if (!/Reading your scorecard/.test(await progress().innerText())) throw new Error("missing reading message");
