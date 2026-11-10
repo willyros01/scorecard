@@ -1,0 +1,35 @@
+name: Scorecard API resubmission build 35
+on:
+  push:
+    branches: [v2]
+    paths: [.github/workflows/scorecard-resubmit-35.yml]
+permissions:
+  contents: read
+jobs:
+  review:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: App Store Connect API
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          node --input-type=module <<'JS'
+          import crypto from "node:crypto";
+          const e=process.env, enc=o=>Buffer.from(JSON.stringify(o)).toString("base64url");
+          function token(){const t=Math.floor(Date.now()/1000);const u=enc({alg:"ES256",kid:e.ASC_KEY_ID,typ:"JWT"})+"."+enc({iss:e.ASC_ISSUER_ID,iat:t,exp:t+600,aud:"appstoreconnect-v1"});return u+"."+crypto.sign("sha256",Buffer.from(u),{key:e.ASC_KEY_P8,dsaEncoding:"ieee-p1363"}).toString("base64url");}
+          async function api(method,path,body){const r=await fetch("https://api.appstoreconnect.apple.com/v1/"+path,{method,headers:{Authorization:"Bearer "+token(),"Content-Type":"application/json"},body:body?JSON.stringify(body):undefined});const s=await r.text();const j=s?JSON.parse(s):{};if(!r.ok)throw Error(method+" "+path+" "+r.status+" "+JSON.stringify(j.errors));return j;}
+          const app=(await api("GET","apps?filter[bundleId]=io.github.willyros01.scorecard")).data[0];
+          const versions=(await api("GET",`apps/${app.id}/appStoreVersions?filter[platform]=IOS&limit=10`)).data;
+          console.log("APP",app.id);
+          for(const v of versions)console.log("VERSION",v.id,v.attributes.versionString,v.attributes.appStoreState,v.attributes.releaseType);
+          const build=(await api("GET",`builds?filter[app]=${app.id}&filter[version]=35&filter[preReleaseVersion.version]=2.31.4`)).data[0];console.log("BUILD",JSON.stringify(build&&{id:build.id,...build.attributes}));
+          const subs=(await api("GET",`reviewSubmissions?filter[app]=${app.id}&limit=20`)).data;
+          for(const sub of subs){if(["READY_FOR_REVIEW","UNRESOLVED_ISSUES","WAITING_FOR_REVIEW","IN_REVIEW"].includes(sub.attributes.state)){console.log("SUB",sub.id,JSON.stringify(sub.attributes));const items=(await api("GET",`reviewSubmissions/${sub.id}/items?include=appStoreVersion`));console.log("ITEMS",JSON.stringify(items));}}
+          
+          JS
