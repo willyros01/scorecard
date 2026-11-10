@@ -1,0 +1,419 @@
+Building The Scorecard 2.31.4 as version 2.31.4, build 35
+--- 1. npm ci and 2. build checks V1-V6
+OK    V1 npm ci succeeded from the committed lockfile
+OK    V2 every package is exactly the approved version
+
+  vendor/firebase/firebase-10.12.0.js  384.2kb
+
+⚡ Done in 87ms
+OK    V3 the committed bundle is identical to a fresh build
+OK    V4 no remote code in the 19 packaged files
+OK    V5 Capacitor core, cli and ios are 8.5.2
+OK    V6 no location.origin; the bundle exports everything store.js uses
+verify.sh: all checks passed
+--- 3. Collect the web files into www/
+www/app.js
+www/cleanup.html
+www/courses-api.js
+www/firebase-config.js
+www/icon.svg
+www/index.html
+www/model.js
+www/outbox.js
+www/platform.js
+www/quick-start.html
+www/rebuild.html
+www/repair.html
+www/store.js
+www/styles.css
+www/tidy.html
+www/tool-firebase.js
+www/vendor/firebase/bundle.source
+www/vendor/firebase/firebase-10.12.0.js
+www/version.js
+--- 4. Capacitor: generate the iOS project (fresh every build) and sync
+✔ Adding native Xcode project in ios in 34.52ms
+✔ add in 35.69ms
+✔ Copying web assets from www to ios/App/App/public in 17.02ms
+✔ Creating capacitor.config.json in ios/App/App in 551.38μs
+✔ copy ios in 39.35ms
+✔ Updating iOS plugins in 907.54μs
+[info] All Capacitor plugins have a Package.swift file and will be included in Package.swift
+[info] Writing Package.swift
+[info] Found 5 Capacitor plugins for ios:
+       @capacitor/app@8.1.1
+       @capacitor/share@8.0.2
+       @capacitor/filesystem@8.1.3
+       @capacitor/clipboard@8.0.1
+       @capacitor/app-launcher@8.0.1
+✔ update ios in 23.62ms
+[success] ios platform added!
+Follow the Developer Workflow guide to get building:
+https://capacitorjs.com/docs/basics/workflow
+✔ Copying web assets from www to ios/App/App/public in 110.16ms
+✔ Creating capacitor.config.json in ios/App/App in 1.31ms
+✔ copy ios in 130.91ms
+✔ Updating iOS plugins in 2.56ms
+[info] All Capacitor plugins have a Package.swift file and will be included in Package.swift
+[info] Writing Package.swift
+[info] Found 5 Capacitor plugins for ios:
+       @capacitor/app@8.1.1
+       @capacitor/share@8.0.2
+       @capacitor/filesystem@8.1.3
+       @capacitor/clipboard@8.0.1
+       @capacitor/app-launcher@8.0.1
+✔ update ios in 100.39ms
+[info] Sync finished in 0.272s
+--- Project settings: privacy manifest, entitlements, Info.plist
+Xcode project: privacy manifest added as a resource; entitlements set.
+PASS  camera permission: ios/App/App/Info.plist
+--- App icon and launch image
+--- Simulator camera configuration regression and launch test
+PASS  camera permission: /var/folders/h5/t85nd63d71x27_8gl5gw3l_w0000gn/T/tmpsbbf3g5d/Info.plist
+PASS  camera permission: /var/folders/h5/t85nd63d71x27_8gl5gw3l_w0000gn/T/tmpsbbf3g5d/Info.plist
+PASS  camera permission: /var/folders/h5/t85nd63d71x27_8gl5gw3l_w0000gn/T/tmpsbbf3g5d/Info.plist
+PASS  CAM1 missing/empty/non-string camera descriptions rejected (build 33 regression)
+PASS  CAM2 configuration preserves other keys and is repeatable
+PASS  CAM3 unrelated permissions remain forbidden
+PASS  camera permission: /Users/runner/work/_temp/scorecard-camera-simulator/DerivedData/Build/Products/Debug-iphonesimulator/App.app/Info.plist
+FAIL  camera permission: NSCameraUsageDescription must be a nonempty string
+PASS SIM-CAM1 built app permission validated; missing-key negative control rejected
+Monitoring boot status for iPhone 17 Pro (FCC5F673-7BEC-4A7D-8F2A-4DC35E2668EC).
+[2026-11-10 16:28:10 +0000] Status=2, isTerminal=NO, Elapsed=01:04.
+	Waiting on Data Migration
+		Reason:Running plugin com.apple.-0LaunchServicesMigrator (00LaunchServicesMigrator.migrator, user-agnostic)
+		Migration Elapsed:00:48 seconds
+
+[2026-11-10 16:28:11 +0000] Status=2, isTerminal=NO, Elapsed=01:05.
+	Waiting on Data Migration
+		Reason:Running plugin com.apple.-0LaunchServicesMigrator (00LaunchServicesMigrator.migrator, user-agnostic)
+		Migration Elapsed:00:49 seconds
+
+[2026-11-10 16:28:12 +0000] Status=2, isTerminal=NO, Elapsed=01:06.
+	Waiting on Data Migration
+		Reason:Running plugin com.apple.-0LaunchServicesMigrator (00LaunchServicesMigrator.migrator, user-agnostic)
+		Migration Elapsed:00:50 seconds
+
+[2026-11-10 16:28:13 +0000] Status=2, isTerminal=NO, Elapsed=01:07.
+	Waiting on Data Migration
+		Reason:Running plugin com.apple.-0LaunchServicesMigrator (00LaunchServicesMigrator.migrator, user-agnostic)
+		Migration Elapsed:00:51 seconds
+
+[2026-11-10 16:28:14 +0000] Status=2, isTerminal=NO, Elapsed=01:08.
+	Waiting on Data Migration
+		Reason:Running plugin com.apple.-0LaunchServicesMigrator (00LaunchServicesMigrator.migrator, user-agnostic)
+		Migration Elapsed:00:52 seconds
+
+[2026-11-10 16:28:15 +0000] Status=2, isTerminal=NO, Elapsed=01:09.
+	Waiting on Data Migration
+		Reason:Running plugin com.apple.-0LaunchServicesMigrator (00LaunchServicesMigrator.migrator, user-agnostic)
+		Migration Elapsed:00:53 seconds
+
+[2026-11-10 16:28:16 +0000] Status=2, isTerminal=NO, Elapsed=01:10.
+	Waiting on Data Migration
+		Reason:Running plugin com.apple.-0LaunchServicesMigrator (00LaunchServicesMigrator.migrator, user-agnostic)
+		Migration Elapsed:00:54 seconds
+
+[2026-11-10 16:28:17 +0000] Status=2, isTerminal=NO, Elapsed=01:11.
+	Waiting on Data Migration
+		Reason:Running plugin com.apple.-0LaunchServicesMigrator (00LaunchServicesMigrator.migrator, user-agnostic)
+		Migration Elapsed:00:55 seconds
+
+[2026-11-10 16:28:18 +0000] Status=2, isTerminal=NO, Elapsed=01:12.
+	Waiting on Data Migration
+		Reason:Running plugin com.apple.-0LaunchServicesMigrator (00LaunchServicesMigrator.migrator, user-agnostic)
+		Migration Elapsed:00:56 seconds
+
+[2026-11-10 16:28:19 +0000] Status=2, isTerminal=NO, Elapsed=01:13.
+	Waiting on Data Migration
+		Reason:Running plugin com.apple.-0LaunchServicesMigrator (00LaunchServicesMigrator.migrator, user-agnostic)
+		Migration Elapsed:00:57 seconds
+
+[2026-11-10 16:28:23 +0000] Status=2, isTerminal=NO, Elapsed=01:17.
+	Waiting on Data Migration
+		Reason:Running plugin com.apple.securityd.KeychainMigrator (KeychainMigrator.migrator, user-agnostic)
+		Migration Elapsed:00:59 seconds
+
+[2026-11-10 16:28:25 +0000] Status=2, isTerminal=NO, Elapsed=01:19.
+	Waiting on Data Migration
+		Reason:Running plugin com.apple.managedconfiguration.migrator (MCProfile.migrator, user-agnostic)
+		Migration Elapsed:01:02 seconds
+
+[2026-11-10 16:28:26 +0000] Status=2, isTerminal=NO, Elapsed=01:20.
+	Waiting on Data Migration
+		Reason:Running plugin com.apple.managedconfiguration.migrator (MCProfile.migrator, user-agnostic)
+		Migration Elapsed:01:04 seconds
+
+[2026-11-10 16:28:26 +0000] Status=2, isTerminal=NO, Elapsed=01:20.
+	Waiting on Data Migration
+		Reason:Running plugin com.apple.managedconfiguration.migrator (MCProfile.migrator, user-agnostic)
+		Migration Elapsed:01:05 seconds
+
+[2026-11-10 16:28:28 +0000] Status=2, isTerminal=NO, Elapsed=01:22.
+	Waiting on Data Migration
+		Reason:Running plugin com.apple.managedconfiguration.migrator (MCProfile.migrator, user-agnostic)
+		Migration Elapsed:01:05 seconds
+
+[2026-11-10 16:28:28 +0000] Status=2, isTerminal=NO, Elapsed=01:22.
+	Waiting on Data Migration
+		Reason:Running plugin com.apple.managedconfiguration.migrator (MCProfile.migrator, user-agnostic)
+		Migration Elapsed:01:07 seconds
+
+[2026-11-10 16:28:29 +0000] Status=2, isTerminal=NO, Elapsed=01:23.
+	Waiting on Data Migration
+		Reason:Running plugin com.apple.managedconfiguration.migrator (MCProfile.migrator, user-agnostic)
+		Migration Elapsed:01:07 seconds
+
+[2026-11-10 16:28:30 +0000] Status=2, isTerminal=NO, Elapsed=01:24.
+	Waiting on Data Migration
+		Reason:Running plugin com.apple.managedconfiguration.migrator (MCProfile.migrator, user-agnostic)
+		Migration Elapsed:01:08 seconds
+
+[2026-11-10 16:28:32 +0000] Status=2, isTerminal=NO, Elapsed=01:26.
+	Waiting on Data Migration
+		Reason:Running plugin com.apple.managedconfiguration.migrator (MCProfile.migrator, user-agnostic)
+		Migration Elapsed:01:09 seconds
+
+[2026-11-10 16:28:33 +0000] Status=2, isTerminal=NO, Elapsed=01:27.
+	Waiting on Data Migration
+		Reason:Running plugin com.apple.managedconfiguration.migrator (MCProfile.migrator, user-agnostic)
+		Migration Elapsed:01:11 seconds
+
+[2026-11-10 16:28:35 +0000] Status=2, isTerminal=NO, Elapsed=01:29.
+	Waiting on Data Migration
+		Reason:Running plugin com.apple.managedconfiguration.migrator (MCProfile.migrator, user-agnostic)
+		Migration Elapsed:01:12 seconds
+
+[2026-11-10 16:28:37 +0000] Status=2, isTerminal=NO, Elapsed=01:31.
+	Waiting on Data Migration
+		Reason:Running plugin com.apple.addressbook.migrator (AddressBookLegacy.migrator)
+		Migration Elapsed:01:13 seconds
+
+[2026-11-10 16:28:40 +0000] Status=2, isTerminal=NO, Elapsed=01:34.
+	Waiting on Data Migration
+		Reason:Running plugin com.apple.MobileSafari.migrator (MobileSafari.migrator)
+		Migration Elapsed:01:15 seconds
+
+[2026-11-10 16:28:42 +0000] Status=2, isTerminal=NO, Elapsed=01:36.
+	Waiting on Data Migration
+		Reason:Running plugin com.apple.locationd.migrator (CoreLocationMigrator.migrator)
+		Migration Elapsed:01:18 seconds
+
+[2026-11-10 16:28:43 +0000] Status=2, isTerminal=NO, Elapsed=01:37.
+	Waiting on Data Migration
+		Reason:Running plugin com.apple.locationd.migrator (CoreLocationMigrator.migrator)
+		Migration Elapsed:01:20 seconds
+
+[2026-11-10 16:28:44 +0000] Status=2, isTerminal=NO, Elapsed=01:37.
+	Waiting on Data Migration
+		Reason:Running plugin com.apple.locationd.migrator (CoreLocationMigrator.migrator)
+		Migration Elapsed:01:22 seconds
+
+[2026-11-10 16:28:46 +0000] Status=2, isTerminal=NO, Elapsed=01:40.
+	Waiting on Data Migration
+		Reason:Running plugin com.apple.locationd.migrator (CoreLocationMigrator.migrator)
+		Migration Elapsed:01:23 seconds
+
+[2026-11-10 16:28:48 +0000] Status=2, isTerminal=NO, Elapsed=01:42.
+	Waiting on Data Migration
+		Reason:Running plugin com.apple.locationd.migrator (CoreLocationMigrator.migrator)
+		Migration Elapsed:01:24 seconds
+
+[2026-11-10 16:28:49 +0000] Status=2, isTerminal=NO, Elapsed=01:43.
+	Waiting on Data Migration
+		Reason:Running plugin com.apple.locationd.migrator (CoreLocationMigrator.migrator)
+		Migration Elapsed:01:27 seconds
+
+[2026-11-10 16:28:50 +0000] Status=2, isTerminal=NO, Elapsed=01:44.
+	Waiting on Data Migration
+		Reason:Running plugin com.apple.locationd.migrator (CoreLocationMigrator.migrator)
+		Migration Elapsed:01:28 seconds
+
+[2026-11-10 16:28:50 +0000] Status=2, isTerminal=NO, Elapsed=01:44.
+	Waiting on Data Migration
+		Reason:Running plugin com.apple.locationd.migrator (CoreLocationMigrator.migrator)
+		Migration Elapsed:01:28 seconds
+
+[2026-11-10 16:28:51 +0000] Status=2, isTerminal=NO, Elapsed=01:45.
+	Waiting on Data Migration
+		Reason:Running plugin com.apple.locationd.migrator (CoreLocationMigrator.migrator)
+		Migration Elapsed:01:30 seconds
+
+[2026-11-10 16:28:52 +0000] Status=2, isTerminal=NO, Elapsed=01:46.
+	Waiting on Data Migration
+		Reason:Running plugin com.apple.locationd.migrator (CoreLocationMigrator.migrator)
+		Migration Elapsed:01:31 seconds
+
+[2026-11-10 16:28:53 +0000] Status=2, isTerminal=NO, Elapsed=01:47.
+	Waiting on Data Migration
+		Reason:Running plugin com.apple.locationd.migrator (CoreLocationMigrator.migrator)
+		Migration Elapsed:01:31 seconds
+
+[2026-11-10 16:28:54 +0000] Status=2, isTerminal=NO, Elapsed=01:48.
+	Waiting on Data Migration
+		Reason:Running plugin com.apple.locationd.migrator (CoreLocationMigrator.migrator)
+		Migration Elapsed:01:32 seconds
+
+[2026-11-10 16:28:55 +0000] Status=2, isTerminal=NO, Elapsed=01:49.
+	Waiting on Data Migration
+		Reason:Running plugin com.apple.locationd.migrator (CoreLocationMigrator.migrator)
+		Migration Elapsed:01:33 seconds
+
+[2026-11-10 16:28:56 +0000] Status=2, isTerminal=NO, Elapsed=01:50.
+	Waiting on Data Migration
+		Reason:Running plugin com.apple.locationd.migrator (CoreLocationMigrator.migrator)
+		Migration Elapsed:01:34 seconds
+
+[2026-11-10 16:28:57 +0000] Status=2, isTerminal=NO, Elapsed=01:51.
+	Waiting on Data Migration
+		Reason:Running plugin com.apple.locationd.migrator (CoreLocationMigrator.migrator)
+		Migration Elapsed:01:35 seconds
+
+[2026-11-10 16:28:58 +0000] Status=2, isTerminal=NO, Elapsed=01:52.
+	Waiting on Data Migration
+		Reason:Running plugin com.apple.locationd.migrator (CoreLocationMigrator.migrator)
+		Migration Elapsed:01:36 seconds
+
+[2026-11-10 16:28:59 +0000] Status=2, isTerminal=NO, Elapsed=01:53.
+	Waiting on Data Migration
+		Reason:Running plugin com.apple.locationd.migrator (CoreLocationMigrator.migrator)
+		Migration Elapsed:01:37 seconds
+
+[2026-11-10 16:29:00 +0000] Status=2, isTerminal=NO, Elapsed=01:54.
+	Waiting on Data Migration
+		Reason:Running plugin com.apple.locationd.migrator (CoreLocationMigrator.migrator)
+		Migration Elapsed:01:38 seconds
+
+[2026-11-10 16:29:01 +0000] Status=2, isTerminal=NO, Elapsed=01:55.
+	Waiting on Data Migration
+		Reason:Running plugin com.apple.locationd.migrator (CoreLocationMigrator.migrator)
+		Migration Elapsed:01:39 seconds
+
+[2026-11-10 16:29:02 +0000] Status=2, isTerminal=NO, Elapsed=01:56.
+	Waiting on Data Migration
+		Reason:Running plugin com.apple.locationd.migrator (CoreLocationMigrator.migrator)
+		Migration Elapsed:01:40 seconds
+
+[2026-11-10 16:29:03 +0000] Status=2, isTerminal=NO, Elapsed=01:57.
+	Waiting on Data Migration
+		Reason:Running plugin com.apple.locationd.migrator (CoreLocationMigrator.migrator)
+		Migration Elapsed:01:41 seconds
+
+[2026-11-10 16:29:08 +0000] Status=2, isTerminal=NO, Elapsed=02:01.
+	Waiting on Data Migration
+		Reason:Running plugin com.apple.locationd.migrator (CoreLocationMigrator.migrator)
+		Migration Elapsed:01:43 seconds
+
+[2026-11-10 16:29:11 +0000] Status=2, isTerminal=NO, Elapsed=02:04.
+	Waiting on Data Migration
+		Reason:Running plugin com.apple.locationd.migrator (CoreLocationMigrator.migrator)
+		Migration Elapsed:01:46 seconds
+
+[2026-11-10 16:29:13 +0000] Status=2, isTerminal=NO, Elapsed=02:07.
+	Waiting on Data Migration
+		Reason:Running plugin com.apple.CloudTabsMigrator.migrator (CloudTabsMigrator.migrator)
+		Migration Elapsed:01:49 seconds
+
+[2026-11-10 16:29:13 +0000] Status=2, isTerminal=NO, Elapsed=02:07.
+	Waiting on Data Migration
+		Reason:Running plugin com.apple.tone.migrator (Tones.migrator)
+		Migration Elapsed:01:51 seconds
+
+[2026-11-10 16:29:15 +0000] Status=2, isTerminal=NO, Elapsed=02:09.
+	Waiting on Data Migration
+		Reason:Running plugin com.apple.managedconfiguration.cleanup.migrator (MCCleanup.migrator)
+		Migration Elapsed:01:52 seconds
+
+[2026-11-10 16:29:16 +0000] Status=4, isTerminal=NO, Elapsed=02:10.
+	Waiting on System App
+
+[2026-11-10 16:29:16 +0000] Status=4, isTerminal=NO, Elapsed=02:10.
+	Waiting on System App
+
+[2026-11-10 16:29:17 +0000] Status=4, isTerminal=NO, Elapsed=02:11.
+	Waiting on System App
+
+[2026-11-10 16:29:18 +0000] Status=4, isTerminal=NO, Elapsed=02:12.
+	Waiting on System App
+
+[2026-11-10 16:29:19 +0000] Status=4, isTerminal=NO, Elapsed=02:13.
+	Waiting on System App
+
+[2026-11-10 16:29:20 +0000] Status=4, isTerminal=NO, Elapsed=02:14.
+	Waiting on System App
+
+[2026-11-10 16:29:21 +0000] Status=4, isTerminal=NO, Elapsed=02:15.
+	Waiting on System App
+
+[2026-11-10 16:29:22 +0000] Status=4, isTerminal=NO, Elapsed=02:16.
+	Waiting on System App
+
+[2026-11-10 16:29:24 +0000] Status=4, isTerminal=NO, Elapsed=02:17.
+	Waiting on System App
+
+[2026-11-10 16:29:27 +0000] Status=4, isTerminal=NO, Elapsed=02:21.
+	Waiting on System App
+
+[2026-11-10 16:29:29 +0000] Status=4294967295, isTerminal=YES, Elapsed=02:23.
+	Finished
+
+PASS  camera permission: /Users/runner/Library/Developer/CoreSimulator/Devices/FCC5F673-7BEC-4A7D-8F2A-4DC35E2668EC/data/Containers/Bundle/Application/E5C000CD-5119-4DB3-A3ED-1F6BAFD9D1C7/App.app/Info.plist
+io.github.willyros01.scorecard: 6923
+Detected file type from extension: PNG
+Note: No display specified. Defaulting to display: 3995D0BD-8F3F-4137-83E0-D6FDFC583894 (screenID: 1, name: LCD)
+Wrote screenshot to: /Users/runner/work/_temp/scorecard-camera-simulator/launched.png
+PASS SIM-CAM2 installed Scorecard launched and remained running for 10 seconds
+LIMIT: Simulator has no camera. Physical photo capture still requires device acceptance.
+--- App Store Connect key
+--- Check the Apple key is accepted
+Apple API preflight passed: the key is accepted.
+App record found: The Scorecard: Golf Handicaps (io.github.willyros01.scorecard).
+--- 5. Set the version, 6. archive (signed for distribution at export, as Fairpot does: no devices needed)
+    cd /Users/runner/work/scorecard/scorecard/ios/App
+    /usr/bin/touch -c /Users/runner/Library/Developer/Xcode/DerivedData/App-foiydrissoivwcgqlipyfvsodhew/Build/Intermediates.noindex/ArchiveIntermediates/App/InstallationBuildProductsLocation/Applications/App.app
+
+** ARCHIVE SUCCEEDED **
+
+--- 7. Audit the finished, distribution-signed app (A1-A7). No upload unless it passes.
+Audit of App.app — 2.31.4 (35)
+      privacy manifests found: 3
+        Frameworks/Capacitor.framework/PrivacyInfo.xcprivacy
+        Frameworks/Cordova.framework/PrivacyInfo.xcprivacy
+        PrivacyInfo.xcprivacy
+OK    A1 the app's own manifest: no tracking, no tracking domains
+      categories declared across all manifests: NSPrivacyAccessedAPICategoryUserDefaults
+      App: none
+      Capacitor: none
+      Cordova: none
+OK    A2 every required-reason API category used is declared
+      frameworks and resource bundles in the app:
+        Frameworks/Capacitor.framework
+        Frameworks/Cordova.framework
+OK    A3 Capacitor (on Apple's commonly used SDK list) ships its own privacy manifest
+OK    A3 every embedded framework carries a valid signature
+PASS  camera permission: /Users/runner/work/_temp/audit/Payload/App.app/Info.plist
+OK    A4 camera usage description present; no unrelated permissions
+      entitlements: application-identifier beta-reports-active com.apple.developer.associated-domains com.apple.developer.team-identifier get-task-allow
+OK    A5 no unexpected entitlements
+OK    A5 get-task-allow is false
+OK    A5 associated domains: applinks:www.cuberoot-systems.com only
+OK    A5b link name: thescorecard
+OK    A6 no App Transport Security exceptions
+OK    A7 ITSAppUsesNonExemptEncryption is NO
+OK    A7 no bundled encryption library (SQLCipher, OpenSSL, BoringSSL)
+
+AUDIT PASSED (A1-A7)
+--- 8. Upload to TestFlight
+::notice title=Uploaded::The Scorecard 2.31.4 build 35 sent to App Store Connect.
+--- 9. Test Information and What to Test
+Test Information filled.
+Waiting for Apple to process build 35 (not listed yet)…
+Waiting for Apple to process build 35 (not listed yet)…
+Waiting for Apple to process build 35 (not listed yet)…
+Waiting for Apple to process build 35 (not listed yet)…
+Waiting for Apple to process build 35 (not listed yet)…
+Waiting for Apple to process build 35 (not listed yet)…
+"What to Test" filled for build 35.
+Export compliance already set (usesNonExemptEncryption: false).
+Group "Willy": POST /v1/betaGroups/a860dc30-33c8-4115-b7eb-2835e7bec0ad/relationships/builds — ENTITY_UNPROCESSABLE: Cannot add internal group to a build. (automatic distribution may already have added it).
+RESULT: success — The Scorecard 2.31.4 build 35 uploaded to TestFlight.
