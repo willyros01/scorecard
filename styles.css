@@ -894,3 +894,8 @@ body { font-size: 1rem; }
 .popmsg-text { font-size: 18px; line-height: 1.45; margin: 0 0 18px; }
 .popmsg-body .btn { width: 100%; }
 .joined-tick { color: var(--pine, #2e7d32); font-weight: 700; margin-left: 4px; }
+
+/* Keep scorecard-reading feedback large, visible and within the editor. */
+.card-reading-progress { text-align: center; padding: 1.25rem .5rem; }
+.card-reading-progress .busy-what { font-size: max(22px, 1.35rem); }
+.card-reading-progress .busy-wait { font-size: max(20px, 1.1rem); line-height: 1.5; }

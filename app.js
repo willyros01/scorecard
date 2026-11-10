@@ -4135,13 +4135,17 @@ function scorecardEntry() {
   const c = cardScan;
   return `<div class="card padded" style="margin-top:0.8rem">
     <div class="eyebrow">Or enter it from the club's scorecard</div>
-    ${c && c.reading ? cardCheck(c.reading) : `
+    ${c && c.busy ? `<div class="card-reading-progress" role="status" aria-live="polite" aria-atomic="true" aria-busy="true">
+      <div class="busy-spinner" aria-hidden="true"></div>
+      <p class="busy-what">${c.readingPhoto ? "Reading your scorecard…" : "Verifying your scorecard…"}</p>
+      <p class="busy-wait">Please wait. This can take up to a minute.<br>You do not need to take another photo.</p>
+    </div>` : c && c.reading ? cardCheck(c.reading) : `
       <div class="inline-actions stacked">
         <label class="btn ghost" style="text-align:center">Take a photo<input type="file" name="card-photo" accept="image/*" capture="environment" hidden></label>
         <label class="btn ghost" style="text-align:center">Photos or Files<input type="file" name="card-photo" accept="image/*" hidden></label>
         <button class="btn ghost" data-act="card-type">Type it in instead</button>
       </div>`}
-    ${c && c.msg ? `<p class="hint">${esc(c.msg)}</p>` : ""}
+    ${c && !c.busy && c.msg ? `<p class="hint">${esc(c.msg)}</p>` : ""}
   </div>`;
 }
 /* "Check against the card": the club's card as read, every tee with each
@@ -4191,17 +4195,24 @@ function shrinkPhoto(file) {
   });
 }
 async function readCardPhoto(file) {
-  cardScan = { ...(cardScan || {}), busy: true, msg: "Reading the card… this takes up to a minute." };
+  if (!courseDraft || (cardScan && cardScan.busy)) return;
+  const draft = courseDraft;
+  const request = { scanIds: (cardScan && cardScan.scanIds) || [], busy: true, readingPhoto: true, msg: "" };
+  cardScan = request;
   render();
   try {
     const image = await shrinkPhoto(file);
+    if (courseDraft !== draft || cardScan !== request) return;
     const r = await db.callMarkerWorker("/scan", { method: "POST", body: { image } });
+    // Cancel or opening a different editor invalidates this response.
+    if (courseDraft !== draft || cardScan !== request) return;
     const reading = r.scan || {};
-    cardScan = { busy: false, msg: "", reading, scanIds: [...((cardScan && cardScan.scanIds) || []), reading.scanId].filter(Boolean) };
-    if (reading.course && courseDraft && !courseDraft.name) courseDraft.name = reading.course;
+    cardScan = { busy: false, msg: "", reading, scanIds: [...request.scanIds, reading.scanId].filter(Boolean) };
+    if (reading.course && !draft.name) draft.name = reading.course;
   } catch (e) {
+    if (courseDraft !== draft || cardScan !== request) return;
     const m = String((e && e.message) || e);
-    cardScan = { busy: false, msg: m === "SCAN_LIMIT" ? "Today's picture readings are used up. Type it in instead, or try tomorrow." : m === "SCAN_BAD_PHOTO" ? "That picture could not be opened. Try another." : `The card could not be read (${m}). Try another picture, or type it in.` };
+    cardScan = { scanIds: request.scanIds, busy: false, msg: m === "SCAN_LIMIT" ? "Today's picture readings are used up. Type it in instead, or try tomorrow." : m === "SCAN_BAD_PHOTO" ? "That picture could not be opened. Try another." : `The card could not be read (${m}). Try another picture, or type it in.` };
   }
   render();
 }
@@ -4262,7 +4273,7 @@ function courseEditor() {
     ${editing ? "" : scorecardEntry()}
 
     <div class="inline-actions stacked editor-actions">
-      <button class="btn" data-act="save-course">${editing ? "Save changes" : "Save course"}</button>
+      <button class="btn" data-act="save-course" ${cardScan && cardScan.busy ? "disabled" : ""}>${editing ? "Save changes" : "Save course"}</button>
       <button class="btn ghost" data-act="cancel-course">Cancel</button>
     </div>
   </div>`;
