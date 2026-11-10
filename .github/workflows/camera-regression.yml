@@ -1,0 +1,35 @@
+name: Camera crash regression checks
+on:
+  push:
+    branches: [fix-camera-permission]
+permissions:
+  contents: read
+jobs:
+  claude-suite:
+    uses: ./.github/workflows/release-checks.yml
+  simulator:
+    runs-on: macos-26
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Verify and prepare the same native project as the release
+        run: |
+          bash build/verify.sh
+          bash build/prepare-ios.sh
+      - name: Simulator camera configuration and app launch
+        run: bash test/ios/camera-simulator.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: camera-simulator-evidence
+          path: |
+            ${{ runner.temp }}/scorecard-camera-simulator/build.log
+            ${{ runner.temp }}/scorecard-camera-simulator/launch.log
+            ${{ runner.temp }}/scorecard-camera-simulator/launched.png
+          if-no-files-found: ignore

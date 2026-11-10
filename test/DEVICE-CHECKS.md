@@ -49,3 +49,15 @@ Use test accounts for every DEL check — never your own owner account.
 | C11 | Tap Rebuild the roster in the app | The tool opens in Safari | Device | |
 | C12 | Airplane Mode, post a round, force-quit, reopen, turn the network on | The round uploads once, with no duplicate | Device | |
 | C13 | Normal start inside the app | No service worker registered; nothing else changes | Device | |
+
+
+## Camera regression — 2.31.3
+
+On an iPhone and iPad, open Manage > Add a course > Take a photo.
+- Fresh camera permission: purpose text explains scorecard photography; Allow opens camera.
+- Take and use a picture: editor remains open and reading completes or shows a recoverable error.
+- Cancel: editor remains usable.
+- Deny permission: no termination; Photos or Files remains available.
+- Enable permission in Settings and retry; test Photos or Files separately.
+
+Simulator checks permission packaging and startup, not physical camera capture.

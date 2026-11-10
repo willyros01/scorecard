@@ -34,6 +34,7 @@ jobs:
           node test/review/query-indexes.mjs
           node test/review/query-index-regressions.mjs
           python3 test/review/deployment-regressions.py
+          python3 test/ios/camera-permission-tests.py
       - name: Complete rules, safety, migration and real app tests
         env:
           TEST_BROWSER: ${{ matrix.browser }}

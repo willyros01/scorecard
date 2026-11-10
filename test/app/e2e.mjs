@@ -2151,6 +2151,25 @@ await check("AT2", "deleting a group only hides it, in one commit; a member stil
   await page.close();
 });
 
+/* Camera regression: real Manage screen and input handler; no live OCR call. */
+await check("CAM4", "Manage camera input, cancelled selection and unreadable photo recover without losing the editor", async () => {
+  const page = await ownerInG1();
+  try {
+    await tab(page, "manage");
+    await page.locator('[data-act="new-course"]').click();
+    const camera = () => page.locator('input[name="card-photo"][capture="environment"]');
+    await camera().waitFor({ state: "attached" });
+    if (await camera().getAttribute("accept") !== "image/*") throw new Error("camera no longer accepts images");
+    if (await page.locator('input[name="card-photo"]:not([capture])').count() !== 1) throw new Error("Photos or Files fallback missing");
+    await camera().setInputFiles([]);
+    if (await page.locator('[data-act="card-type"]').count() !== 1) throw new Error("cancel lost the course editor");
+    await camera().setInputFiles({ name: "unreadable.jpg", mimeType: "image/jpeg", buffer: Buffer.from("invalid image regression fixture") });
+    await waitForText(page, /That picture could not be opened/);
+    if (await camera().count() !== 1) throw new Error("cannot retry after unreadable photo");
+    if (page.errors.length) throw new Error(page.errors.join(" | "));
+  } finally { await page.close(); }
+});
+
 await browser.close();
 server.kill();
 console.log(`\nRESULT: ${passed} passed, ${failed} failed`);

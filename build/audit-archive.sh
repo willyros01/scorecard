@@ -74,9 +74,11 @@ while IFS= read -r fw; do codesign -dv "$fw" >/dev/null 2>&1 || { bad "A3 unsign
 [[ $sigbad -eq 0 ]] && ok "A3 every embedded framework carries a valid signature"
 
 # ---- A4 usage descriptions ----
-usage="$(plutil -convert xml1 -o - "$PLIST" | grep -oE 'NS[A-Za-z]+UsageDescription' | sort -u)"
-[[ -z "$usage" ]] && ok "A4 no NS…UsageDescription keys (no camera, photos, location or contacts)" \
-  || bad "A4 unexpected usage descriptions: $(echo $usage)"
+if python3 "$(dirname "$0")/ios/camera-permission.py" verify "$PLIST"; then
+  ok "A4 camera usage description present; no unrelated permissions"
+else
+  bad "A4 invalid or missing camera usage description"
+fi
 
 # ---- A5 entitlements ----
 codesign -d --entitlements - --xml "$APP" > "$WORK/entitlements.plist" 2>/dev/null \

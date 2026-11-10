@@ -1,9 +1,5 @@
-The Scorecard 2.31.2, 6 November: the fixes from testing build 32.
+The Scorecard 2.31.3 — Manage camera crash fix
 
-1. Mistakes on any form (wrong email, empty box, name already used) show a pop-up in the middle that stays until OK; the box to fix is then outlined.
-2. Enter: after choosing the tee, only that tee stays; Change shows them all again.
-3. Manage: a joined golfer has a small tick beside the name; "Let them join again" is under the ··· button.
-4. The header shows your name, never your email.
-5. Admin, cockpit: people by their golfer's name; "last seen" says Just now, 12 min ago, Today 8:41 am, Yesterday 9:10 pm.
+Open Manage > Add a course > Take a photo. Allow camera access, photograph a scorecard and confirm the image returns to the editor without closing the app. Also test cancelling, denying permission, retrying, and Photos or Files.
 
-Report problems with Send a report in the app.
+Automated checks cover the required camera description in the finished app, missing-key rejection, simulator installation/startup, and Manage photo-input recovery in Chromium and WebKit. A simulator cannot take a physical photograph.

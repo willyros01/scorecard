@@ -58,6 +58,16 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           RUN_NUMBER: ${{ github.run_number }}
         run: bash build/ios-build.sh 2>&1 | tee build.log
+      - name: Save simulator camera regression evidence
+        if: always() && steps.version.outputs.changed == 'yes'
+        uses: actions/upload-artifact@v4
+        with:
+          name: camera-simulator-evidence
+          path: |
+            ${{ runner.temp }}/scorecard-camera-simulator/build.log
+            ${{ runner.temp }}/scorecard-camera-simulator/launch.log
+            ${{ runner.temp }}/scorecard-camera-simulator/launched.png
+          if-no-files-found: ignore
       - name: Remove anything secret from the logs
         if: always() && steps.version.outputs.changed == 'yes'
         env:
