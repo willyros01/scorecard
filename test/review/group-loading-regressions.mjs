@@ -1,0 +1,15 @@
+import fs from 'node:fs';
+import vm from 'node:vm';
+import assert from 'node:assert/strict';
+const s=fs.readFileSync('store.js','utf8');
+const body=s.slice(s.indexOf('export async function loadMyGroups()'),s.indexOf('/* Whether this account is actually a member',s.indexOf('export async function loadMyGroups()'))).replace('export async function','async function');
+let release; const gate=new Promise(r=>release=r); const started=[]; let saved;
+const context={uid:'account',fb:{mod:{store:{getDocs:async()=>({empty:false,docs:['a','b','c'].map(id=>({id,data:()=>({name:id})}))}),getDoc:async path=>{started.push(path.at(-1));await gate;if(path.at(-1)==='b')throw Error('unreachable');return {exists:()=>path.at(-1)!=='c'};}}}},col:(...p)=>p,ref:(...p)=>p,noteRead:()=>{},hiddenGroups:()=>[],knownGroups:()=>[],groupsFromMemberships:async()=>{throw Error('unexpected fallback')},GROUPS_KEY:'groups',localStorage:{setItem:(k,v)=>saved=JSON.parse(v)},Promise};
+vm.createContext(context);vm.runInContext(body+';globalThis.load=loadMyGroups;',context);
+const loading=context.load();
+await new Promise(r=>setTimeout(r,0));
+assert.deepEqual(started,['a','b','c'],'all independent reads start before the first resolves');
+release();const result=await loading;
+assert.deepEqual(JSON.parse(JSON.stringify(result)),[{id:'a',name:'a'},{id:'b',name:'b'}]);
+assert.deepEqual(saved,[{id:'a',name:'a'},{id:'b',name:'b'}]);
+console.log('PASS group reads overlap, retain order, preserve unreadable groups, and omit confirmed missing groups');

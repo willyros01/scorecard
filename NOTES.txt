@@ -296,3 +296,5 @@ Apple review submission must use App Store Connect API only and wait for
 Willy's explicit go signal. Rejection text was not included in the request.
 
 2026-11-10 — Web updated from 2.30.0 to tested 2.31.4 with Willy's explicit approval. Shared runtime, photo reading and waiting spinner synchronized from v2. Firestore rules source synchronized for emulator verification; no live Firebase rules deployment. Android spinner port preserves Android platform adapters.
+
+2026-11-10 — Web loading delay: check independent linked group documents concurrently, preserving order and unreadable-group handling. Reuse the group document just read by loadMembership instead of immediately reading it again. No authentication, membership or deletion checks removed. Web-only update; mobile binaries untouched.
