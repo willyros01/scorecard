@@ -24,12 +24,45 @@ jobs:
           const e=process.env, enc=o=>Buffer.from(JSON.stringify(o)).toString("base64url");
           function token(){const t=Math.floor(Date.now()/1000);const u=enc({alg:"ES256",kid:e.ASC_KEY_ID,typ:"JWT"})+"."+enc({iss:e.ASC_ISSUER_ID,iat:t,exp:t+600,aud:"appstoreconnect-v1"});return u+"."+crypto.sign("sha256",Buffer.from(u),{key:e.ASC_KEY_P8,dsaEncoding:"ieee-p1363"}).toString("base64url");}
           async function api(method,path,body){const r=await fetch("https://api.appstoreconnect.apple.com/v1/"+path,{method,headers:{Authorization:"Bearer "+token(),"Content-Type":"application/json"},body:body?JSON.stringify(body):undefined});const s=await r.text();const j=s?JSON.parse(s):{};if(!r.ok)throw Error(method+" "+path+" "+r.status+" "+JSON.stringify(j.errors));return j;}
+          
           const app=(await api("GET","apps?filter[bundleId]=io.github.willyros01.scorecard")).data[0];
-          const versions=(await api("GET",`apps/${app.id}/appStoreVersions?filter[platform]=IOS&limit=10`)).data;
-          console.log("APP",app.id);
-          for(const v of versions)console.log("VERSION",v.id,v.attributes.versionString,v.attributes.appStoreState,v.attributes.releaseType);
-          const build=(await api("GET",`builds?filter[app]=${app.id}&filter[version]=35&filter[preReleaseVersion.version]=2.31.4`)).data[0];console.log("BUILD",JSON.stringify(build&&{id:build.id,...build.attributes}));
-          const subs=(await api("GET",`reviewSubmissions?filter[app]=${app.id}&limit=20`)).data;
-          for(const sub of subs){if(["READY_FOR_REVIEW","UNRESOLVED_ISSUES","WAITING_FOR_REVIEW","IN_REVIEW"].includes(sub.attributes.state)){console.log("SUB",sub.id,JSON.stringify(sub.attributes));const items=(await api("GET",`reviewSubmissions/${sub.id}/items?include=appStoreVersion`));console.log("ITEMS",JSON.stringify(items));}}
+          if(app.id!=="6817462903")throw Error("Wrong app");
+          const vid="4072db12-e7d4-4940-a27d-67f5e81bd5ea", sid="daf388bc-c377-4f70-b995-25e7ca9bc162";
+          let ver=(await api("GET","appStoreVersions/"+vid)).data;
+          if(!["REJECTED","METADATA_REJECTED","PREPARE_FOR_SUBMISSION","DEVELOPER_REJECTED"].includes(ver.attributes.appStoreState))throw Error("Version is not editable: "+ver.attributes.appStoreState);
+          const build=(await api("GET",`builds?filter[app]=${app.id}&filter[version]=35&filter[preReleaseVersion.version]=2.31.4`)).data[0];
+          if(!build||build.id!=="e4fcf1e5-f2a8-4181-a43a-cdfe7435015b"||build.attributes.processingState!=="VALID"||build.attributes.expired)throw Error("Build 35 not valid");
+          const sub=(await api("GET","reviewSubmissions/"+sid)).data;
+          if(!["UNRESOLVED_ISSUES","READY_FOR_REVIEW"].includes(sub.attributes.state))throw Error("Unexpected submission state "+sub.attributes.state);
+          const items=(await api("GET","reviewSubmissions/"+sid+"/items")).data;
+          if(items.length!==1||items[0].relationships.appStoreVersion.data.id!==vid)throw Error("Unexpected submission contents");
+          const response="RESPONSE TO APP REVIEW — CAMERA CRASH\nThank you for reporting the crash after Login > Manage > Add a course > Take a photo on iPad Air 11-inch (M3) and iPhone 17 Pro Max.\n\nThe crash report identifies an iOS privacy termination (TCC / SIGABRT) because NSCameraUsageDescription was missing from the app's Info.plist. We corrected the generated native app configuration to include a camera purpose description explaining scorecard photography. The archive audit now requires this nonempty description in the finished app and prevents upload if it is missing.\n\nReplacement: version 2.31.4, build 35. This build also shows a large spinning progress indicator while the scorecard image is read, prevents duplicate photo requests while reading, and handles cancellation safely.\n\nValidation: the full automated application and safety suites passed in Chromium and WebKit. The iPhone simulator build/install/startup and camera-description checks passed, including a negative control that rejects the missing key. The distribution archive audit passed. Simulator checks do not substitute for physical camera testing; the developer has additionally tested this TestFlight build on a physical device and confirmed the test was successful.\n\nPlease retest using the existing review account:\n1. Log in.\n2. Tap Manage.\n3. Tap Add a course.\n4. Tap Take a photo and allow camera access if prompted.\n5. Take and use a scorecard photograph.\n6. The app remains open and shows Reading your scorecard with a spinner until the card details return.\n\nThe camera-crash issue described in the rejection has been addressed in this replacement binary.";
+          const rd=(await api("GET","appStoreVersions/"+vid+"/appStoreReviewDetail")).data;
+          if(!rd||!rd.attributes.demoAccountName)throw Error("Existing review account missing");
+          const previous=(rd.attributes.notes||"").split("\n\nRESPONSE TO APP REVIEW")[0];
+          const combined=response+"\n\nEXISTING REVIEW INSTRUCTIONS\n"+previous;
+          if(combined.length>4000)throw Error("Review notes exceed limit");
+          await api("PATCH","appStoreVersions/"+vid,{data:{type:"appStoreVersions",id:vid,attributes:{versionString:"2.31.4"}}});
+          console.log("VERSION updated to 2.31.4; existing listing and manual release retained");
+          await api("PATCH","appStoreVersions/"+vid+"/relationships/build",{data:{type:"builds",id:build.id}});
+          console.log("BUILD 35 attached");
+          await api("PATCH","appStoreReviewDetails/"+rd.id,{data:{type:"appStoreReviewDetails",id:rd.id,attributes:{notes:combined}}});
+          console.log("RESPONSE saved in App Review notes; existing account preserved");
+          for(const loc of (await api("GET","appStoreVersions/"+vid+"/appStoreVersionLocalizations")).data){
+          if(loc.attributes.locale==="en-US") await api("PATCH","appStoreVersionLocalizations/"+loc.id,{data:{type:"appStoreVersionLocalizations",id:loc.id,attributes:{whatsNew:(loc.attributes.whatsNew||"")+"\n\nFixes a crash when taking a course scorecard photo. Adds clear progress while reading the photo and prevents duplicate requests."}}});}
+          const actual=(await api("GET","appStoreVersions/"+vid+"/build")).data;
+          const actualNotes=(await api("GET","appStoreVersions/"+vid+"/appStoreReviewDetail")).data.attributes.notes;
+          if(actual.id!==build.id||!actualNotes.startsWith(response))throw Error("Preparation verification failed");
+          await api("PATCH","reviewSubmissionItems/"+items[0].id,{data:{type:"reviewSubmissionItems",id:items[0].id,attributes:{resolved:true}}});
+          console.log("REJECTED ITEM marked resolved");
+          const sent=(await api("PATCH","reviewSubmissions/"+sid,{data:{type:"reviewSubmissions",id:sid,attributes:{submitted:true}}})).data;
+          console.log("SUBMITTED",sent.attributes.state);
+          await new Promise(r=>setTimeout(r,10000));
+          ver=(await api("GET","appStoreVersions/"+vid)).data;
+          const finalSub=(await api("GET","reviewSubmissions/"+sid)).data;
+          const finalBuild=(await api("GET","appStoreVersions/"+vid+"/build")).data;
+          console.log("FINAL",JSON.stringify({version:ver.attributes.versionString,state:ver.attributes.appStoreState,submission:finalSub.attributes.state,build:finalBuild.attributes.version,buildId:finalBuild.id,release:ver.attributes.releaseType}));
+          if(!["WAITING_FOR_REVIEW","IN_REVIEW"].includes(finalSub.attributes.state)||finalBuild.id!==build.id)throw Error("Submission not yet verified");
+          console.log("PASS Scorecard 2.31.4 (35) resubmitted using API only");
           
           JS
