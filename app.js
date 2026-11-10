@@ -7478,8 +7478,7 @@ async function start(assocId) {
   if (!member) return;
   db.isAppOwner().then((on) => { if (on) render(); }).catch(() => {});   /* batch 4/5: app-owner tools */
   groupState = "some";
-  const loadedGroup = db.currentAssociationDoc();
-  association = loadedGroup && loadedGroup.id === assocId ? loadedGroup : await db.loadAssociation(assocId);
+  association = await db.loadAssociation(assocId);
   if (association) /* batch 5: the key is no longer read by the app */
   /* "last seen" for the cockpit (at most every 10 minutes; quiet). */
   db.stampLastSeen();

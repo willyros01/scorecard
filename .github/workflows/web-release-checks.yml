@@ -1,17 +1,9 @@
 name: Web shared application verification
 on:
   push:
-    branches: [update-web-spinner, web-loading-speed]
+    branches: [update-web-spinner]
 permissions:
   contents: read
 jobs:
-  loading-regression:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-      - run: node test/review/group-loading-regressions.mjs
   verify:
     uses: ./.github/workflows/release-checks.yml

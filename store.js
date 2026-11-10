@@ -3076,19 +3076,17 @@ export async function loadMyGroups() {
      * is how a live group vanished from an account. Cannot confirm is not the
      * same as gone. Groups that no longer exist are simply left out of what is
      * returned; the pointer stays until something with certainty removes it. */
-    // Check independent group documents together. A slow group must not add
-    // another full network round trip for every other group on the account.
-    // Preserve the original order and keep unreadable groups as before.
-    const checked = await Promise.all(listed.map(async (group) => {
+    const alive = [];
+    const missing = [];
+    for (const group of listed) {
       try {
         const exists = await getDoc(ref("associations", group.id));
-        return { group, alive: exists.exists() };
+        if (exists.exists()) alive.push(group);
+        else missing.push(group);
       } catch {
-        return { group, alive: true }; // unreadable is not evidence of deletion
+        alive.push(group);   /* unreadable — assume it is fine */
       }
-    }));
-    const alive = checked.filter((g) => g.alive).map((g) => g.group);
-    const missing = checked.filter((g) => !g.alive).map((g) => g.group);
+    }
 
     /* Only cache when the answer looks trustworthy. If everything came back
        missing, that is far more likely to be a bad connection than every group
