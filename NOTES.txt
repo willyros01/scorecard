@@ -273,3 +273,26 @@ their rounds in other groups are untouched.
 
 Do NOT delete things by hand first. That is how rounds were orphaned before.
 Afterwards, run tidy to archive any leftover test golfers.
+
+
+2026-11-09 — Manage camera crash, incident 44E688E5-3B87-4343-90EC-88B226A60B31
+Build 33 (2.31.2) terminated by iOS TCC: missing NSCameraUsageDescription.
+Release source is v2, not the older ios branch. The native project is generated
+fresh each build. build/ios/camera-permission.py now configures and validates
+the camera purpose string. Archive audit A4 now requires it rather than
+forbidding all permission strings; unrelated permissions remain forbidden.
+Claude suite: test/ops/run.sh plus test/app/e2e.mjs, both browsers. Added CAM1-4
+and test/ios/camera-simulator.sh, run before signing/upload. Simulator validates
+the built and installed app, rejects a missing-key control, and checks launch.
+Physical photo capture/permission dialog remains a device acceptance check.
+No Firestore rules or shared application behavior changed.
+
+2026-11-10 — 2.31.4 scorecard photo progress
+Show a large, announced spinner while the photo is read; remove photo controls
+and disable Save until completion. Guard duplicate input events; ignore late
+responses after Cancel or another editor opens. Preserve scan IDs on failure.
+Add delayed-response tests to Claude's actual-app suite. No rules changed.
+Apple review submission must use App Store Connect API only and wait for
+Willy's explicit go signal. Rejection text was not included in the request.
+
+2026-11-10 — Web updated from 2.30.0 to tested 2.31.4 with Willy's explicit approval. Shared runtime, photo reading and waiting spinner synchronized from v2. Firestore rules source synchronized for emulator verification; no live Firebase rules deployment. Android spinner port preserves Android platform adapters.

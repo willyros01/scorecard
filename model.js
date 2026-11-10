@@ -261,6 +261,8 @@ export const buildCourse = ({ name, club = "", location = "", country = "", tees
     rating: Number(t.rating),
     slope: Number(t.slope),
     par: Number(t.par),
+    /* Batch 5, step 24: each hole's par, yards and handicap number, when known. */
+    ...(Array.isArray(t.holes) && t.holes.length === 18 ? { holes: t.holes.map((h) => ({ par: Number(h.par) || 4, yards: h.yards ? Number(h.yards) : null, si: h.si ? Number(h.si) : null })) } : {}),
   })),
   createdBy,
 });

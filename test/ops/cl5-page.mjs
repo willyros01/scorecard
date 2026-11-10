@@ -1,7 +1,7 @@
 /* CL9: groups-check.html, opened in a browser, reads a backup file chosen on
  * the device and shows the clean-up plan (the same plan cl5.mjs carries out).
  *   node test/ops/cl5-page.mjs <backup file>      (from the repository folder) */
-import { chromium } from "playwright";
+import { chromium, webkit } from "playwright";
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
@@ -19,7 +19,7 @@ await new Promise((r) => server.listen(0, "127.0.0.1", r));
 const port = server.address().port;
 let failed = 0;
 const check = (label, cond) => { console.log(`${cond ? "PASS" : "FAIL"}  CL9 ${label}`); if (!cond) failed++; };
-const browser = await chromium.launch();
+const browser = await (process.env.TEST_BROWSER === "webkit" ? webkit : chromium).launch();   /* the browser this job installed */
 try {
   const page = await browser.newPage();
   const errors = []; const requests = [];

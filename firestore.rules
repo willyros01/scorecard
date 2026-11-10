@@ -181,8 +181,17 @@ service cloud.firestore {
     }
 
     /* beta.9: a deleting account is a member of nothing (see deleting()). */
+    /* Batch 4, step 9 (Willy, like SAP_ALL): the app owner acts as owner in
+       every group, groups made by others included. appOwners/{uid} is written
+       only by Willy's scripts; every use is recorded by the app (ownerLog). */
+    function isAppOwner() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/appOwners/$(request.auth.uid))
+        && get(/databases/$(database)/documents/appOwners/$(request.auth.uid)).data.get('active', false) == true;
+    }
+
     function isMember(assocId) {
-      return signedIn() && exists(memberPath(assocId)) && !deleting();
+      return signedIn() && !deleting() && (exists(memberPath(assocId)) || isAppOwner());
     }
 
     function role(assocId) {
@@ -190,11 +199,11 @@ service cloud.firestore {
     }
 
     function isAdmin(assocId) {
-      return isMember(assocId) && (role(assocId) == 'admin' || role(assocId) == 'owner');
+      return isAppOwner() || (isMember(assocId) && (role(assocId) == 'admin' || role(assocId) == 'owner'));
     }
 
     function isOwner(assocId) {
-      return isMember(assocId) && role(assocId) == 'owner';
+      return isAppOwner() || (isMember(assocId) && role(assocId) == 'owner');
     }
 
     function association(assocId) {
@@ -398,6 +407,12 @@ service cloud.firestore {
         && getAfter(tokenPath(a, token)).data.state == 'used';
     }
 
+    /* Batch 3, Fix 1: the score fields of a Marker round never change here. */
+    function markerScoresKept() {
+      return resource.data.get('enteredVia', '') != 'marker'
+        || !request.resource.data.diff(resource.data).affectedKeys().hasAny(
+          ['gross', 'adjusted', 'differential', 'holes', 'rating', 'slope', 'par', 'courseHandicap', 'handicapIndexAtEntry', 'indexAtEntry', 'holePar', 'holeSi']);
+    }
     /* The edit window runs from entry time, not the date played, and is
        measured against request.time — the server's clock, not the device's. */
     function withinEditWindow() {
@@ -432,8 +447,14 @@ service cloud.firestore {
         && request.resource.data.ownerUid == resource.data.ownerUid
         /* Phase D: the admin secret may only stay as it was or be removed
            (moved to secrets/admin), never set here again. */
-        && request.resource.data.get('adminCode', null) in [null, resource.data.get('adminCode', null)];
+        && request.resource.data.get('adminCode', null) in [null, resource.data.get('adminCode', null)]
+        /* Batch 4, step 18: deleting a group only hides it; only the app owner
+           brings a hidden group back. */
+        && (resource.data.get('hidden', false) != true || request.resource.data.get('hidden', false) == true || isAppOwner());
 
+      /* Only whoever created it, and only ever their own (and the app owner,
+         removing a hidden group for good after its backup). */
+      allow delete: if isAppOwner() && resource.data.get('hidden', false) == true;
       /* Only whoever created it, and only ever their own. Needed so the
          cleanup tool can remove groups that failed to set up properly. */
       allow delete: if signedIn() && resource.data.ownerUid == request.auth.uid;
@@ -682,15 +703,26 @@ service cloud.firestore {
            else's — that was far too wide, and meant one careless guest could
            edit the whole group's scores. Admins remain unrestricted, because
            entering and fixing other people's cards is their job. */
-        allow update: if isAdmin(assocId)
+        /* Batch 3, Fix 1: a round from The Marker keeps its scores; they are
+           corrected in The Marker only (its server is not bound by rules). */
+        allow update: if markerScoresKept() && (isAdmin(assocId)
           || (isMember(assocId) && withinEditWindow()
               && myGolfer(resource.data.golferId)
               && request.resource.data.golferId == resource.data.golferId
               && request.resource.data.enteredAt == resource.data.enteredAt
-              && request.resource.data.enteredBy == resource.data.enteredBy);
+              && request.resource.data.enteredBy == resource.data.enteredBy));
 
         allow delete: if isAdmin(assocId)
           || (isMember(assocId) && withinEditWindow() && myGolfer(resource.data.golferId));
+      }
+
+      /* Batch 4, step 9: every time the app owner opens a group they are
+         not a member of, a record: who, when, what. Never changed or removed. */
+      match /ownerLog/{entryId} {
+        allow create: if isAppOwner() && request.resource.data.uid == request.auth.uid
+          && request.resource.data.keys().hasOnly(['uid', 'at', 'what']);
+        allow read: if isAdmin(assocId);
+        allow update, delete: if false;
       }
 
       /* ---------------- directory: name and index only ---------------- */
@@ -841,7 +873,10 @@ service cloud.firestore {
          every name in the database. Creating a claim is open to a signed-in
          account (adding or joining as a golfer); changing or removing one is
          for that golfer's own account or an admin of a group it plays in. */
-      allow get: if signedIn();
+      /* Batch 2, step 29: single reads are open to anybody, so an applicant
+         (not signed in yet) is told at once when the name is taken. A read
+         by exact name only says whether that one name exists. */
+      allow get: if true;
       allow list: if false;
       allow create: if signedIn() && !deleting() && request.resource.data.golferId is string;
       allow update, delete: if signedIn() && !deleting() && (
@@ -885,6 +920,12 @@ service cloud.firestore {
     /* beta.4: the owner cockpit counts rounds across groups. Read only, and
        only for the group creator. */
     match /{path=**}/rounds/{roundId} {
+      allow read: if groupCreator();
+    }
+
+    /* 2.31.2 (Willy, 6 Nov 2026): the owner cockpit shows people by their
+       golfer's name. Read only, and only for the group creator. */
+    match /{path=**}/directory/{golferId} {
       allow read: if groupCreator();
     }
 
@@ -1053,6 +1094,25 @@ service cloud.firestore {
         && request.resource.data.updatedAt == request.time;
     }
 
+    /* Batch 5, step 31: the course search key's last four characters, for
+       the key box; written only by the app owner with the key itself. */
+    match /settings/golfKeyInfo {
+      allow get: if signedIn();
+      allow create, update: if isAppOwner()
+        && request.resource.data.keys().hasOnly(['last4', 'savedAt'])
+        && request.resource.data.last4 is string && request.resource.data.last4.size() <= 4;
+    }
+    /* The key itself: written by the app owner only, readable by NO app (the
+       Cloudflare server reads it with its own service account). Kept in the
+       database on purpose, for safe keeping (Willy, 1 Nov 2026). */
+    match /secretKeys/{keyId} {
+      allow read: if false;
+      allow create, update: if isAppOwner() && keyId == 'golfCourseApi'
+        && request.resource.data.keys().hasOnly(['key', 'savedBy', 'savedAt'])
+        && request.resource.data.savedBy == request.auth.uid;
+      allow delete: if false;
+    }
+
     /* Block lists, checked by the rules for every automatic approval. */
     match /blockedEmails/{key} {
       allow read, delete: if reviewer();
@@ -1116,6 +1176,13 @@ service cloud.firestore {
 
     /* Phase D: who may create groups. You may check your own entry; nobody
        can list it, and no app can write it (the setup script does). */
+    /* Batch 4, step 9: the app owner's own record is readable by them only;
+       nobody can write it from an app. */
+    match /appOwners/{userId} {
+      allow get: if signedIn() && request.auth.uid == userId;
+      allow list, write: if false;
+    }
+
     match /groupCreators/{userId} {
       allow get: if signedIn() && userId == request.auth.uid;
       allow list, write: if false;
@@ -1185,7 +1252,16 @@ service cloud.firestore {
          well-meaning edits that break other groups' data, so version 3 should
          replace this with a curated review step. Until then, ratings that are
          wrong get a new course entry rather than an edit war. */
-      allow update: if signedIn() && !deleting() && resource.data.createdBy == request.auth.uid;
+      /* Batch 5, step 14 (Willy, 16 Oct 2026): a withdrawn course is never
+         used, edited or restored again. */
+      allow update: if signedIn() && !deleting() && resource.data.get('withdrawn', false) != true
+        && (resource.data.createdBy == request.auth.uid
+            /* Withdrawal: an owner or admin of a group (named in withdrawnIn),
+               or the app owner, for every group, for good. Nothing else changes. */
+            || ((isAppOwner() || isAdmin(request.resource.data.get('withdrawnIn', '')))
+                && request.resource.data.withdrawn == true
+                && request.resource.data.withdrawnBy == request.auth.uid
+                && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['withdrawn', 'withdrawnBy', 'withdrawnAt', 'withdrawnReason', 'withdrawnIn'])));
 
       allow delete: if false;   /* rounds reference courses; never orphan them */
     }

@@ -103,8 +103,28 @@ export async function initLinks() {
   if (!App || typeof App.getLaunchUrl !== "function") return;
   try {
     const launched = await App.getLaunchUrl();
-    if (launched && launched.url) takeLink(launched.url);
+    if (launched && launched.url) { takeLink(launched.url); return; }
   } catch { /* no launch link */ }
+  await pickUpCopiedLink();
+}
+
+/* Batch 2, copy and continue (Willy, 2 Nov 2026): on a phone without the app,
+   the join page's App Store and Android buttons also copy the link. On its very
+   first start (Terms of Use never accepted on this device) the app looks at the
+   clipboard once; a Scorecard join link there becomes the waiting link. Never
+   asked twice, and nothing else on the clipboard is kept or used. */
+async function pickUpCopiedLink() {
+  try {
+    if (localStorage.getItem("golf:terms") || localStorage.getItem("golf:clipboardChecked")) return;
+    localStorage.setItem("golf:clipboardChecked", "1");
+  } catch { return; }
+  const Clip = plugin("Clipboard");
+  if (!Clip || typeof Clip.read !== "function") return;
+  try {
+    const got = await Clip.read();
+    const text = String((got && got.value) || "").trim();
+    if (text.startsWith(JOIN_BASE) && text.length < 4000) takeLink(text);
+  } catch { /* nothing on the clipboard, or not allowed */ }
 }
 
 /* Warm start: a link tapped while the app is already open. */

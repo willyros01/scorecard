@@ -102,6 +102,31 @@
     },
     {
       "sourceFile": "store.js",
+      "signature": "78289365ad07bb7fa3cefe9956ed370dc931c9ca27205049cc1c436b7741993c",
+      "collectionId": "rounds",
+      "parent": "associations/scorecard-index-probe-nonexistent",
+      "structuredQuery": {
+        "from": [
+          {
+            "collectionId": "rounds"
+          }
+        ],
+        "limit": 1,
+        "where": {
+          "fieldFilter": {
+            "field": {
+              "fieldPath": "golferId"
+            },
+            "op": "EQUAL",
+            "value": {
+              "stringValue": "__scorecard_index_probe__"
+            }
+          }
+        }
+      }
+    },
+    {
+      "sourceFile": "store.js",
       "signature": "17059b36b90b8ea942d439e00fa73cc2abb74c6632e298eb8b37b75ee68f98ef",
       "collectionId": "golfers",
       "parent": "",
@@ -325,6 +350,31 @@
               "fieldPath": "participantGolferIds"
             },
             "op": "ARRAY_CONTAINS",
+            "value": {
+              "stringValue": "__scorecard_index_probe__"
+            }
+          }
+        }
+      }
+    },
+    {
+      "sourceFile": "store.js",
+      "signature": "894fda4bc73e367b23a815bb4b15464670d626202cca8b14ef18220fb9993505",
+      "collectionId": "rounds",
+      "parent": "associations/scorecard-index-probe-nonexistent",
+      "structuredQuery": {
+        "from": [
+          {
+            "collectionId": "rounds"
+          }
+        ],
+        "limit": 1,
+        "where": {
+          "fieldFilter": {
+            "field": {
+              "fieldPath": "gameId"
+            },
+            "op": "EQUAL",
             "value": {
               "stringValue": "__scorecard_index_probe__"
             }

@@ -1,11 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="96" fill="#1F5641"/>
-  <circle cx="256" cy="300" r="92" fill="#FBF7EE"/>
-  <g fill="#1F5641">
-    <circle cx="222" cy="266" r="9"/><circle cx="256" cy="252" r="9"/><circle cx="290" cy="266" r="9"/>
-    <circle cx="208" cy="300" r="9"/><circle cx="256" cy="290" r="9"/><circle cx="304" cy="300" r="9"/>
-    <circle cx="222" cy="334" r="9"/><circle cx="256" cy="328" r="9"/><circle cx="290" cy="334" r="9"/>
-  </g>
-  <path d="M180 300 L180 96" stroke="#E0D3B6" stroke-width="14" stroke-linecap="round"/>
-  <path d="M180 104 L292 140 L180 176 Z" fill="#B4402F"/>
+  <!-- Icon F (Willy, 31 Oct 2026): a putting green with a flag and a 12.4 handicap badge, on Lake blue. -->
+  <defs><linearGradient id="lake" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5297D6"/><stop offset="1" stop-color="#2F7BC4"/></linearGradient></defs>
+  <rect width="512" height="512" rx="96" fill="url(#lake)"/>
+  <ellipse cx="256" cy="330" rx="190" ry="96" fill="#6DAE5B"/>
+  <ellipse cx="256" cy="330" rx="190" ry="96" fill="none" stroke="#A9D98F" stroke-width="10"/>
+  <ellipse cx="300" cy="340" rx="22" ry="9" fill="#1E3A26"/>
+  <path d="M300 338V110" stroke="#FFFFFF" stroke-width="12" stroke-linecap="round"/>
+  <path d="M306 114 L376 140 L306 166 Z" fill="#D9463A"/>
+  <rect x="88" y="98" width="164" height="96" rx="20" fill="#FFFFFF"/>
+  <text x="170" y="168" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="66" font-weight="700" fill="#1F5C99">12.4</text>
 </svg>

@@ -502,6 +502,8 @@ export function postRound({ golfer, course, tee, date, gross, adjusted, notes, g
           editedIn: assocId,
         },
       },
+      /* Batch 3, Fix 3: the group list's index moves in the same commit. */
+      ...directoryWrites(golfer, window),
     ],
     opId: `round-create-${round.id}`,
   });
@@ -510,8 +512,99 @@ export function postRound({ golfer, course, tee, date, gross, adjusted, notes, g
   return { round, window, handicapIndex: model.indexFromWindow(window) };
 }
 
+/* Batch 3, Fix 3 (Willy's commit rule): the golfer's entry in the group list,
+   written in the same commit as the round and the golfer. This group always;
+   the golfer's other groups only when it is the signed-in person's own golfer
+   (the rules allow exactly that; their admins' apps repair the rest). */
+function directoryWrites(golfer, window) {
+  const groups = new Set([assocId]);
+  if (golfer && golfer.linkedUid && golfer.linkedUid === uid) {
+    const mine = new Set(knownGroups().map((g) => g.id));
+    for (const a of golfer.groups || []) if (mine.has(a)) groups.add(a);
+  }
+  const index = model.effectiveIndex({ ...golfer, recentWindow: window }).index;
+  return [...groups].map((a) => ({ op: "set", merge: false, path: ["associations", a, "directory", golfer.id],
+    data: { golferId: golfer.id, displayName: golfer.name || "", handicapIndex: index == null ? null : index, updatedAt: Date.now() } }));
+}
+
+/* Batch 3, Fix 2 (Willy's commit rule, plan of 3 Nov 2026): editing or
+ * deleting a round, the golfer's 20-round window, index and round count, and
+ * their group-list entries are saved in ONE commit, or nothing is.
+ *
+ * Online it is a Firestore transaction: the round, the golfer and the list
+ * entries are read inside it, so if anybody changed them meanwhile the commit
+ * is refused and tried again (Firestore's own precondition). Offline the
+ * whole change waits in the outbox as ONE item and is committed whole later.
+ * change: "delete", or the round's new field values. */
+export async function saveRoundChange({ roundId, change, golferId }) {
+  const { getDocs, query, where, runTransaction, getDoc } = fb.mod.store;
+  const roundPath = ["associations", assocId, "rounds", roundId];
+  if (!golferId) {
+    if (change === "delete") outbox.enqueue({ type: "delete", path: roundPath, opId: `round-delete-${roundId}` });
+    else outbox.enqueue({ type: "update", path: roundPath, data: change, opId: `round-update-${roundId}-${Date.now()}` });
+    await flush();
+    return { ok: true };
+  }
+  /* This group's other rounds of the golfer (a query cannot run inside a
+     transaction; the round itself is read again inside it). */
+  let others = [];
+  try {
+    const snap = await getDocs(query(col("associations", assocId, "rounds"), where("golferId", "==", golferId)));
+    snap.forEach((d) => { if (d.id !== roundId) { const r = d.data(); others.push({ roundId: d.id, date: r.date, differential: r.differential, assocId }); } });
+  } catch { others = null; }
+  const reachable = new Set(knownGroups().map((g) => g.id)); reachable.add(assocId);
+  const plan = (golfer, round) => {
+    const fresh = [...(others || [])];
+    if (change !== "delete") { const m = { ...round, ...change }; fresh.push({ roundId, date: m.date, differential: m.differential, assocId }); }
+    fresh.sort((a, b) => String(b.date).localeCompare(String(a.date)));
+    fresh.length = Math.min(fresh.length, 20);
+    const kept = golfer ? model.windowFromOtherGroups(golfer.recentWindow, assocId).filter((e) => e.assocId && reachable.has(e.assocId)) : [];
+    const window = model.mergeWindow(kept, fresh);
+    return { window, count: fresh.length + kept.length };
+  };
+  const golferUpdate = (window, count) => ({ recentWindow: window, handicapIndex: model.displayIndex(window), roundCount: count, editedIn: assocId });
+  const online = others !== null && !(typeof navigator !== "undefined" && navigator.onLine === false);
+  if (online) {
+    try {
+      return await runTransaction(fb.db, async (tx) => {
+        const r = await tx.get(ref(...roundPath));
+        if (!r.exists()) { const e = new Error("round/gone"); e.code = "round/gone"; throw e; }
+        const g = await tx.get(ref("golfers", golferId));
+        const golfer = g.exists() ? { ...g.data(), id: golferId } : null;
+        const { window, count } = plan(golfer, r.data());
+        if (change === "delete") tx.delete(ref(...roundPath)); else tx.update(ref(...roundPath), change);
+        if (golfer) {
+          tx.update(ref("golfers", golferId), golferUpdate(window, count));
+          for (const w of directoryWrites(golfer, window)) tx.set(ref(...w.path), w.data);
+        }
+        return { ok: true, window };
+      });
+    } catch (e) {
+      const code = String((e && (e.code || e.message)) || "");
+      if (!/unavailable|offline|network/i.test(code)) {
+        if (/aborted|failed-precondition/.test(code)) { const c = new Error("Somebody changed this golfer a moment ago. Nothing was saved. Try again."); c.code = "round/conflict"; throw c; }
+        throw e;
+      }
+      /* no connection after all: queue it whole, below */
+    }
+  }
+  /* Offline: one queued item, from the copies on this device. */
+  let golfer = null, round = {};
+  try { const g = await getDoc(ref("golfers", golferId)); if (g.exists()) golfer = { ...g.data(), id: golferId }; } catch {}
+  try { const r = await getDoc(ref(...roundPath)); if (r.exists()) round = r.data(); } catch {}
+  if (others === null) others = [];
+  const { window, count } = plan(golfer, round);
+  outbox.enqueue({ type: "batch", writes: [
+    change === "delete" ? { op: "delete", path: roundPath } : { op: "update", path: roundPath, data: change },
+    ...(golfer ? [{ op: "update", path: ["golfers", golferId], data: golferUpdate(window, count) }, ...directoryWrites(golfer, window)] : []),
+  ], opId: `round-change-${roundId}-${Date.now()}` });
+  flush();
+  return { ok: true, queued: true, window };
+}
+
 /* Editing or deleting is rarer, and correctness matters more than avoiding a
-   read, so the window is rebuilt from the golfer's last twenty rounds. */
+   read, so the window is rebuilt from the golfer's last twenty rounds.
+   (Batch 3: kept only as a repair tool; edits and deletes use saveRoundChange.) */
 /* Rebuilds after an edit or deletion.
  *
  * Only this group's rounds are readable from here, so entries belonging to the
@@ -580,9 +673,7 @@ export function deleteRound(roundId) {
 /* Deleting and rebuilding in one call, so a caller cannot do half of it and
    leave the golfer's index quietly wrong. */
 export async function deleteRoundAndRebuild(round) {
-  deleteRound(round.id);
-  await flush();
-  if (round.golferId) await rebuildGolferIndex(round.golferId);
+  return saveRoundChange({ roundId: round.id, change: "delete", golferId: round.golferId || null });
 }
 
 /* ---------------- roster, courses, games ---------------- */
@@ -925,7 +1016,8 @@ export function watchRounds(callback, { max = 500 } = {}) {
 
 export function watchCourses(callback) {
   const { onSnapshot } = fb.mod.store;
-  const stop = listen(col("courses"), (snap) => callback(snap.docs.map((d) => d.data())), (e) => report(e));
+  /* Batch 3, Fix 5: the document's own id always wins over any stored field. */
+  const stop = listen(col("courses"), (snap) => callback(snap.docs.map((d) => ({ ...d.data(), id: d.id }))), (e) => report(e));
   unsubscribers.push(stop);
   return stop;
 }
@@ -1095,10 +1187,28 @@ export async function signInWithEmail({ email, password }) {
   }
 }
 
+/* Batch 2, step 1 (Willy, 23 Oct 2026: the app first, never a Firebase page):
+   Forgot password sends the same kind of sign-in link as the approval email.
+   It opens the app, which shows its own "Choose a new password" screen. */
 export async function sendPasswordReset(email) {
   if (!fb) throw new Error("Firebase has not loaded yet.");
-  await fb.mod.auth.sendPasswordResetEmail(fb.auth, String(email || "").trim());
+  const address = String(email || "").trim();
+  const settings = signInLinkSettings(address);
+  await fb.mod.auth.sendSignInLinkToEmail(fb.auth, address, { ...settings, url: `${settings.url}&reset=1` });
 }
+/* A value from the link. With Firebase's action URL set to the Cuberoot join
+   page (Batch 2), an email link arrives as ?mode=signIn&oobCode=…&continueUrl=…,
+   so our own values (e, reset, approved) sit inside continueUrl. */
+function linkParam(name) {
+  const top = new URLSearchParams(platform.linkQuery());
+  if (top.has(name)) return top.get(name);
+  try { const c = top.get("continueUrl"); if (c) return new URL(c).searchParams.get(name); } catch {}
+  return null;
+}
+/* A Forgot password link (not an approval or application link). */
+export const isResetLink = () => {
+  try { return isApplyLink() && linkParam("reset") === "1"; } catch { return false; }
+};
 
 /* Whether this account can already be signed into with a password. A Google
    account cannot, until one is added — which is the whole point of the panel
@@ -1477,9 +1587,10 @@ export async function declineGroupRequest(key) {
 
 /* ======================= beta.4: the cockpit ======================= */
 
-/* "Last seen": the member's own app stamps its membership, at most once every
-   12 hours per group. Quiet if refused (rules not published yet). */
-const LAST_SEEN_EVERY_MS = 12 * 3600 * 1000;
+/* "Last seen": the member's own app stamps its membership when the app is
+   opened or comes back to the front, at most once every 10 minutes per group
+   (Willy, 6 Nov 2026: close to real time). Quiet if refused. */
+const LAST_SEEN_EVERY_MS = 10 * 60 * 1000;
 export async function stampLastSeen() {
   if (!fb || !uid || !assocId || !myMember || isAnonymousSession()) return;
   const at = myMember.lastSeenAt && typeof myMember.lastSeenAt.toMillis === "function" ? myMember.lastSeenAt.toMillis() : 0;
@@ -1509,17 +1620,31 @@ export async function stampLastSeen() {
 const favKey = () => `golf:v2:favCourses:${uid}`;
 let favCourses = [];
 export const favouriteCourses = () => favCourses.slice();
+/* Batch 5, step 24: the golfer's own courses, kept with the favourites. */
+let myCourseIds = [];
+export const myCourses = () => myCourseIds.slice();
+export function addMyCourse(courseId) {
+  if (!uid || !courseId || myCourseIds.includes(courseId)) return;
+  myCourseIds = [...myCourseIds, courseId];
+  try { localStorage.setItem(`${favKey()}:mine`, JSON.stringify(myCourseIds)); } catch {}
+  outbox.enqueueOrMerge({ type: "set", path: ["users", uid, "prefs", "courses"], data: { favourites: favCourses.slice(), mine: myCourseIds.slice(), at: Date.now() } });
+  flush();
+  emit();
+}
 export const isFavouriteCourse = (id) => favCourses.includes(id);
 export async function loadFavouriteCourses() {
   favCourses = [];
   if (!fb || !uid) return favCourses;
   try { favCourses = JSON.parse(localStorage.getItem(favKey()) || "[]").filter((x) => typeof x === "string"); } catch {}
+  try { myCourseIds = JSON.parse(localStorage.getItem(`${favKey()}:mine`) || "[]").filter((x) => typeof x === "string"); } catch {}
   try {
     const snap = await fb.mod.store.getDoc(ref("users", uid, "prefs", "courses"));
     /* A change still waiting in the outbox is newer than the database. */
     const queued = (JSON.parse(localStorage.getItem("golf:v2:outbox") || "[]") || [])
       .some((o) => o && o.path && o.path.join("/") === `users/${uid}/prefs/courses`);
     if (snap.exists() && !queued) {
+      const mineList = (snap.data() || {}).mine;
+      if (Array.isArray(mineList)) { myCourseIds = mineList.filter((x) => typeof x === "string"); try { localStorage.setItem(`${favKey()}:mine`, JSON.stringify(myCourseIds)); } catch {} }
       const list = (snap.data() || {}).favourites;
       if (Array.isArray(list)) {
         favCourses = list.filter((x) => typeof x === "string");
@@ -1537,7 +1662,7 @@ export function toggleFavouriteCourse(courseId) {
   try { localStorage.setItem(favKey(), JSON.stringify(favCourses)); } catch {}
   outbox.enqueueOrMerge({
     type: "set", path: ["users", uid, "prefs", "courses"],
-    data: { favourites: favCourses.slice(), at: Date.now() },
+    data: { favourites: favCourses.slice(), mine: myCourseIds.slice(), at: Date.now() },
   });
   /* Each change carries the whole list; queued changes are sent in order,
      so the last one wins. */
@@ -1580,14 +1705,21 @@ export async function loadOwnerCockpit() {
         date: String(r.date || ""), golferId: r.golferId || "", courseName: r.courseName || "" };
     });
   } catch (e) { roundsError = String((e && (e.code || e.message)) || "unavailable"); }
-  const groups = groupsSnap.docs.map((d) => ({ id: d.id, name: (d.data() || {}).name || d.id, ownerUid: (d.data() || {}).ownerUid || "" }));
+  const groups = groupsSnap.docs.map((d) => ({ id: d.id, name: (d.data() || {}).name || d.id, ownerUid: (d.data() || {}).ownerUid || "", hidden: (d.data() || {}).hidden === true }));
   const members = membersSnap.docs.map((d) => {
     const m = d.data() || {};
     return { assocId: (d.ref.parent && d.ref.parent.parent && d.ref.parent.parent.id) || "",
-      uid: m.uid || d.id, role: m.role || "member", displayName: m.displayName || "",
+      uid: m.uid || d.id, role: m.role || "member", displayName: m.displayName || "", golferId: m.golferId || "",
       lastSeen: millisOf(m.lastSeenAt), joinedAt: millisOf(m.joinedAt) };
   }).filter((m) => m.assocId);
-  return { groups, members, rounds, roundsError, since: isoDay(since), me: uid, loadedAt: Date.now() };
+  /* Willy, 6 Nov 2026: people are shown by their golfer's name, not by an
+     email kept as a membership name. One read of the groups' directories. */
+  const golferNames = {};
+  try {
+    const dirSnap = await getDocs(collectionGroup(fb.db, "directory"));
+    for (const d of dirSnap.docs) { const n = (d.data() || {}).displayName; if (n && !golferNames[d.id]) golferNames[d.id] = n; }
+  } catch { /* names fall back to the membership's own */ }
+  return { groups, members, rounds, roundsError, golferNames, since: isoDay(since), me: uid, loadedAt: Date.now() };
 }
 
 /* ======================= beta.4: the applications switch ======================= */
@@ -1684,6 +1816,17 @@ export async function nextFreeName(name) {
   return base;
 }
 
+/* Batch 2, step 29: whether a golfer already has this name (one read of its
+   name claim; the rules allow single reads, never a list). Unsure: false, and
+   the application simply goes on as today. */
+export async function nameTaken(name) {
+  if (!fb) return false;
+  try {
+    const snap = await fb.mod.store.getDoc(ref("golferNames", model.nameKey(name)));
+    return snap.exists();
+  } catch { return false; }
+}
+
 /* The Level 1 name check the app can make before anything is sent (the rules
    make it again): two or more words, plain letters, 4-60 characters. */
 export const plainName = (name) => /^[A-Za-z][A-Za-z'-]*( [A-Za-z][A-Za-z'-]*)+$/.test(String(name || "")) && String(name).length >= 4 && String(name).length <= 60;
@@ -1713,7 +1856,7 @@ export async function sendApprovalLink(email) {
 export const sendNewLink = (email) => sendApprovalLink(email);
 /* The email a sign-in link was sent to (from the link itself), or "". */
 export function applyLinkEmail() {
-  try { return String(new URLSearchParams(platform.linkQuery()).get("e") || "").trim().toLowerCase(); } catch { return ""; }
+  try { return String(linkParam("e") || "").trim().toLowerCase(); } catch { return ""; }
 }
 /* The link is no longer wanted on this device (Cancel, or after it is used). */
 export function dropApplyLink() {
@@ -1730,7 +1873,19 @@ export const isApplyLink = () => {
    with the email confirmed), then set their chosen password. */
 export async function finishApplyLink({ email, password }) {
   const address = String(email || "").trim();
-  await withTimeout(fb.mod.auth.signInWithEmailLink(fb.auth, address, platform.signInLinkUrl()), 20000, "Opening your link");
+  const reset = isResetLink();
+  const cred = await withTimeout(fb.mod.auth.signInWithEmailLink(fb.auth, address, platform.signInLinkUrl()), 20000, "Opening your link");
+  /* A Forgot password link for an email with no account would make one:
+     it is taken back at once and nothing else is written. */
+  if (reset) {
+    const m = (cred && cred.user && cred.user.metadata) || {};
+    const made = Date.parse(m.creationTime || ""), last = Date.parse(m.lastSignInTime || "");
+    if (Number.isFinite(made) && Number.isFinite(last) && Math.abs(last - made) < 1500) {
+      try { await fb.mod.auth.deleteUser(cred.user); } catch {}
+      dropApplyLink();
+      const e = new Error("auth/no-such-account"); e.code = "auth/no-such-account"; throw e;
+    }
+  }
   uid = fb.auth.currentUser.uid;
   /* From here until the password is saved, every start shows Create your
      password (rule 4). The device note is written first, so it holds even if
@@ -1744,7 +1899,7 @@ export async function finishApplyLink({ email, password }) {
   let passwordFailed = false;
   try { await createMyPassword(password); } catch { passwordFailed = true; }
   try { await ensureAccountEmail(); } catch {}
-  return { ok: true, passwordFailed };
+  return { ok: true, passwordFailed, reset };
 }
 
 /* Auto: join the public group by yourself. Every Level 1 check is made again
@@ -2019,6 +2174,28 @@ export async function createAccount({ email, password }) {
   return { ok: true, outcome: "created" };
 }
 
+/* Item 9 (Willy, 5 Nov 2026): creating the account and joining are one unit.
+   When Join fails after the account was made moments ago on this screen, the
+   account is taken back: its own small records first, then the sign-in
+   itself, then this device is signed out. Only an account created within the
+   last ten minutes is ever removed this way. Returns { removed }. */
+export async function removeNewAccount() {
+  const user = fb && fb.auth && fb.auth.currentUser;
+  if (!user || user.isAnonymous) return { removed: false };
+  const made = Date.parse((user.metadata && user.metadata.creationTime) || "");
+  if (!Number.isFinite(made) || Date.now() - made > 10 * 60 * 1000) return { removed: false };
+  const { deleteDoc } = fb.mod.store;
+  for (const path of [["users", user.uid, "terms", "accepted"], ["users", user.uid, "prefs", "account"]]) {
+    try { await withTimeout(deleteDoc(ref(...path)), 10000, "Tidying up"); } catch {}
+  }
+  if (user.email) { try { await withTimeout(deleteDoc(ref("accountEmails", emailKey(user.email))), 10000, "Tidying up"); } catch {} }
+  try { await withTimeout(fb.mod.auth.deleteUser(user), 15000, "Removing the new account"); }
+  catch { return { removed: false }; }
+  try { localStorage.removeItem(PW_PENDING_KEY(user.uid)); } catch {}
+  await signOutHere();
+  return { removed: true };
+}
+
 export async function signOutEverywhere() {
   /* Live listeners must go first. Left running, they keep firing against
      collections this account can no longer read, which produces permission
@@ -2065,7 +2242,7 @@ let myMember = null;
    was previously below its first use, which is the kind of ordering fault that
    silently breaks a whole feature. */
 let cachedAssociation = null;
-const currentAssociationDoc = () => cachedAssociation;
+export const currentAssociationDoc = () => cachedAssociation;
 export const myRole = () => (myMember ? myMember.role : null);
 export const canManage = () => ["owner", "admin"].includes(myRole());
 export const isOwner = () => myRole() === "owner";
@@ -2076,6 +2253,12 @@ export async function loadMembership(id) {
     const snap = await getDoc(ref("associations", id, "members", uid));
     noteRead(snap, snap.exists());
     myMember = snap.exists() ? snap.data() : null;
+    /* Batch 4, step 9: the app owner opens any group as its owner; each time
+       is recorded on the group (ownerLog). The rules decide for real. */
+    if (!myMember && await isAppOwner()) {
+      myMember = { uid, role: "owner", displayName: "App owner", appOwner: true };
+      try { await fb.mod.store.setDoc(ref("associations", id, "ownerLog", `${Date.now()}-${uid.slice(0, 6)}`), { uid, at: Date.now(), what: "opened the group as the app owner" }); } catch {}
+    }
     if (myMember) {
       assocId = id;
       rememberAssociation(id);
@@ -2083,12 +2266,86 @@ export async function loadMembership(id) {
          first created. A group made before this existed would otherwise stay
          invisible to a second device forever. */
       const group = await loadAssociation(id);
-      rememberGroup(id, group ? group.name : "Group");
-      rememberGroupForAccount(id, group ? group.name : "Group");
+      const label = group ? `${group.name}${group.hidden ? " (deleted)" : ""}` : "Group";
+      rememberGroup(id, label);
+      rememberGroupForAccount(id, label);
     }
     return myMember;
   } catch (e) { report(e); return null; }
 }
+
+/* Batch 5, step 14 (Willy, 16 Oct 2026): withdraw a course for ALL groups, for
+   good. It stays only because posted rounds point to it (they keep their
+   frozen figures, nothing is recalculated); it is never used, edited or
+   restored. A replacement is a new course. One write. */
+export async function withdrawCourse(courseId, reason) {
+  await commitTogether([{ op: "update", path: ["courses", courseId],
+    data: { withdrawn: true, withdrawnBy: uid, withdrawnAt: Date.now(), withdrawnReason: String(reason || "").trim().slice(0, 200), withdrawnIn: assocId } }],
+    "withdraw the course");
+  return { ok: true };
+}
+
+/* Batch 5, step 31 (Willy, 1 Nov 2026: GolfCourseAPI's terms): course search
+   goes through The Marker's Cloudflare server, which holds the key; the key
+   never reaches a phone. Its address is in markerConfig/public. */
+let workerBase = "";
+async function markerWorkerUrl() {
+  if (workerBase) return workerBase;
+  try {
+    const snap = await fb.mod.store.getDoc(ref("markerConfig", "public"));
+    const url = snap.exists() ? String(snap.data().workerUrl || "") : "";
+    if (/^https:\/\//.test(url)) { workerBase = url.replace(/\/+$/, ""); try { localStorage.setItem("golf:workerUrl", workerBase); } catch {} return workerBase; }
+  } catch { /* the saved one below */ }
+  try { const saved = localStorage.getItem("golf:workerUrl") || ""; if (saved) return (workerBase = saved); } catch {}
+  throw new Error("NOT_SET_UP");
+}
+export async function callMarkerWorker(path, { method = "GET", body = null } = {}) {
+  const user = fb && fb.auth && fb.auth.currentUser;
+  if (!user) throw new Error("SIGN_IN");
+  if (typeof navigator !== "undefined" && navigator.onLine === false) throw new Error("OFFLINE");
+  const base = await markerWorkerUrl();
+  const token = await user.getIdToken();
+  let res;
+  try {
+    res = await fetch(base + path, { method, headers: { Authorization: `Bearer ${token}`, ...(body ? { "Content-Type": "application/json" } : {}) },
+      body: body ? JSON.stringify(body) : undefined });
+  } catch { throw new Error("UNREACHABLE"); }
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 401 || res.status === 403) throw new Error("SIGN_IN");
+  if (!res.ok) throw new Error("UNREACHABLE");
+  if (data.error) throw new Error(data.error === "REFUSED" ? (data.reason || "Refused.") : data.error);
+  return data;
+}
+
+/* The key box (owner of the app only): the key goes to a record no app can
+   read (secretKeys/golfCourseApi); only its last four characters to one the
+   app shows (settings/golfKeyInfo). One commit. */
+export async function saveCourseKey(key) {
+  const k = String(key || "").trim();
+  if (k.length < 8) throw new Error("That does not look like a key.");
+  await commitTogether([
+    { op: "set", merge: false, path: ["secretKeys", "golfCourseApi"], data: { key: k, savedBy: uid, savedAt: Date.now() } },
+    { op: "set", merge: false, path: ["settings", "golfKeyInfo"], data: { last4: k.slice(-4), savedAt: Date.now() } },
+  ], "save the course search key");
+  return { last4: k.slice(-4) };
+}
+export async function courseKeyInfo() {
+  try { const d = await fb.mod.store.getDoc(ref("settings", "golfKeyInfo")); return d.exists() ? d.data() : null; } catch { return null; }
+}
+
+/* Batch 4, step 9: whether this account is the app owner (appOwners/{uid}). */
+let appOwnerFlag = null;
+export async function isAppOwner() {
+  if (!fb || !uid) return false;
+  if (appOwnerFlag && appOwnerFlag.uid === uid) return appOwnerFlag.on;
+  let on = false;
+  try { const d = await fb.mod.store.getDoc(ref("appOwners", uid)); on = d.exists() && d.data().active === true; } catch { on = false; }
+  appOwnerFlag = { uid, on };
+  return on;
+}
+export const appOwnerNow = () => !!(appOwnerFlag && appOwnerFlag.uid === uid && appOwnerFlag.on);
+/* Batch 4, step 18: the open group was deleted (hidden) by its owner. */
+export const groupHidden = () => !!(cachedAssociation && cachedAssociation.id === assocId && cachedAssociation.hidden === true);
 
 export async function loadAssociation(id) {
   const { getDoc } = fb.mod.store;
@@ -2192,7 +2449,9 @@ export async function inviteLink(role = "member", golferId = null) {
         groupName: String(group.name || "").slice(0, 120), state: "pending", sentAt: { __serverTimestamp: true } } },
     { op: "set", merge: false, path: ["associations", group.id, "invitationSlots", slot], data: { token } },
   ], "prepare one-time invitation");
-  return `${platform.joinBase()}?join=${group.id}.${token}${golferId ? `.${golferId}` : ""}${role === "admin" ? "&as=admin" : ""}&v=2`;
+  /* g: the group's name, only for the welcome line before the account exists
+     (Batch 2); joining itself checks everything against the database. */
+  return `${platform.joinBase()}?join=${group.id}.${token}${golferId ? `.${golferId}` : ""}${role === "admin" ? "&as=admin" : ""}&v=2&g=${encodeURIComponent(String(group.name || "").slice(0, 60))}`;
 }
 
 /* A token is deliberately unreadable by list to invitees; only its random
@@ -2309,6 +2568,8 @@ export function readJoinLink() {
       token: params.get("v") === "2" ? parts[1] : null,
       golferId: params.get("v") === "2" && loadedInvitation && loadedInvitation.token === parts[1]
         ? loadedInvitation.golferId : parts.length > 2 ? parts.slice(2).join(".") : null,
+      /* The group's name for the welcome line only (display, never trusted). */
+      groupHint: String(params.get("g") || "").replace(/[<>]/g, "").slice(0, 60),
       /* Verified against the group by the rules, never trusted on its own. */
       role: params.get("v") === "2" && loadedInvitation && loadedInvitation.token === parts[1]
         ? loadedInvitation.role : params.get("as") === "admin" ? "admin" : "member",
@@ -2463,7 +2724,7 @@ export function watchGames(callback, { max = 200 } = {}) {
   if (canManage()) {
     const stop = listen(
       query(col("associations", assocId, "games"), orderBy("date", "desc"), limit(max)),
-      (snap) => callback(snap.docs.map((d) => d.data())), (e) => report(e));
+      (snap) => callback(snap.docs.map((d) => ({ ...d.data(), id: d.id }))), (e) => report(e));
     unsubscribers.push(stop);
     return stop;
   }
@@ -2474,11 +2735,11 @@ export function watchGames(callback, { max = 200 } = {}) {
     .sort((a, b) => String(b.date || "").localeCompare(String(a.date || ""))));
   const stops = [];
   stops.push(listen(query(col("associations", assocId, "games"), where("createdBy", "==", uid), limit(max)),
-    (snap) => { created.clear(); snap.docs.forEach((d) => created.set(d.id, d.data())); emit(); }, (e) => report(e)));
+    (snap) => { created.clear(); snap.docs.forEach((d) => created.set(d.id, { ...d.data(), id: d.id })); emit(); }, (e) => report(e)));
   findMyGolfer().then((g) => {
     if (generation !== watchGeneration || !g) { emit(); return; }
     stops.push(listen(query(col("associations", assocId, "games"), where("participantGolferIds", "array-contains", g.id), limit(max)),
-      (snap) => { played.clear(); snap.docs.forEach((d) => played.set(d.id, d.data())); emit(); }, (e) => report(e)));
+      (snap) => { played.clear(); snap.docs.forEach((d) => played.set(d.id, { ...d.data(), id: d.id })); emit(); }, (e) => report(e)));
   });
   const stop = () => { while (stops.length) { try { stops.pop()(); } catch {} } };
   unsubscribers.push(stop);
@@ -2509,10 +2770,22 @@ export function updateGame(gameId, data) {
   flush();
 }
 
-export function deleteGame(gameId) {
-  outbox.enqueue({ type: "delete", path: ["associations", assocId, "games", gameId],
-    opId: `game-delete-${gameId}` });
+/* Batch 3, Fix 4: the game and the game id on every one of its rounds, in ONE
+   commit (or one queued item offline). The rounds stay; they leave the game. */
+export async function deleteGame(gameId) {
+  const { getDocs, query, where } = fb.mod.store;
+  const snap = await getDocs(query(col("associations", assocId, "rounds"), where("gameId", "==", gameId)));
+  const writes = [{ op: "delete", path: ["associations", assocId, "games", gameId] }];
+  snap.forEach((d) => writes.push({ op: "update", path: ["associations", assocId, "rounds", d.id], data: { gameId: null } }));
+  if (writes.length > 400) throw new Error("The game has too many rounds to delete in one step.");
+  const offline = typeof navigator !== "undefined" && navigator.onLine === false;
+  if (!offline) {
+    try { await commitTogether(writes, `delete game ${gameId}`); return { ok: true, rounds: writes.length - 1 }; }
+    catch (e) { if (!/unavailable|network|offline/i.test(String((e && (e.code || e.message)) || ""))) throw e; }
+  }
+  outbox.enqueue({ type: "batch", writes, opId: `game-delete-${gameId}` });
   flush();
+  return { ok: true, rounds: writes.length - 1, queued: true };
 }
 
 /* ---------------- editing a round ---------------- */
@@ -2527,9 +2800,7 @@ export function updateRound(roundId, data) {
    Use this rather than updateRound followed by a rebuild — that pairing could
    leave a corrected score with an index still reflecting the old one. */
 export async function updateRoundAndRebuild(roundId, data, golferId) {
-  updateRound(roundId, data);
-  await flush();
-  if (golferId) await rebuildGolferIndex(golferId);
+  return saveRoundChange({ roundId, change: data, golferId: golferId || null });
 }
 
 /* Whether this person may still change a round. The rules decide for real;
@@ -2663,8 +2934,24 @@ export async function restoreBackup({ golfers = [], courses = [], rounds = [] })
  * an existing person when the name matches, so somebody joining a second group
  * keeps their handicap rather than starting again. */
 export async function linkGolferForMember(displayName) {
+  /* Batch 3, step 21 (found by Willy, 26 Oct 2026): the creator's EXISTING
+     golfer goes on the new group's roster, group list and membership, in one
+     commit — never a second golfer named after the account's email. */
+  myGolferCache = null;
+  const mine = await findMyGolfer();
+  if (mine) {
+    await commitTogether([
+      { op: "set", merge: false, path: ["associations", assocId, "roster", mine.id], data: { golferId: mine.id, addedAt: Date.now() } },
+      { op: "update", path: ["golfers", mine.id], data: { groups: [...new Set([...(mine.groups || []), assocId])], editedIn: assocId } },
+      { op: "set", merge: false, path: ["associations", assocId, "directory", mine.id], data: directoryEntry(mine) },
+    ], "put my golfer on the new group");
+    /* The membership points at the golfer too (best effort; findMyGolfer repairs it). */
+    try { await fb.mod.store.updateDoc(ref("associations", assocId, "members", uid), { golferId: mine.id }); } catch {}
+    return mine;
+  }
   const name = String(displayName || "").trim();
-  if (!name) return null;
+  /* A new golfer only with a real name, never an email address. */
+  if (!name || name.includes("@")) { const e = new Error("Type the name you play under."); e.code = "golfer/name"; throw e; }
 
   const { golfer } = await addGolfer({ name });
 
@@ -2988,6 +3275,19 @@ async function commitTogether(writes, what) {
  * until that copy exists. If the backup cannot be made, the deletion does not
  * happen at all.
  */
+/* Batch 4, step 18 (Willy, 26 Oct 2026, option B): deleting a group only
+   hides it, in ONE commit. Nothing inside it is removed: the rounds still
+   count in each golfer's handicap and each golfer can still see their own.
+   The app owner can bring it back, or remove it for good (deleteGroup, which
+   takes a backup first). */
+export async function hideGroup(targetId, hidden = true) {
+  const id = targetId || assocId;
+  await commitTogether([{ op: "update", path: ["associations", id],
+    data: hidden ? { hidden: true, hiddenBy: uid, hiddenAt: Date.now() } : { hidden: false, restoredBy: uid, restoredAt: Date.now() } }],
+    hidden ? "hide the group" : "restore the group");
+  return { ok: true };
+}
+
 export async function deleteGroup(targetId) {
   const { collection, getDocs } = fb.mod.store;
   const id = targetId || assocId;

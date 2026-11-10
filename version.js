@@ -1,4 +1,8 @@
+/* 2.31.4: visible progress while reading a scorecard, duplicate-photo prevention and safe cancellation. */
+/* 2.31.3: camera privacy description for Manage scorecard photos; audited in the built app and simulator. */
 /* Single source of truth for the version. */
-/* 2.30.0 build 25 (Oct 22): the entry screens (E1–E5) — Sign in link for approved applicants, Create your password once, "Is this for you?" on a signed-in device, never "Start your group" when the groups could not be checked, "request a group" wording. Resubmitted to the App Store in place of build 24. */
-self.APP_VERSION = "2.30.0";
-self.APP_BUILD = "2026-10-22.3";
+/* 2.31.2 (Nov 6): every error is one pop-up with OK (showMessage); only the chosen tee stays on Enter; a tick for joined golfers; the header and the cockpit show golfer names, never an email; last seen close to real time. */
+/* 2.31.1 (Nov 6): the fixes from testing 2.31.0 — an invitation on a signed-in phone signs out by itself when the account plays as another golfer, and "someone else" continues at once; nothing of the old account is left on screen; a link closes an open box; Join is all or nothing (a new account is removed again if joining fails); plain refusals; form messages as a pop-up that needs OK; a colour for each kind of score; course search as the first line of the Course list; the app's own link name for the join page's iPhone Open button. */
+/* 2.31.0 (Nov 5): the plan of 3 Nov, batches 1 to 6 — the new look; getting in (Forgot password and approval links open the app, one welcome screen, the taken-name warning); safe saving (one commit for edits and deletes, Marker scores read-only, deleted games, a new group uses the creator's golfer); admin tools (app owner override, deleting a group hides it, Tidy for all groups); courses (search for every golfer through The Marker's server, withdrawal, verified pictures); Marker rounds (the hole-by-hole card, scoring statistics). */
+self.APP_VERSION = "2.31.4";
+self.APP_BUILD = "2026-11-10.scan1";

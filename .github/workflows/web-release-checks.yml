@@ -1,0 +1,9 @@
+name: Web shared application verification
+on:
+  push:
+    branches: [update-web-spinner]
+permissions:
+  contents: read
+jobs:
+  verify:
+    uses: ./.github/workflows/release-checks.yml
