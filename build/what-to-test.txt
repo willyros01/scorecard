@@ -1,5 +1,3 @@
-The Scorecard 2.31.3 — Manage camera crash fix
+The Scorecard 2.31.4 — scorecard photo progress
 
-Open Manage > Add a course > Take a photo. Allow camera access, photograph a scorecard and confirm the image returns to the editor without closing the app. Also test cancelling, denying permission, retrying, and Photos or Files.
-
-Automated checks cover the required camera description in the finished app, missing-key rejection, simulator installation/startup, and Manage photo-input recovery in Chromium and WebKit. A simulator cannot take a physical photograph.
+Manage > Add a course > Take a photo. After choosing the picture, a large spinning indicator and Reading your scorecard message stay visible until the card returns. Photo controls and Save are unavailable during reading to avoid duplicate requests. Check success, failure/retry, and Cancel while reading. The iOS camera permission fix from build 34 is retained.

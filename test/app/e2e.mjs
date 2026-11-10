@@ -2170,6 +2170,69 @@ await check("CAM4", "Manage camera input, cancelled selection and unreadable pho
   } finally { await page.close(); }
 });
 
+/* Hold only the remote scan response; the real editor and photo handler run. */
+await check("CAM5", "delayed scorecard reading shows progress, blocks duplicate photos, recovers on error and ignores cancelled responses", async () => {
+  const page = await ownerInG1();
+  const picture = { name: "card.png", mimeType: "image/png", buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jR1kAAAAASUVORK5CYII=", "base64") };
+  let requests = 0, pending = null;
+  await page.evaluate(() => localStorage.setItem("golf:workerUrl", "https://scorecard-scan-test.invalid"));
+  await page.route("https://scorecard-scan-test.invalid/scan", async route => {
+    requests++;
+    pending = route;
+  });
+  const progress = () => page.locator('.card-reading-progress[role="status"]');
+  const camera = () => page.locator('input[name="card-photo"][capture="environment"]');
+  async function startPhoto() {
+    pending = null;
+    await camera().setInputFiles(picture);
+    await progress().waitFor();
+    const deadline = Date.now() + 10000;
+    while (!pending && Date.now() < deadline) await page.waitForTimeout(50);
+    if (!pending) throw new Error("photo never reached the controlled scan endpoint");
+    if (await page.locator('input[name="card-photo"]').count()) throw new Error("photo controls still available while reading");
+    if (!await page.locator('[data-act="save-course"]').isDisabled()) throw new Error("Save enabled during reading");
+    if (!/Reading your scorecard/.test(await progress().innerText())) throw new Error("missing reading message");
+  }
+  async function reply(body) {
+    const route = pending;
+    pending = null;
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
+  }
+  try {
+    await tab(page, "manage");
+    await page.locator('[data-act="new-course"]').click();
+    await startPhoto();
+    // Even a queued duplicate input event must not start another reading.
+    await page.evaluate(() => {
+      const input = document.createElement("input"); input.type = "file"; input.name = "card-photo";
+      const transfer = new DataTransfer(); transfer.items.add(new File(["bad"], "duplicate.jpg", {type:"image/jpeg"}));
+      input.files = transfer.files; document.body.append(input);
+      input.dispatchEvent(new Event("change", {bubbles:true})); input.remove();
+    });
+    await page.waitForTimeout(300);
+    if (requests !== 1 || !await progress().isVisible()) throw new Error("duplicate input interrupted or repeated the reading");
+    await reply({ scan: { course: "Progress Test Links", scanId: "scan-1", tees: [] } });
+    await page.locator('[data-act="card-again"]').waitFor();
+    if (await progress().count()) throw new Error("spinner remained after success");
+    await page.locator('[data-act="card-again"]').click();
+    await startPhoto();
+    await reply({ error: "SCAN_LIMIT" });
+    await waitForText(page, /picture readings are used up/);
+    if (await progress().count() || await camera().count() !== 1) throw new Error("cannot retry after scan failure");
+    await startPhoto();
+    await page.locator('[data-act="cancel-course"]').click();
+    await page.locator('[data-act="new-course"]').click();
+    await reply({ scan: { course: "Stale Reply Must Not Appear", scanId: "old", tees: [] } });
+    await page.waitForTimeout(500);
+    if (await progress().count() || await camera().count() !== 1 || /Stale Reply Must Not Appear/.test(await text(page))) throw new Error("cancelled scan changed the new editor");
+    if (requests !== 3) throw new Error(`expected three scan requests, got ${requests}`);
+    if (page.errors.length) throw new Error(page.errors.join(" | "));
+  } finally {
+    if (pending) await pending.abort().catch(() => {});
+    await page.close();
+  }
+});
+
 await browser.close();
 server.kill();
 console.log(`\nRESULT: ${passed} passed, ${failed} failed`);

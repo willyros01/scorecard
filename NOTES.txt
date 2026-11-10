@@ -286,3 +286,11 @@ and test/ios/camera-simulator.sh, run before signing/upload. Simulator validates
 the built and installed app, rejects a missing-key control, and checks launch.
 Physical photo capture/permission dialog remains a device acceptance check.
 No Firestore rules or shared application behavior changed.
+
+2026-11-10 — 2.31.4 scorecard photo progress
+Show a large, announced spinner while the photo is read; remove photo controls
+and disable Save until completion. Guard duplicate input events; ignore late
+responses after Cancel or another editor opens. Preserve scan IDs on failure.
+Add delayed-response tests to Claude's actual-app suite. No rules changed.
+Apple review submission must use App Store Connect API only and wait for
+Willy's explicit go signal. Rejection text was not included in the request.

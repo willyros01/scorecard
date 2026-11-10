@@ -1,7 +1,7 @@
 name: Camera crash regression checks
 on:
   push:
-    branches: [fix-camera-permission]
+    branches: [fix-camera-permission, fix-card-reading-progress]
 permissions:
   contents: read
 jobs:
