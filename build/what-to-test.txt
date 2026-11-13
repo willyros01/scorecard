@@ -1,3 +1,6 @@
-The Scorecard 2.31.4 — scorecard photo progress
+The Scorecard 2.31.5 — sign-in emails sent by The Scorecard itself
 
-Manage > Add a course > Take a photo. After choosing the picture, a large spinning indicator and Reading your scorecard message stay visible until the card returns. Photo controls and Save are unavailable during reading to avoid duplicate requests. Check success, failure/retry, and Cancel while reading. The iOS camera permission fix from build 34 is retained.
+1. Forgot password: on the sign-in screen, tap Forgot password and send it to your own address. The email comes from The Scorecard (thescorecard.marker@gmail.com), titled Choose a new password for The Scorecard. Tap its button: The Scorecard opens with no Firebase page in between, and lets you choose a new password.
+2. Approval: approve a test applicant. Their email is titled Welcome to The Scorecard and opens the app the same way.
+3. Cockpit: your own row shows your golfer name, never your email. The small cnt.txt note under the list is gone.
+4. The camera and scorecard photo reading from 2.31.4 still work (Manage > Add a course > Take a photo).

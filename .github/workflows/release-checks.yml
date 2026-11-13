@@ -29,6 +29,7 @@ jobs:
       - name: Link and confirmation regressions
         run: |
           node test/review/link-regressions.mjs .
+          node test/review/email-helper-regressions.mjs
           node test/review/message-regressions.mjs
           node test/review/deletion-check-regressions.mjs
           node test/review/query-indexes.mjs

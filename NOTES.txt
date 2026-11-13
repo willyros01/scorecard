@@ -294,3 +294,4 @@ responses after Cancel or another editor opens. Preserve scan IDs on failure.
 Add delayed-response tests to Claude's actual-app suite. No rules changed.
 Apple review submission must use App Store Connect API only and wait for
 Willy's explicit go signal. Rejection text was not included in the request.
+2026-11-13 — 2.31.5 (TestFlight only): sign-in emails sent by The Marker's Cloudflare helper (/send-link) from thescorecard.marker@gmail.com, link straight to the join page, our own wording; Firebase's email as fallback. Cockpit own-name fix (from fix-34). Built from v2 build 35 (camera fix kept).

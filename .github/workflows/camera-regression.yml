@@ -1,7 +1,7 @@
 name: Camera crash regression checks
 on:
   push:
-    branches: [fix-camera-permission, fix-card-reading-progress]
+    branches: [fix-camera-permission, fix-card-reading-progress, tf-2.31.5]
 permissions:
   contents: read
 jobs:
