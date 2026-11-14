@@ -1,0 +1,48 @@
+kind:    ops
+result:  cancelled
+branch:  del-public
+commit:  89054192c46be61e072142e1db39813c78c2d4f3
+run:     124 (id 43541695130)
+time:    2026-11-14T01:39:50Z
+
+--- last lines of ops-tests.log ---
+PASS  CK9 ... and so is skipping the count
+PASS  CK9 ... and so is leaving the counter out
+PASS  CK9 under the limit, leaving the counter out is still refused
+PASS  CK9 under the limit, with the counter, it passes
+PASS  CK9 a reviewer cannot claim an application already approved by Auto
+
+RESULT: 55 passed, 0 failed
+
+PASS  E1  signed out: Sign in, I have a code, Become a member or request a group; no sign-in happens by itself
+PASS  E2  the applicant applies with full name and email; the application is stored as pending
+PASS  E2b  a second application for the same email is refused with a clear message
+PASS  E3  the owner signs in, lands in PUBLIC and sees the application on the Admin tab
+[33m[1m⚠ [22m[39m canHandleCodeInApp is unsupported in Auth Emulator. All OOB operations will complete via web.
+[36m[1mi [22m[39m To sign in as pat.applicant@example.com, follow this link: http://127.0.0.1:9099/emulator/action?mode=signIn&lang=en&oobCode=-gXf69WRPk0O34hQQcs2veszhcTDfNVk_PDKaORzlos0zIPlnmCI66&apiKey=fake-api-key&continueUrl=http%3A%2F%2Flocalhost%3A8000%2F%3Femulators%3D1%26apply%3D1%26approved%3D1%26e%3Dpat.applicant%2540example.com
+PASS  E4  approving creates the account, the golfer, the directory entry and the approval, and sends the password email
+PASS  E4b  a name already in use is refused and the owner is asked to change it
+[33m[1m⚠ [22m[39m canHandleCodeInApp is unsupported in Auth Emulator. All OOB operations will complete via web.
+[36m[1mi [22m[39m To sign in as retry@example.com, follow this link: http://127.0.0.1:9099/emulator/action?mode=signIn&lang=en&oobCode=FV4mFyD26bW_000LbUyjmJp3nZ6QMstERKYs_uCi07taY4VuRnLhRj&apiKey=fake-api-key&continueUrl=http%3A%2F%2Flocalhost%3A8000%2F%3Femulators%3D1%26apply%3D1%26approved%3D1%26e%3Dretry%2540example.com
+PASS  E4c  an approval interrupted part-way is finished by the same reviewer, with the same golfer
+[33m[1m⚠ [22m[39m canHandleCodeInApp is unsupported in Auth Emulator. All OOB operations will complete via web.
+[36m[1mi [22m[39m To sign in as both@example.com, follow this link: http://127.0.0.1:9099/emulator/action?mode=signIn&lang=en&oobCode=HyWhKsCMoGjntluvpHnEekj9SK568dHNbY0LqA4NSgdKz10JJDRzlg&apiKey=fake-api-key&continueUrl=http%3A%2F%2Flocalhost%3A8000%2F%3Femulators%3D1%26apply%3D1%26approved%3D1%26e%3Dboth%2540example.com
+PASS  E4d  two reviewers approving the same application at once: exactly one approval, one golfer, one account
+PASS  E5  build 25 (E1): approval sends the Sign in link, not the reset email; the applicant creates a password once and is in the PUBLIC group
+      after E5 the member's screen says: The Scorecard PUBLIC PAT APPLICANT A+ Auto · night Connected Welcome to the public group. Your password is saved — use this email and password on every device. Post your rounds on the Enter tab. Almost ready Whoever runs your group still needs to add the roster and a course. ✎ Enter ≡ My rounds ▤ Summary ⚑ Games
+PASS  E6  the member sees the group ranking with Report or block beside other golfers
+PASS  E7  reporting a name reaches the reviewers
+PASS  E8  blocking hides the golfer from the member's ranking; unblocking brings them back
+PASS  E8b  a regular member reads only their own membership, and no errors appeared
+PASS  E9  the owner sees the report and dismisses it
+PASS  E10  only the group creator is offered Start another group
+PASS  E11  a named private invitation: create an account, then join as the invited golfer
+PASS  E12  an admin invites regular members only: no Admin choice on the invitation
+PASS  E13  an admin removes a regular member of their group, and has no button for the owner
+PASS  E15  signed out: Request your own group sends a request (only after agreeing to the conditions)
+PASS  E16  Willy approves: the group is created with him as owner, the request is approved, and an admin invitation is ready to email to the organiser
+PASS  E17  the organiser taps the link, creates an account and joins the new group as its admin
+PASS  E18  the owner cockpit counts every group, and the owner's last seen is stamped
+PASS  E19  the owner's Members tab is People as before, and Settings holds Group, Backup and Account (the key box is the app owner's)
+PASS  E20  a group admin sees the mini cockpit of their own group, and two tabs only
+PASS  E21  an email that already has an account is stopped on screen; nothing is saved
