@@ -173,7 +173,7 @@ public_cleanup(){ # uid golferId
   rounds="$(rounds_of "${PUBLIC}" "${g}")"
   nk="$(jq -r '.fields.nameKey.stringValue // empty' <<<"${golfer}")"
   claim=null
-  if [[ -n "${nk}" && "${nk}" != */* ]]; then
+  if [[ "${nk}" =~ ^[a-z0-9-]{1,200}$ ]]; then          # the app's name keys: letters, digits, hyphens
     claim="$(read_doc "golferNames/${nk}")"
     [[ "$(jq -r '.fields.golferId.stringValue // empty' <<<"${claim}")" == "${g}" ]] || claim=null
   fi

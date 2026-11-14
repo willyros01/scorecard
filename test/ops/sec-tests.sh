@@ -139,21 +139,21 @@ seed_public(){
   put "associations/PUBLIC/directory/gP" '{"golferId":"gP","displayName":"Pat Public"}'
   put "associations/PUBLIC/rounds/pr1" "{\"golferId\":\"gP\",\"enteredBy\":\"${Pp}\"}"
   put "associations/PUBLIC/rounds/pr2" "{\"golferId\":\"gP\",\"enteredBy\":\"${Pp}\"}"
-  put "golfers/gP" "{\"name\":\"Pat Public\",\"nameKey\":\"pat public\",\"linkedUid\":\"${Pp}\"}"
-  put "golferNames/pat public" '{"golferId":"gP"}'
+  put "golfers/gP" "{\"name\":\"Pat Public\",\"nameKey\":\"pat-public\",\"linkedUid\":\"${Pp}\"}"
+  put "golferNames/pat-public" '{"golferId":"gP"}'
   put "associations/PUBLIC/roster/gZ" '{"golferId":"gZ"}'
   put "associations/PUBLIC/directory/gZ" '{"golferId":"gZ","displayName":"Zoe Bystander"}'
   put "associations/PUBLIC/rounds/pz1" '{"golferId":"gZ"}'
-  put "golfers/gZ" '{"name":"Zoe Bystander","nameKey":"zoe bystander","linkedUid":null}'
-  put "golferNames/zoe bystander" '{"golferId":"gZ"}'
+  put "golfers/gZ" '{"name":"Zoe Bystander","nameKey":"zoe-bystander","linkedUid":null}'
+  put "golferNames/zoe-bystander" '{"golferId":"gZ"}'
   put "associations/PUBLIC/roster/gQ" '{"golferId":"gQ"}'
   put "associations/PUBLIC/directory/gQ" '{"golferId":"gQ","displayName":"Quinn Both"}'
   put "associations/PUBLIC/rounds/qr1" "{\"golferId\":\"gQ\",\"enteredBy\":\"${Q}\"}"
   put "associations/G1/roster/gQ" '{"golferId":"gQ"}'
   put "associations/G1/members/${Q}" "{\"uid\":\"${Q}\",\"role\":\"member\",\"golferId\":\"gQ\"}"
   put "associations/G1/rounds/qr2" "{\"golferId\":\"gQ\",\"enteredBy\":\"${Q}\"}"
-  put "golfers/gQ" "{\"name\":\"Quinn Both\",\"nameKey\":\"quinn both\",\"linkedUid\":\"${Q}\"}"
-  put "golferNames/quinn both" '{"golferId":"gQ"}'
+  put "golfers/gQ" "{\"name\":\"Quinn Both\",\"nameKey\":\"quinn-both\",\"linkedUid\":\"${Q}\"}"
+  put "golferNames/quinn-both" '{"golferId":"gQ"}'
 }
 
 echo "== Scenario 5 (PUB-DEL1): Pat plays only in the Public group; the app finished its part"
@@ -171,12 +171,12 @@ check "PUB-DEL1 Pat's golfer deleted for good"          missing "golfers/gP"
 check "PUB-DEL1 Pat off the Public list"                missing "associations/PUBLIC/roster/gP"
 check "PUB-DEL1 Pat's name gone from the ranking"       missing "associations/PUBLIC/directory/gP"
 check "PUB-DEL1 Pat's Public rounds deleted"            bash -c "! curl -g -sf -o /dev/null -H 'Authorization: Bearer owner' '${FS}/${DB}/associations/PUBLIC/rounds/pr1' && ! curl -g -sf -o /dev/null -H 'Authorization: Bearer owner' '${FS}/${DB}/associations/PUBLIC/rounds/pr2'"
-check "PUB-DEL1 Pat's name free again"                  missing "golferNames/pat public"
+check "PUB-DEL1 Pat's name free again"                  missing "golferNames/pat-public"
 check "PUB-DEL1 one backup, with both rounds"           test "$(backups_of gP)/$(backup_rounds gP)" == "1/2"
 check "PUB-DEL1 Zoe (named in the request) untouched"   exists "golfers/gZ"
 check "PUB-DEL1 Zoe still on the Public list"           exists "associations/PUBLIC/roster/gZ"
 check "PUB-DEL1 Zoe's round untouched"                  exists "associations/PUBLIC/rounds/pz1"
-check "PUB-DEL1 Zoe's name claim untouched"             exists "golferNames/zoe bystander"
+check "PUB-DEL1 Zoe's name claim untouched"             exists "golferNames/zoe-bystander"
 check "PUB-DEL1 no backup of Zoe"                       test "$(backups_of gZ)" == "0"
 check "PUB-DEL1 request removed"                        missing "accountDeletions/${Pp}"
 
@@ -196,7 +196,7 @@ check "PUB-RES1 Pat's golfer back"                      field_is "golfers/gP" na
 check "PUB-RES1 Pat back on the Public list"            exists "associations/PUBLIC/roster/gP"
 check "PUB-RES1 Pat back in the ranking"                exists "associations/PUBLIC/directory/gP"
 check "PUB-RES1 both rounds back"                       bash -c "curl -g -sf -o /dev/null -H 'Authorization: Bearer owner' '${FS}/${DB}/associations/PUBLIC/rounds/pr1' && curl -g -sf -o /dev/null -H 'Authorization: Bearer owner' '${FS}/${DB}/associations/PUBLIC/rounds/pr2'"
-check "PUB-RES1 Pat's name taken again"                 exists "golferNames/pat public"
+check "PUB-RES1 Pat's name taken again"                 exists "golferNames/pat-public"
 check "PUB-RES1 backup removed"                         test "$(backups_of gP)" == "0"
 check "PUB-RES1 says RESTORED"                          grep -q "RESTORED: Pat Public" /tmp/rgf.out
 
@@ -211,7 +211,7 @@ check "PUB-DEL2 Quinn gone from the Public ranking"     missing "associations/PU
 check "PUB-DEL2 Quinn's Public round kept"              exists "associations/PUBLIC/rounds/qr1"
 check "PUB-DEL2 Quinn's club round kept"                exists "associations/G1/rounds/qr2"
 check "PUB-DEL2 Quinn still on the club's list"         exists "associations/G1/roster/gQ"
-check "PUB-DEL2 Quinn's name claim kept"                exists "golferNames/quinn both"
+check "PUB-DEL2 Quinn's name claim kept"                exists "golferNames/quinn-both"
 check "PUB-DEL2 no backup needed"                       test "$(backups_of gQ)" == "0"
 check "PUB-DEL2 Pat (not deleting) untouched"           field_is "golfers/gP" linkedUid "${Pp}"
 check "PUB-DEL2 Pat still on the Public list"           exists "associations/PUBLIC/roster/gP"
@@ -221,7 +221,7 @@ reset; seed; seed_public
 put "accountDeletions/${A}" '{"stage":"requested"}'
 raw "$(jq -nc --arg r "${DB}/accountDeletions/${A}" '[{update:{name:$r,fields:{stage:{stringValue:"auth-deleting"},
      golferIds:{arrayValue:{values:[{stringValue:"gZ"},{stringValue:"gP"}]}}}},updateMask:{fieldPaths:["stage","golferIds"]}}]')"
-put "golfers/gZ" '{"name":"Zoe Bystander","nameKey":"zoe bystander","linkedUid":null}'
+put "golfers/gZ" '{"name":"Zoe Bystander","nameKey":"zoe-bystander","linkedUid":null}'
 if run_job; then ok "job finished"; else bad "job finished"; fi
 check "PUB-DEL3 Zoe untouched"                          exists "golfers/gZ"
 check "PUB-DEL3 Zoe still on the Public list"           exists "associations/PUBLIC/roster/gZ"
