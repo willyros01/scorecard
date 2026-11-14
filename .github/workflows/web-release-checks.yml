@@ -1,7 +1,7 @@
 name: Web shared application verification
 on:
   push:
-    branches: [update-web-spinner]
+    branches: [update-web-spinner, main-2.31.5]
 permissions:
   contents: read
 jobs:
