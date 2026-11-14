@@ -182,7 +182,7 @@ public_cleanup(){ # uid golferId
     return 0
   fi
   now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  expires="$(date -u -d "+${BACKUP_DAYS} days" +%Y-%m-%dT%H:%M:%SZ)"
+  expires="$(jq -rn --argjson d "${BACKUP_DAYS}" 'now + $d * 86400 | floor | todate')"   # works on Linux and macOS
   # The backup and every delete in ONE commit: all of it happens, or none.
   # Each delete requires the document to be unchanged since it was read.
   jq -nc --arg b "${DB}/deletionBackups/${g}-$(date -u +%s)" --arg g "${g}" --arg now "${now}" --arg exp "${expires}" \
@@ -282,8 +282,8 @@ process(){ # uid   (runs in a subshell; exit codes: 0 done, 10 blocked, 11 not c
   #     (and refuse "auth-deleting" at the moment a request is created), so a
   #     golfer with that update time, unlinked, can only be its own. The
   #     request's golfer list is used only as the names to look at.
-  local -a mine=()
-  mapfile -t mine < <(jq -r '.[] | .document? // empty | .name | sub(".*/";"")' "${WORK}/golfers.json")
+  local mine
+  mine="$(jq -r '.[] | .document? // empty | .name | sub(".*/";"")' "${WORK}/golfers.json")"
   if [[ "${REQ_STAGE}" == "auth-deleting" && -n "${REQ_UPDATED}" ]]; then
     local cand gj
     while IFS= read -r cand; do
@@ -291,12 +291,12 @@ process(){ # uid   (runs in a subshell; exit codes: 0 done, 10 blocked, 11 not c
       gj="$(curl -g -sS -H "Authorization: Bearer ${ACCESS_TOKEN}" "${FS_BASE}/${DB}/golfers/${cand}")"
       if [[ "$(jq -r '.updateTime // ""' <<<"${gj}")" == "${REQ_UPDATED}" \
          && "$(jq -r '.fields.linkedUid | if . == null or has("nullValue") then "none" else "linked" end' <<<"${gj}")" == "none" ]]; then
-        mine+=("${cand}")
+        mine="${mine}"$'\n'"${cand}"
       fi
     done < <(jq -r '.fields.golferIds.arrayValue.values[]?.stringValue // empty' <<<"${REQ_JSON}")
   fi
   local g
-  for g in $(printf '%s\n' "${mine[@]}" | sort -u); do
+  for g in $(printf '%s\n' "${mine}" | grep -E '^[A-Za-z0-9_-]{1,128}$' | sort -u); do
     public_cleanup "${uid}" "${g}"
   done
 
