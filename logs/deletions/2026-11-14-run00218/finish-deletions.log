@@ -1,3 +1,5 @@
-03:25:47 Deletion completion job for scorecard-f41b8 (requests older than 300s).
-03:25:48 Requests found: 1
-03:25:48 Summary: done 0, blocked 0, waiting for the app 1, failed 0.
+03:29:32 Deletion completion job for scorecard-f41b8 (requests older than 300s).
+03:29:32 Requests found: 1
+03:29:38 PUBLIC ORKA…: golfer mwfu… deleted from the Public group for good (1 rounds); backup kept 30 days.
+03:29:40 DONE ORKA…: account confirmed gone; request removed.
+03:29:40 Summary: done 1, blocked 0, waiting for the app 0, failed 0.
