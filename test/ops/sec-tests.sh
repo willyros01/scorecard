@@ -180,6 +180,26 @@ check "PUB-DEL1 Zoe's name claim untouched"             exists "golferNames/zoe 
 check "PUB-DEL1 no backup of Zoe"                       test "$(backups_of gZ)" == "0"
 check "PUB-DEL1 request removed"                        missing "accountDeletions/${Pp}"
 
+echo "== Scenario 5b (PUB-RES1): rgf.txt brings Pat back, exactly as before"
+FAKE="$(mktemp -d)"
+cat > "${FAKE}/gcloud" <<'G'
+#!/usr/bin/env bash
+case "$*" in
+  "config get-value project") echo scorecard-f41b8 ;;
+  "auth print-access-token") echo owner ;;
+  *) exit 0 ;;
+esac
+G
+chmod +x "${FAKE}/gcloud"
+if printf 'Pat Public\nyes\n' | PATH="${FAKE}:${PATH}" RGF_FS="${FS}" RGF_DB_PROJECT="${P}" bash "${HERE}/rgf.txt" > /tmp/rgf.out 2>&1; then ok "rgf.txt finished"; else bad "rgf.txt finished: $(tail -5 /tmp/rgf.out)"; fi
+check "PUB-RES1 Pat's golfer back"                      field_is "golfers/gP" name "Pat Public"
+check "PUB-RES1 Pat back on the Public list"            exists "associations/PUBLIC/roster/gP"
+check "PUB-RES1 Pat back in the ranking"                exists "associations/PUBLIC/directory/gP"
+check "PUB-RES1 both rounds back"                       bash -c "curl -g -sf -o /dev/null -H 'Authorization: Bearer owner' '${FS}/${DB}/associations/PUBLIC/rounds/pr1' && curl -g -sf -o /dev/null -H 'Authorization: Bearer owner' '${FS}/${DB}/associations/PUBLIC/rounds/pr2'"
+check "PUB-RES1 Pat's name taken again"                 exists "golferNames/pat public"
+check "PUB-RES1 backup removed"                         test "$(backups_of gP)" == "0"
+check "PUB-RES1 says RESTORED"                          grep -q "RESTORED: Pat Public" /tmp/rgf.out
+
 echo "== Scenario 6 (PUB-DEL2): Quinn plays in the Public group AND a club; the app stopped early"
 reset; seed; seed_public
 put "accountDeletions/${Q}" '{"stage":"requested"}'
