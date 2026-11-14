@@ -1,9 +1,9 @@
 kind:    ops-webkit
 result:  failure
-branch:  v2
-commit:  824e7fca4001dda9da598f0eacab7da3a5d29b99
-run:     87 (id 39802717218)
-time:    2026-10-22T15:20:54Z
+branch:  del-public
+commit:  2e2d5b55be477585ff329fa2012eed3a8880804a
+run:     125 (id 43541819579)
+time:    2026-11-14T01:47:17Z
 
 --- last lines of ops-tests.log ---
 true
