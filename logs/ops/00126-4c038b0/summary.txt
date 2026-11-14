@@ -1,9 +1,9 @@
 kind:    ops
 result:  success
-branch:  v2
-commit:  3f85ea7863900ea2bce6885e8e9d5db9d681dd0e
-run:     89 (id 39808239935)
-time:    2026-10-22T15:54:42Z
+branch:  del-public
+commit:  4c038b01dc24655e39b4badd6151f1730edb0e58
+run:     126 (id 43543294705)
+time:    2026-11-14T02:01:11Z
 
 --- last lines of ops-tests.log ---
 PASS  IX2 succeeds (exit 0)
