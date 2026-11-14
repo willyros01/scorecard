@@ -120,6 +120,122 @@ check "young request untouched"                        exists "accountDeletions/
 check "young request: membership untouched"            exists "associations/G1/members/${A}"
 check "young request: sign-in untouched"               user_exists "${A}"
 
+# ---- The Public group (Willy, 13 Nov 2026): deleted for good there ----
+# raw WRITES-JSON-ARRAY : one atomic commit, as the app's writeBatch does.
+raw(){ jq -nc --argjson w "$1" '{writes:$w}' \
+  | curl -g -sS --fail "${H[@]}" -H 'Content-Type: application/json' --data-binary @- "${FS}/${DB}:commit" >/dev/null; }
+del_auth(){ jq -n --arg u "$1" '{localId:$u}' | curl -g -sS --fail "${H[@]}" -H 'Content-Type: application/json' \
+  --data-binary @- "${AUTHROOT}/projects/${P}/accounts:delete" >/dev/null; }
+backups_of(){ curl -g -sS --fail "${H[@]}" "${FS}/${DB}/deletionBackups?pageSize=300" \
+  | jq -r --arg g "$1" '[.documents[]? | select(.fields.golferId.stringValue == $g)] | length'; }
+backup_rounds(){ curl -g -sS --fail "${H[@]}" "${FS}/${DB}/deletionBackups?pageSize=300" \
+  | jq -r --arg g "$1" '[.documents[]? | select(.fields.golferId.stringValue == $g)][0].fields.rounds.arrayValue.values | length'; }
+seed_public(){
+  Pp="$(new_user)"; Q="$(new_user)"
+  put "associations/PUBLIC" "{\"name\":\"Public\",\"ownerUid\":\"${O}\"}"
+  put "associations/PUBLIC/members/${O}" "{\"uid\":\"${O}\",\"role\":\"owner\"}"
+  put "associations/PUBLIC/members/${Q}" "{\"uid\":\"${Q}\",\"role\":\"member\",\"golferId\":\"gQ\"}"
+  put "associations/PUBLIC/roster/gP" '{"golferId":"gP"}'
+  put "associations/PUBLIC/directory/gP" '{"golferId":"gP","displayName":"Pat Public"}'
+  put "associations/PUBLIC/rounds/pr1" "{\"golferId\":\"gP\",\"enteredBy\":\"${Pp}\"}"
+  put "associations/PUBLIC/rounds/pr2" "{\"golferId\":\"gP\",\"enteredBy\":\"${Pp}\"}"
+  put "golfers/gP" "{\"name\":\"Pat Public\",\"nameKey\":\"pat public\",\"linkedUid\":\"${Pp}\"}"
+  put "golferNames/pat public" '{"golferId":"gP"}'
+  put "associations/PUBLIC/roster/gZ" '{"golferId":"gZ"}'
+  put "associations/PUBLIC/directory/gZ" '{"golferId":"gZ","displayName":"Zoe Bystander"}'
+  put "associations/PUBLIC/rounds/pz1" '{"golferId":"gZ"}'
+  put "golfers/gZ" '{"name":"Zoe Bystander","nameKey":"zoe bystander","linkedUid":null}'
+  put "golferNames/zoe bystander" '{"golferId":"gZ"}'
+  put "associations/PUBLIC/roster/gQ" '{"golferId":"gQ"}'
+  put "associations/PUBLIC/directory/gQ" '{"golferId":"gQ","displayName":"Quinn Both"}'
+  put "associations/PUBLIC/rounds/qr1" "{\"golferId\":\"gQ\",\"enteredBy\":\"${Q}\"}"
+  put "associations/G1/roster/gQ" '{"golferId":"gQ"}'
+  put "associations/G1/members/${Q}" "{\"uid\":\"${Q}\",\"role\":\"member\",\"golferId\":\"gQ\"}"
+  put "associations/G1/rounds/qr2" "{\"golferId\":\"gQ\",\"enteredBy\":\"${Q}\"}"
+  put "golfers/gQ" "{\"name\":\"Quinn Both\",\"nameKey\":\"quinn both\",\"linkedUid\":\"${Q}\"}"
+  put "golferNames/quinn both" '{"golferId":"gQ"}'
+}
+
+echo "== Scenario 5 (PUB-DEL1): Pat plays only in the Public group; the app finished its part"
+reset; seed; seed_public
+put "accountDeletions/${Pp}" '{"stage":"requested"}'
+# The app's last commit: unlink its golfer AND mark the request, together.
+# The request also names Zoe's golfer: a hint the job must not trust.
+raw "$(jq -nc --arg g "${DB}/golfers/gP" --arg r "${DB}/accountDeletions/${Pp}" '[
+  {update:{name:$g,fields:{linkedUid:{nullValue:null}}},updateMask:{fieldPaths:["linkedUid"]}},
+  {update:{name:$r,fields:{stage:{stringValue:"auth-deleting"},
+     golferIds:{arrayValue:{values:[{stringValue:"gP"},{stringValue:"gZ"}]}}}},updateMask:{fieldPaths:["stage","golferIds"]}}]')"
+del_auth "${Pp}"
+if run_job; then ok "job finished"; else bad "job finished"; fi
+check "PUB-DEL1 Pat's golfer deleted for good"          missing "golfers/gP"
+check "PUB-DEL1 Pat off the Public list"                missing "associations/PUBLIC/roster/gP"
+check "PUB-DEL1 Pat's name gone from the ranking"       missing "associations/PUBLIC/directory/gP"
+check "PUB-DEL1 Pat's Public rounds deleted"            bash -c "! curl -g -sf -o /dev/null -H 'Authorization: Bearer owner' '${FS}/${DB}/associations/PUBLIC/rounds/pr1' && ! curl -g -sf -o /dev/null -H 'Authorization: Bearer owner' '${FS}/${DB}/associations/PUBLIC/rounds/pr2'"
+check "PUB-DEL1 Pat's name free again"                  missing "golferNames/pat public"
+check "PUB-DEL1 one backup, with both rounds"           test "$(backups_of gP)/$(backup_rounds gP)" == "1/2"
+check "PUB-DEL1 Zoe (named in the request) untouched"   exists "golfers/gZ"
+check "PUB-DEL1 Zoe still on the Public list"           exists "associations/PUBLIC/roster/gZ"
+check "PUB-DEL1 Zoe's round untouched"                  exists "associations/PUBLIC/rounds/pz1"
+check "PUB-DEL1 Zoe's name claim untouched"             exists "golferNames/zoe bystander"
+check "PUB-DEL1 no backup of Zoe"                       test "$(backups_of gZ)" == "0"
+check "PUB-DEL1 request removed"                        missing "accountDeletions/${Pp}"
+
+echo "== Scenario 5b (PUB-RES1): rgf.txt brings Pat back, exactly as before"
+FAKE="$(mktemp -d)"
+cat > "${FAKE}/gcloud" <<'G'
+#!/usr/bin/env bash
+case "$*" in
+  "config get-value project") echo scorecard-f41b8 ;;
+  "auth print-access-token") echo owner ;;
+  *) exit 0 ;;
+esac
+G
+chmod +x "${FAKE}/gcloud"
+if printf 'Pat Public\nyes\n' | PATH="${FAKE}:${PATH}" RGF_FS="${FS}" RGF_DB_PROJECT="${P}" bash "${HERE}/rgf.txt" > /tmp/rgf.out 2>&1; then ok "rgf.txt finished"; else bad "rgf.txt finished: $(tail -5 /tmp/rgf.out)"; fi
+check "PUB-RES1 Pat's golfer back"                      field_is "golfers/gP" name "Pat Public"
+check "PUB-RES1 Pat back on the Public list"            exists "associations/PUBLIC/roster/gP"
+check "PUB-RES1 Pat back in the ranking"                exists "associations/PUBLIC/directory/gP"
+check "PUB-RES1 both rounds back"                       bash -c "curl -g -sf -o /dev/null -H 'Authorization: Bearer owner' '${FS}/${DB}/associations/PUBLIC/rounds/pr1' && curl -g -sf -o /dev/null -H 'Authorization: Bearer owner' '${FS}/${DB}/associations/PUBLIC/rounds/pr2'"
+check "PUB-RES1 Pat's name taken again"                 exists "golferNames/pat public"
+check "PUB-RES1 backup removed"                         test "$(backups_of gP)" == "0"
+check "PUB-RES1 says RESTORED"                          grep -q "RESTORED: Pat Public" /tmp/rgf.out
+
+echo "== Scenario 6 (PUB-DEL2): Quinn plays in the Public group AND a club; the app stopped early"
+reset; seed; seed_public
+put "accountDeletions/${Q}" '{"stage":"requested"}'
+if run_job; then ok "job finished"; else bad "job finished"; fi
+check "PUB-DEL2 Quinn's golfer kept"                    field_is "golfers/gQ" name "Quinn Both"
+check "PUB-DEL2 Quinn's golfer unlinked"                field_is "golfers/gQ" linkedUid null
+check "PUB-DEL2 Quinn off the Public list"              missing "associations/PUBLIC/roster/gQ"
+check "PUB-DEL2 Quinn gone from the Public ranking"     missing "associations/PUBLIC/directory/gQ"
+check "PUB-DEL2 Quinn's Public round kept"              exists "associations/PUBLIC/rounds/qr1"
+check "PUB-DEL2 Quinn's club round kept"                exists "associations/G1/rounds/qr2"
+check "PUB-DEL2 Quinn still on the club's list"         exists "associations/G1/roster/gQ"
+check "PUB-DEL2 Quinn's name claim kept"                exists "golferNames/quinn both"
+check "PUB-DEL2 no backup needed"                       test "$(backups_of gQ)" == "0"
+check "PUB-DEL2 Pat (not deleting) untouched"           field_is "golfers/gP" linkedUid "${Pp}"
+check "PUB-DEL2 Pat still on the Public list"           exists "associations/PUBLIC/roster/gP"
+
+echo "== Scenario 7 (PUB-DEL3): a request marked auth-deleting on its own proves nothing"
+reset; seed; seed_public
+put "accountDeletions/${A}" '{"stage":"requested"}'
+raw "$(jq -nc --arg r "${DB}/accountDeletions/${A}" '[{update:{name:$r,fields:{stage:{stringValue:"auth-deleting"},
+     golferIds:{arrayValue:{values:[{stringValue:"gZ"},{stringValue:"gP"}]}}}},updateMask:{fieldPaths:["stage","golferIds"]}}]')"
+put "golfers/gZ" '{"name":"Zoe Bystander","nameKey":"zoe bystander","linkedUid":null}'
+if run_job; then ok "job finished"; else bad "job finished"; fi
+check "PUB-DEL3 Zoe untouched"                          exists "golfers/gZ"
+check "PUB-DEL3 Zoe still on the Public list"           exists "associations/PUBLIC/roster/gZ"
+check "PUB-DEL3 Pat untouched"                          field_is "golfers/gP" linkedUid "${Pp}"
+
+echo "== Scenario 8 (PUB-DEL4): backups older than 30 days are removed; newer ones kept"
+reset; seed
+raw "$(jq -nc --arg o "${DB}/deletionBackups/old" --arg n "${DB}/deletionBackups/new" '[
+  {update:{name:$o,fields:{golferId:{stringValue:"gOld"},expiresAt:{timestampValue:"2020-01-01T00:00:00Z"}}}},
+  {update:{name:$n,fields:{golferId:{stringValue:"gNew"},expiresAt:{timestampValue:"2099-01-01T00:00:00Z"}}}}]')"
+if run_job; then ok "job finished"; else bad "job finished"; fi
+check "PUB-DEL4 expired backup removed"                 missing "deletionBackups/old"
+check "PUB-DEL4 recent backup kept"                     exists "deletionBackups/new"
+
 echo
 echo "RESULT: ${pass} passed, ${fail} failed"
 [[ "${fail}" -eq 0 ]]
