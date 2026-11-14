@@ -4,7 +4,7 @@ name: Deletion safety tests (SEC1-SEC5, DEL1), rules tests (PRIV, ACC, PUB) and 
 # or its tests, or the Firestore rules. Uses the Firebase emulators only; nothing live is touched.
 on:
   push:
-    branches: [ios, v2]
+    branches: [ios, v2, del-public]
     paths:
       - .github/scripts/finish-deletions.sh
       - .github/scripts/save-logs.sh

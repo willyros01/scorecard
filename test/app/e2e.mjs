@@ -1136,6 +1136,55 @@ await check("E31", "a deletion that stops part-way: signed out at once, cannot s
   if (problems.length) throw new Error(problems.join("; "));
 });
 
+/* E30P (Willy, 13 Nov 2026): somebody who plays only in the PUBLIC group
+   deletes their account in the app, the way a golfer does it. The warning
+   says what happens; once the completion job has run, their golfer, name,
+   rounds and handicap are gone for good, with a backup; nobody else is touched. */
+await check("E30P", "Delete my account in the PUBLIC group only: golfer, name and rounds deleted for good (backup kept); others untouched", async () => {
+  const Pi = { email: "pia@example.com", password: "pia-pass-1" };
+  const uid = await signUp(Pi.email, Pi.password);
+  await put("golfers/gPia", { name: "Pia Public", nameKey: "pia-public", linkedUid: uid, groups: ["PUBLIC"], handicapIndex: 18.0 });
+  await put("golferNames/pia-public", { golferId: "gPia", name: "Pia Public" });
+  await put("associations/PUBLIC/roster/gPia", { golferId: "gPia" });
+  await put("associations/PUBLIC/directory/gPia", { golferId: "gPia", displayName: "Pia Public", handicapIndex: 18.0 });
+  await put(`associations/PUBLIC/members/${uid}`, { uid, role: "member", displayName: "Pia Public", golferId: "gPia" });
+  await put(`userGroups/${uid}/groups/PUBLIC`, { assocId: "PUBLIC", name: "PUBLIC" });
+  await put(`accountEmails/${Pi.email}`, { at: "seeded" });
+  await put("associations/PUBLIC/rounds/r-pia1", { id: "r-pia1", golferId: "gPia", assocId: "PUBLIC", date: "2026-11-01", differential: 20.0, gross: 95 });
+  await put("associations/PUBLIC/rounds/r-pia2", { id: "r-pia2", golferId: "gPia", assocId: "PUBLIC", date: "2026-11-08", differential: 19.0, gross: 94 });
+  const pia = await newPage();
+  await pia.goto(APP, { waitUntil: "load" });
+  await waitForText(pia, /Sign in/);
+  await signIn(pia, Pi.email, Pi.password);
+  await waitForText(pia, /PUBLIC|Public/);
+  await tab(pia, "summary");
+  await pia.locator('[data-act="delete-account"]').first().click();
+  await waitForText(pia, /Only in the Public group:[\s\S]*deleted too/);
+  await pia.fill('[name="delete-password"]', Pi.password);
+  await pia.locator('[data-del="go"]').click();
+  const end = Date.now() + 30000;
+  while (Date.now() < end && await signedInNow(pia)) await pia.waitForTimeout(500);
+  if (await signedInNow(pia)) throw new Error("still signed in after Delete my account");
+  const { spawnSync } = await import("node:child_process");
+  const job = spawnSync("bash", [path.resolve(SITE, ".github/scripts/finish-deletions.sh")], { encoding: "utf8", env: { ...process.env,
+    ACCESS_TOKEN: "owner", PROJECT: P, FS_BASE: "http://127.0.0.1:8080/v1", AUTH_BASE: AUTH, MIN_AGE_SECONDS: "0" } });
+  if (job.status !== 0) throw new Error(`the job failed: ${(job.stdout + job.stderr).slice(-400)}`);
+  const problems = [];
+  if (await accountByEmail(Pi.email)) problems.push("the sign-in still exists");
+  if (await getDoc("golfers/gPia")) problems.push("the golfer is still there");
+  if (await getDoc("associations/PUBLIC/roster/gPia")) problems.push("still on the Public list");
+  if (await getDoc("associations/PUBLIC/directory/gPia")) problems.push("still in the Public ranking");
+  if (await getDoc("associations/PUBLIC/rounds/r-pia1") || await getDoc("associations/PUBLIC/rounds/r-pia2")) problems.push("a round is still there");
+  if (await getDoc("golferNames/pia-public")) problems.push("the name is still taken");
+  const backups = (await list("deletionBackups")).filter((b) => b.golferId === "gPia");
+  if (backups.length !== 1) problems.push(`${backups.length} backups instead of 1`);
+  else if (((backups[0].rounds || {}).values || []).length !== 2) problems.push("the backup does not hold both rounds");
+  if (!(await getDoc("golfers/gM"))) problems.push("another Public golfer (Mia) was touched");
+  if (!(await getDoc("associations/PUBLIC/roster/gM"))) problems.push("Mia left the Public list");
+  if (!/PUBLIC .*deleted from the Public group for good \(2 rounds\)/.test(job.stdout)) problems.push(`the job did not report it: ${job.stdout.slice(-300)}`);
+  if (problems.length) throw new Error(problems.join("; "));
+});
+
 /* E32 (Willy, Oct 2): an invitation opened by somebody who is ALREADY in that
    group as that golfer (a deletion that never finished, or a second device).
    Joining must simply open the group, not be refused. */
