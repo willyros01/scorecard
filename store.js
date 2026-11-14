@@ -48,7 +48,15 @@ export const status = () => ({
 });
 const emit = (patch = {}) => { const s = status(); listeners.forEach((fn) => fn(s, patch)); };
 const setStatus = (text, alert = false) => { statusText = text; statusAlert = alert; emit(); };
-const setError = (short, full) => { lastError = { short, full }; emit(); };
+/* While this account is being deleted, or once it is gone, a refusal is
+   expected (it has just left its groups): no error box (13 Nov 2026). */
+let accountGone = false;   /* this account was just deleted here: no more error boxes */
+const setError = (short, full) => {
+  let deleting = false;
+  try { deleting = deletionPendingFlag; } catch { /* not set up yet */ }
+  if (accountGone || (deleting && /refused/i.test(String(short)))) return;
+  lastError = { short, full }; emit();
+};
 const clearError = () => { if (lastError) { lastError = null; emit(); } };
 
 /* ---------------- error messages ---------------- */
@@ -3793,6 +3801,12 @@ export async function deleteMyAccount({ password = "", onStep = () => {} } = {})
     /* Firebase has confirmed the account is gone. Clear this device. */
     clearDeletionNote();
     deletionPendingFlag = false;
+    /* 13 Nov 2026 (found on the simulators): while the account was leaving
+       its groups, the screens still listening to them were refused, and the
+       red "Firestore refused the write" box stayed up after "Your account has
+       been deleted". Those refusals are expected; nothing more is shown. */
+    accountGone = true;
+    clearError();
     try {
       Object.keys(localStorage).filter((k) => k.startsWith("golf:v2:")).forEach((k) => localStorage.removeItem(k));
     } catch {}
