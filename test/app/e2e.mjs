@@ -1165,6 +1165,8 @@ await check("E30P", "Delete my account in the PUBLIC group only: golfer, name an
   const end = Date.now() + 30000;
   while (Date.now() < end && await signedInNow(pia)) await pia.waitForTimeout(500);
   if (await signedInNow(pia)) throw new Error("still signed in after Delete my account");
+  await waitForText(pia, /Your account has been deleted/, 20000);
+  if (/refused/i.test(await text(pia))) throw new Error("an error box shows after the deletion");
   const { spawnSync } = await import("node:child_process");
   const job = spawnSync("bash", [path.resolve(SITE, ".github/scripts/finish-deletions.sh")], { encoding: "utf8", env: { ...process.env,
     ACCESS_TOKEN: "owner", PROJECT: P, FS_BASE: "http://127.0.0.1:8080/v1", AUTH_BASE: AUTH, MIN_AGE_SECONDS: "0" } });
