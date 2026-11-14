@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+# The Scorecard — RESTORE A DELETED PUBLIC GOLFER (rgf.txt), prepared by Claude, Nov 13, 2026
+# When somebody deletes their account and plays only in the Public group, their
+# golfer, name, rounds and handicap are deleted, and a backup is kept 30 days.
+# This script:
+#   1. lists the golfers deleted in the last 30 days (name, date, rounds);
+#   2. asks you for the name to bring back, then asks you to type yes;
+#   3. puts the golfer, name, rounds and Public list place back, exactly as they
+#      were, in ONE all-or-nothing save, and removes that backup.
+# Their account (email and password) cannot come back: they sign up again and
+# you invite them to their restored golfer.
+#
+# Run in Google Cloud Shell:   bash rgf.txt
+
+# ---------------------------------------------------------------------------
+# THE GOOGLE PROJECT — defined first, before any command runs.
+# ---------------------------------------------------------------------------
+PROJECT_ID="scorecard-f41b8"
+unset CLOUDSDK_CORE_PROJECT GOOGLE_CLOUD_PROJECT
+
+set -Eeuo pipefail
+echo "Switching Cloud Shell to project ${PROJECT_ID} ..."
+gcloud config set project "${PROJECT_ID}" --quiet >/dev/null 2>&1 || { echo "ERROR: could not switch to project ${PROJECT_ID}. Nothing changed." >&2; exit 1; }
+CURRENT_PROJECT="$(gcloud config get-value project 2>/dev/null)"
+[[ "${CURRENT_PROJECT}" == "${PROJECT_ID}" ]] || { echo "ERROR: Cloud Shell is on '${CURRENT_PROJECT}', not ${PROJECT_ID}. Nothing changed." >&2; exit 1; }
+echo "OK: Cloud Shell is now on project ${CURRENT_PROJECT}."
+export CLOUDSDK_CORE_PROJECT="${PROJECT_ID}" GOOGLE_CLOUD_PROJECT="${PROJECT_ID}"
+
+DOCS="projects/${RGF_DB_PROJECT:-${PROJECT_ID}}/databases/(default)/documents"   # override: tests only
+FS="${RGF_FS:-https://firestore.googleapis.com/v1}"
+TMP="$(mktemp -d)"; trap 'rm -rf "${TMP}"' EXIT
+box(){ echo; echo "============================================================"; for l in "$@"; do echo "  $l"; done; echo "============================================================"; }
+for c in gcloud curl jq; do command -v "$c" >/dev/null || { echo "ERROR: $c is unavailable. Run this in Google Cloud Shell." >&2; exit 1; }; done
+TOKEN="$(gcloud auth print-access-token)"
+api(){ # METHOD URL [BODYFILE] -> answer in ${TMP}/a.json
+  local code
+  code="$(curl -g --silent --show-error -o "${TMP}/a.json" -w '%{http_code}' -X "$1" -H "Authorization: Bearer ${TOKEN}" \
+    -H 'Content-Type: application/json' ${3:+--data-binary "@$3"} "$2")" || code="000"
+  [[ "${code}" == 2* ]]
+}
+
+# 1. The backups.
+api GET "${FS}/${DOCS}/deletionBackups?pageSize=300" || { box "STOPPED: the backups could not be read. Nothing changed." "Send a screenshot to Claude."; exit 1; }
+jq -c '[.documents[]? | {id:(.name|sub(".*/";"")), name:(.fields.golfer.mapValue.fields.data.mapValue.fields.name.stringValue // "Unnamed"),
+        when:(.fields.deletedAt.timestampValue // "" | .[0:10]), rounds:((.fields.rounds.arrayValue.values // [])|length), doc:.}]' "${TMP}/a.json" > "${TMP}/list.json"
+N="$(jq 'length' "${TMP}/list.json")"
+if [[ "${N}" -eq 0 ]]; then box "NO DELETED GOLFERS IN THE LAST 30 DAYS." "Nothing to restore. Nothing changed."; exit 0; fi
+echo
+echo "  Golfers deleted in the last 30 days:"
+jq -r '.[] | "    \(.name)   (deleted \(.when), \(.rounds) rounds)"' "${TMP}/list.json"
+echo
+
+# 2. Which one, then yes.
+read -r -p "Type the golfer's name exactly as shown: " WHO
+MATCHES="$(jq --arg w "${WHO}" '[.[] | select(.name == $w)] | length' "${TMP}/list.json")"
+[[ "${MATCHES}" -ge 1 ]] || { box "STOPPED: no deleted golfer is called '${WHO}'." "Nothing changed. Run  bash rgf.txt  again."; exit 1; }
+jq -c --arg w "${WHO}" '[.[] | select(.name == $w)] | sort_by(.when) | last' "${TMP}/list.json" > "${TMP}/one.json"
+echo "  Restoring: ${WHO}, deleted $(jq -r .when "${TMP}/one.json"), $(jq -r .rounds "${TMP}/one.json") rounds."
+read -r -p "Type yes to bring this golfer back: " ANSWER
+[[ "${ANSWER}" == "yes" ]] || { box "STOPPED. Nothing was changed."; exit 1; }
+
+# 3. One all-or-nothing save: every record created again (refused if any
+#    already exists, for example the name is taken again), the backup removed.
+jq --arg docs "${DOCS}" '
+  .doc as $d |
+  def back(x): if x == null or (x|has("nullValue")) then []
+    else [{update:{name:($docs + "/" + x.mapValue.fields.path.stringValue), fields:(x.mapValue.fields.data.mapValue.fields // {})},
+           currentDocument:{exists:false}}] end;
+  {writes: ( back($d.fields.golfer) + back($d.fields.roster) + back($d.fields.directory)
+           + back($d.fields.invitation) + back($d.fields.nameClaim)
+           + ([ ($d.fields.rounds.arrayValue.values // [])[] ] | map(back(.)) | add // [])
+           + [{delete:$d.name}] )}' "${TMP}/one.json" > "${TMP}/commit.json"
+if api POST "${FS}/${DOCS}:commit" "${TMP}/commit.json"; then
+  box "RESTORED: ${WHO}" \
+    "The golfer, name, handicap and $(jq -r .rounds "${TMP}/one.json") rounds are back in the Public group." \
+    "The backup was removed (it is no longer needed)." \
+    "To let them sign in again: they sign up, and you invite them to this golfer."
+else
+  box "STOPPED: nothing was restored. Nothing changed." \
+    "Most likely the name '${WHO}' is in use again by another golfer." \
+    "Google said: $(jq -r '.error.message // "no detail"' "${TMP}/a.json" | head -c 150)" \
+    "Send a screenshot to Claude."
+  exit 1
+fi

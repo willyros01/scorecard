@@ -4450,7 +4450,9 @@ function openDeleteAccount({ resume = false, problem = "", reportable = false } 
     ${problem ? `<div class="note warn">${esc(problem)}</div>` : ""}
     ${resume
       ? `<p class="lead">The deletion you started didn't finish. You are still signed in. Tap Try again to finish it — if it keeps failing, it finishes automatically within a day.</p>`
-      : `<p class="lead">Your email and sign-in are deleted and you leave every group. Your golfer name, rounds and handicap stay with the group so its history and handicaps stay correct, and an admin can keep entering your scores. This can't be undone.</p>`}
+      : `<p class="lead">Your email and sign-in are deleted and you leave every group. This can't be undone.</p>
+        <p class="hint"><b>Only in the Public group:</b> your golfer name, rounds and handicap are deleted too.</p>
+        <p class="hint"><b>Also in a club group:</b> you are taken off the Public group; your golfer name, rounds and handicap stay with your club, so its history and handicaps stay correct.</p>`}
     ${!resume && blockers.abandoned ? `<div class="note warn"><b>${blockers.abandoned} earlier change${blockers.abandoned === 1 ? "" : "s"} could not be saved.</b> They will never upload. Dismiss them to continue.
       <div class="inline-actions stacked"><button class="btn ghost" data-del="dismiss">Dismiss them</button></div></div>` : ""}
     ${needsPassword ? `<label class="lbl">Your Scorecard password</label>

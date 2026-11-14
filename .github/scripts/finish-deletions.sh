@@ -18,7 +18,8 @@
 #      if the golfer hasn't changed since it was read;
 #   6. the request is deleted only after Firebase Authentication confirms the
 #      account is gone.
-# Nothing written inside the request is ever read, except to update its status.
+# Nothing written inside the request is trusted. Its stage and golfer list are
+# read only as hints for the Public group (5b), and every hint is proven first.
 #
 # Settings (environment):
 #   ACCESS_TOKEN      required. A Google access token (or "owner" for the emulators).
@@ -116,6 +117,110 @@ set_status(){ # uid status
 }
 
 # ---------------------------------------------------------------------------
+# The Public group (Willy, 13 Nov 2026).
+PUBLIC="PUBLIC"
+BACKUP_DAYS=30
+
+# One golfer's rounds in one group (a query, one JSON array).
+rounds_of(){ # groupId golferId
+  jq -n --arg g "$2" '{structuredQuery:{from:[{collectionId:"rounds"}],
+      where:{fieldFilter:{field:{fieldPath:"golferId"},op:"EQUAL",value:{stringValue:$g}}}}}' > "${WORK}/rq.json"
+  call POST "${FS_BASE}/${DB}/associations/$1:runQuery" "${WORK}/rq.json" | jq -c '[ .[] | .document? // empty ]'
+}
+
+# One document as JSON, or "null" if it does not exist. Stops on a failed read.
+read_doc(){ # path under ${DB}
+  local code
+  code="$(curl -g -sS -o "${WORK}/doc.json" -w '%{http_code}' -H "Authorization: Bearer ${ACCESS_TOKEN}" "${FS_BASE}/${DB}/$1")"
+  case "${code}" in
+    200) cat "${WORK}/doc.json" ;;
+    404) echo null ;;
+    *) log "ERROR: reading $1 failed (HTTP ${code})"; exit 3 ;;
+  esac
+}
+
+# A golfer of a deleted account, in the Public group:
+#   - plays ONLY in the Public group: the golfer, its name, its Public rounds,
+#     its place on the list and its name claim are deleted for good, in one
+#     commit together with a backup (deletionBackups/, kept 30 days; no app
+#     can read it; restored with rgf.txt);
+#   - also plays in another group: only taken off the Public group's list.
+#     The golfer and every round (the Public ones too) stay.
+public_cleanup(){ # uid golferId
+  local uid="$1" g="$2" m; m="$(mask "${uid}")"
+  doc_exists "associations/${PUBLIC}/roster/${g}" || return 0
+  local gid other="" there
+  while IFS= read -r gid; do
+    [[ -n "${gid}" && "${gid}" != "${PUBLIC}" ]] || continue
+    if doc_exists "associations/${gid}/roster/${g}"; then other="on its list"; break; fi
+    there="$(rounds_of "${gid}" "${g}")"          # a failed read stops the job here
+    if jq -e 'length > 0' >/dev/null <<<"${there}"; then other="rounds there"; break; fi
+  done < <(jq -r '.name | sub(".*/";"")' "${WORK}/assoc.jsonl")
+
+  if [[ -n "${other}" ]]; then
+    commit "$(jq -nc --arg r "${DB}/associations/${PUBLIC}/roster/${g}" --arg d "${DB}/associations/${PUBLIC}/directory/${g}" \
+      '[{delete:$r},{delete:$d}]')"
+    log "PUBLIC ${m}: golfer $(mask "${g}") taken off the Public group's list; golfer and rounds kept (also plays in another group)."
+    return 0
+  fi
+
+  local golfer roster directory invitation rounds nk claim now expires
+  golfer="$(read_doc "golfers/${g}")"
+  [[ "${golfer}" != null ]] || return 0
+  roster="$(read_doc "associations/${PUBLIC}/roster/${g}")"
+  directory="$(read_doc "associations/${PUBLIC}/directory/${g}")"
+  invitation="$(read_doc "associations/${PUBLIC}/invitations/${g}")"
+  rounds="$(rounds_of "${PUBLIC}" "${g}")"
+  nk="$(jq -r '.fields.nameKey.stringValue // empty' <<<"${golfer}")"
+  claim=null
+  if [[ -n "${nk}" && "${nk}" != */* ]]; then
+    claim="$(read_doc "golferNames/${nk}")"
+    [[ "$(jq -r '.fields.golferId.stringValue // empty' <<<"${claim}")" == "${g}" ]] || claim=null
+  fi
+  if [[ "$(jq 'length' <<<"${rounds}")" -gt 450 ]]; then
+    log "PUBLIC ${m}: golfer $(mask "${g}") has more than 450 Public rounds; kept, for a person to look at."
+    return 0
+  fi
+  now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  expires="$(jq -rn --argjson d "${BACKUP_DAYS}" 'now + $d * 86400 | floor | todate')"   # works on Linux and macOS
+  # The backup and every delete in ONE commit: all of it happens, or none.
+  # Each delete requires the document to be unchanged since it was read.
+  jq -nc --arg b "${DB}/deletionBackups/${g}-$(date -u +%s)" --arg g "${g}" --arg now "${now}" --arg exp "${expires}" \
+     --argjson golfer "${golfer}" --argjson roster "${roster}" --argjson dir "${directory}" \
+     --argjson inv "${invitation}" --argjson claim "${claim}" --argjson rounds "${rounds}" '
+    def keep(d): if d == null then {nullValue:null}
+      else {mapValue:{fields:{path:{stringValue:(d.name|sub(".*/documents/";""))},
+                              data:{mapValue:{fields:(d.fields // {})}}}}} end;
+    def gone(d): if d == null then [] else [{delete:d.name,currentDocument:{updateTime:d.updateTime}}] end;
+    [ {update:{name:$b,fields:{
+         golferId:{stringValue:$g}, groupId:{stringValue:"PUBLIC"},
+         deletedAt:{timestampValue:$now}, expiresAt:{timestampValue:$exp},
+         golfer:keep($golfer), roster:keep($roster), directory:keep($dir),
+         invitation:keep($inv), nameClaim:keep($claim),
+         rounds:{arrayValue:{values:[ $rounds[] | keep(.) ]}} }},
+       currentDocument:{exists:false}} ]
+    + gone($golfer) + gone($roster) + gone($dir) + gone($inv) + gone($claim)
+    + [ $rounds[] | {delete:.name,currentDocument:{updateTime:.updateTime}} ]' > "${WORK}/pub.json"
+  if [[ "$(wc -c < "${WORK}/pub.json")" -gt 900000 ]]; then
+    log "PUBLIC ${m}: golfer $(mask "${g}") is too large to back up in one record; kept, for a person to look at."
+    return 0
+  fi
+  commit "$(cat "${WORK}/pub.json")"
+  log "PUBLIC ${m}: golfer $(mask "${g}") deleted from the Public group for good ($(jq 'length' <<<"${rounds}") rounds); backup kept ${BACKUP_DAYS} days."
+}
+
+# Backups older than 30 days are removed for good.
+purge_backups(){
+  local now; now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  list_docs deletionBackups > "${WORK}/backups.jsonl"
+  local old; old="$(jq -sc --arg now "${now}" '[ .[] | select((.fields.expiresAt.timestampValue // "") < $now) | {delete:.name} ]' "${WORK}/backups.jsonl")"
+  if [[ "$(jq 'length' <<<"${old}")" -gt 0 ]]; then
+    commit "${old}"
+    log "Removed $(jq 'length' <<<"${old}") Public backup(s) older than ${BACKUP_DAYS} days."
+  fi
+}
+
+# ---------------------------------------------------------------------------
 process(){ # uid   (runs in a subshell; exit codes: 0 done, 10 blocked, 11 not confirmed)
   local uid="$1" m; m="$(mask "${uid}")"
 
@@ -156,7 +261,8 @@ process(){ # uid   (runs in a subshell; exit codes: 0 done, 10 blocked, 11 not c
   commit "$(jq -sc '[ .[] | {delete:.name} ]' "${WORK}/ptr.jsonl")"
 
   # 5. Golfer links: found by query, cleared only if still linked to this account
-  # and unchanged since read. The golfer, its name, rounds and handicap stay (D1).
+  # and unchanged since read. The golfer, its name, rounds and handicap stay (D1),
+  # except in the Public group (5b below).
   jq -n --arg u "${uid}" '{structuredQuery:{from:[{collectionId:"golfers"}],
       where:{fieldFilter:{field:{fieldPath:"linkedUid"},op:"EQUAL",value:{stringValue:$u}}}}}' > "${WORK}/q.json"
   call POST "${FS_BASE}/${DB}:runQuery" "${WORK}/q.json" > "${WORK}/golfers.json"
@@ -165,6 +271,34 @@ process(){ # uid   (runs in a subshell; exit codes: 0 done, 10 blocked, 11 not c
       | {update:{name:.name,fields:{linkedUid:{nullValue:null}}},
          updateMask:{fieldPaths:["linkedUid"]},
          currentDocument:{updateTime:.updateTime}} ]' "${WORK}/golfers.json")"
+
+  # 5b. The Public group (Willy, 13 Nov 2026): whoever deletes their account
+  # is deleted from the Public group for good. Which golfers were this
+  # account's is proven, never taken from the request:
+  #   - the ones this job has just unlinked (found by linkedUid above), or
+  #   - the ones the app unlinked: the app unlinks the golfer and sets the
+  #     request to "auth-deleting" in ONE commit, so both carry the very same
+  #     update time. The rules allow a deleting account no other golfer change
+  #     (and refuse "auth-deleting" at the moment a request is created), so a
+  #     golfer with that update time, unlinked, can only be its own. The
+  #     request's golfer list is used only as the names to look at.
+  local mine
+  mine="$(jq -r '.[] | .document? // empty | .name | sub(".*/";"")' "${WORK}/golfers.json")"
+  if [[ "${REQ_STAGE}" == "auth-deleting" && -n "${REQ_UPDATED}" ]]; then
+    local cand gj
+    while IFS= read -r cand; do
+      [[ "${cand}" =~ ^[A-Za-z0-9_-]{1,128}$ ]] || continue
+      gj="$(curl -g -sS -H "Authorization: Bearer ${ACCESS_TOKEN}" "${FS_BASE}/${DB}/golfers/${cand}")"
+      if [[ "$(jq -r '.updateTime // ""' <<<"${gj}")" == "${REQ_UPDATED}" \
+         && "$(jq -r '.fields.linkedUid | if . == null or has("nullValue") then "none" else "linked" end' <<<"${gj}")" == "none" ]]; then
+        mine="${mine}"$'\n'"${cand}"
+      fi
+    done < <(jq -r '.fields.golferIds.arrayValue.values[]?.stringValue // empty' <<<"${REQ_JSON}")
+  fi
+  local g
+  for g in $(printf '%s\n' "${mine}" | grep -E '^[A-Za-z0-9_-]{1,128}$' | sort -u); do
+    public_cleanup "${uid}" "${g}"
+  done
 
   # Version 1 documents stored under the account's own path, if any.
   printf '{}' > "${WORK}/empty.json"
@@ -199,6 +333,7 @@ process(){ # uid   (runs in a subshell; exit codes: 0 done, 10 blocked, 11 not c
 
 # ---------------------------------------------------------------------------
 log "Deletion completion job for ${PROJECT} (requests older than ${MIN_AGE_SECONDS}s)."
+purge_backups
 list_docs accountDeletions > "${WORK}/requests.jsonl"
 total="$(wc -l < "${WORK}/requests.jsonl")"
 log "Requests found: ${total}"
@@ -213,6 +348,9 @@ while IFS= read -r req; do
   fi
   created="$(jq -r '.createTime | sub("\\.[0-9]+Z$";"Z") | fromdateiso8601' <<<"${req}")"   # server-set, not client-set
   if (( now - created < MIN_AGE_SECONDS )); then young_n=$((young_n+1)); continue; fi
+  REQ_JSON="${req}"
+  REQ_STAGE="$(jq -r '.fields.stage.stringValue // ""' <<<"${req}")"
+  REQ_UPDATED="$(jq -r '.updateTime // ""' <<<"${req}")"
   set +e; ( set -Eeuo pipefail; process "${uid}" ); rc=$?; set -e
   case "${rc}" in
     0) done_n=$((done_n+1)) ;;

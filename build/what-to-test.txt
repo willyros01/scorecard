@@ -1,7 +1,8 @@
-The Scorecard 2.31.5 (second build) — the app's messages now name the right email titles
+The Scorecard 2.31.5 (third build) — right email titles; Delete my account in the Public group deletes for good
 
 1. Forgot password: on the sign-in screen, tap Forgot the password and send it to your own address. The green message on screen names the email Choose a new password for The Scorecard (no longer Sign in to The Scorecard). The email comes from The Scorecard (thescorecard.marker@gmail.com), titled Choose a new password for The Scorecard. Tap its button: The Scorecard opens with no Firebase page in between, and lets you choose a new password.
 2. Apply: the screens after Send my application name the email Confirm your email for The Scorecard (Auto) or Welcome to The Scorecard (after approval), and no longer say it comes from Firebase.
 2a. Approval: approve a test applicant. Their email is titled Welcome to The Scorecard and opens the app the same way.
 3. Cockpit: your own row shows your golfer name, never your email. The small cnt.txt note under the list is gone.
 4. The camera and scorecard photo reading from 2.31.4 still work (Manage > Add a course > Take a photo).
+5. Delete my account (Summary page, bottom): the box now says what happens. Only in the Public group: golfer name, rounds and handicap deleted too. Also in a club: taken off the Public group; everything stays with the club. (Simulator tested – pass, with a test account.)
