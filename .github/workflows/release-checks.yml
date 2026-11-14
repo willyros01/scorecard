@@ -32,7 +32,6 @@ jobs:
           node test/review/email-helper-regressions.mjs
           node test/review/message-regressions.mjs
           node test/review/deletion-check-regressions.mjs
-          node test/review/email-helper-regressions.mjs
           node test/review/query-indexes.mjs
           node test/review/query-index-regressions.mjs
           python3 test/review/deployment-regressions.py
