@@ -984,6 +984,13 @@ async function submitRequestHere() {
   }
 }
 
+/* 2.31.5: the title of the email that was actually sent (the helper's own
+   wording, or Firebase's if the helper could not send it). */
+function resetSentMsg(address, how) {
+  const title = how === "firebase" ? "Sign in to The Scorecard" : "Choose a new password for The Scorecard";
+  return `Link sent to ${address}. Open the email "${title}" on this phone and tap its button: The Scorecard opens and asks for your new password.`;
+}
+
 function screenApply() {
   const auto = !!(applySettings && applySettings.mode === "auto");
   if (applySentTo && applySentAuto) {
@@ -993,7 +1000,7 @@ function screenApply() {
         <h2 class="panel-title">Check your email</h2>
         <p class="lead">Thank you. A link to finish joining has gone to <b>${esc(applySentTo)}</b>.</p>
         <p class="hint">Open that email on this phone or computer and tap the link. It confirms your email; then you create your password and you are in the public group, once the last checks pass. Otherwise your application waits for a person to look at it.</p>
-        <p class="hint">The email comes from Firebase, which The Scorecard uses for accounts. It sometimes lands in junk mail.</p>
+        <p class="hint">The email comes from The Scorecard. It sometimes lands in junk mail.</p>
         <div class="inline-actions stacked"><button class="btn ghost" data-act="hide-apply">Back to Sign in</button></div>
       </div>
       ${versionBlock()}
@@ -1005,8 +1012,8 @@ function screenApply() {
       <div class="card padded">
         <h2 class="panel-title">Application sent</h2>
         <p class="lead">Thank you. Every application is read by a person, so it can take a day or two.</p>
-        <p class="hint">When it is approved, an email titled <b>Sign in to The Scorecard</b> goes to <b>${esc(applySentTo)}</b>. Tap the link in it and create your password — one time only. Then you are in.</p>
-        <p class="hint">The email comes from Firebase, which The Scorecard uses for accounts. It sometimes lands in junk mail.</p>
+        <p class="hint">When it is approved, an email titled <b>Welcome to The Scorecard</b> goes to <b>${esc(applySentTo)}</b>. Tap the link in it and create your password — one time only. Then you are in.</p>
+        <p class="hint">The email comes from The Scorecard. It sometimes lands in junk mail.</p>
         <div class="inline-actions stacked"><button class="btn ghost" data-act="hide-apply">Back to Sign in</button></div>
       </div>
       ${versionBlock()}
@@ -1029,14 +1036,14 @@ function screenApply() {
       <div class="note tip">Other members of the public group see your <b>full name</b> and your <b>handicap index</b>, and nothing else. Your rounds stay private.</div>
       ${auto ? stepsBlock([
         "You send this application.",
-        "You get an email with a link. It comes from Firebase, which The Scorecard uses for accounts, and it sometimes lands in junk mail.",
+        "You get an email titled Confirm your email for The Scorecard. It sometimes lands in junk mail.",
         "You tap the link, which confirms your email, and create your password.",
         "If the automatic checks pass, you are in the public group straight away. If not, a person reviews your application, usually within one or two days.",
         "You can start entering your rounds.",
       ]) : stepsBlock([
         "You send this application.",
         "A person reviews it, usually within one or two days.",
-        "If it is approved, you get an email titled Sign in to The Scorecard. It comes from Firebase, which The Scorecard uses for accounts, and it sometimes lands in junk mail.",
+        "If it is approved, you get an email titled Welcome to The Scorecard. It sometimes lands in junk mail.",
         "You tap the link in it and create your password, one time only.",
         "You are in the public group and can start entering your rounds.",
       ])}
@@ -5641,7 +5648,7 @@ view.addEventListener("click", async (e) => {
       const address = ((view.querySelector('[name="email"]') || {}).value || authForm.email).trim();
       if (!address) { showMessage("Type your email address first"); return; }
       busy("Sending the reset link");
-      try { await db.sendPasswordReset(address); flashMsg(`Link sent to ${address}. Open the email "Sign in to The Scorecard" on this phone and tap the link: The Scorecard opens and asks for your new password.`); }
+      try { const how = await db.sendPasswordReset(address); flashMsg(resetSentMsg(address, how)); }
       catch { showMessage("Couldn't send the reset link. Check the email address."); }
       finally { idleAll(); }
       return render();
@@ -6711,9 +6718,9 @@ sheetEl.addEventListener("click", async (e) => {
     resetting.disabled = true;
     resetting.textContent = "Sending…";
     try {
-      await db.sendPasswordReset(address);
+      const how = await db.sendPasswordReset(address);
       sheetEl.hidden = true;
-      flashMsg(`Link sent to ${address}. Open the email "Sign in to The Scorecard" on this phone and tap the link: The Scorecard opens and asks for your new password.`);
+      flashMsg(resetSentMsg(address, how));
     } catch {
       resetting.disabled = false;
       resetting.textContent = "Reset my password";

@@ -1194,7 +1194,7 @@ export async function sendPasswordReset(email) {
   if (!fb) throw new Error("Firebase has not loaded yet.");
   const address = String(email || "").trim();
   const settings = signInLinkSettings(address);
-  await sendSignInEmail(address, { ...settings, url: `${settings.url}&reset=1` });
+  return sendSignInEmail(address, { ...settings, url: `${settings.url}&reset=1` });
 }
 /* A value from the link. With Firebase's action URL set to the Cuberoot join
    page (Batch 2), an email link arrives as ?mode=signIn&oobCode=…&continueUrl=…,
@@ -1865,10 +1865,11 @@ async function sendSignInEmail(address, settings) {
       });
       if (timer) clearTimeout(timer);
       const data = await res.json().catch(() => ({}));
-      if (data && data.sent === true) return;
+      if (data && data.sent === true) return "helper";
     } catch { /* Firebase sends it below */ }
   }
   await fb.mod.auth.sendSignInLinkToEmail(fb.auth, address, settings);
+  return "firebase";
 }
 export async function sendApplicationLink(email) {
   await sendSignInEmail(String(email || "").trim(), signInLinkSettings(email));
