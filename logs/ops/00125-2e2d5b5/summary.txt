@@ -1,9 +1,9 @@
 kind:    ops
 result:  failure
-branch:  v2
-commit:  4016eae34b4b873be95f5c448484cba5aec0d0e5
-run:     88 (id 39806497156)
-time:    2026-10-22T15:46:54Z
+branch:  del-public
+commit:  2e2d5b55be477585ff329fa2012eed3a8880804a
+run:     125 (id 43541819579)
+time:    2026-11-14T01:46:39Z
 
 --- last lines of ops-tests.log ---
 true
