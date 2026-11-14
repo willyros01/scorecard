@@ -1,6 +1,3 @@
-02:40:29 Deletion completion job for scorecard-f41b8 (requests older than 300s).
-02:40:29 Requests found: 2
-02:40:36 PUBLIC 7hep…: golfer mwfq… deleted from the Public group for good (0 rounds); backup kept 30 days.
-02:40:38 DONE 7hep…: account confirmed gone; request removed.
-02:40:43 DONE FbDA…: account confirmed gone; request removed.
-02:40:43 Summary: done 2, blocked 0, waiting for the app 0, failed 0.
+03:25:47 Deletion completion job for scorecard-f41b8 (requests older than 300s).
+03:25:48 Requests found: 1
+03:25:48 Summary: done 0, blocked 0, waiting for the app 1, failed 0.
