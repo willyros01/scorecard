@@ -1,0 +1,48 @@
+kind:    ops
+result:  cancelled
+branch:  del-public
+commit:  5a4f5cd32689166968677314a9b5188d22485dbe
+run:     123 (id 43541573808)
+time:    2026-11-14T01:37:41Z
+
+--- last lines of ops-tests.log ---
+PASS  GRQ4 an ordinary account cannot decline
+PASS  GRQ4 the group creator declines a pending request
+PASS  GRQ4 a declined request cannot be claimed
+== GRQ5 deleting
+PASS  GRQ5 an ordinary account cannot delete a request
+PASS  GRQ5 the group creator deletes a request
+
+RESULT: 31 passed, 0 failed
+
+== CK1 the group creator reads every group, membership and round (read only)
+PASS  CK1 Willy reads a group he is not in
+PASS  CK1 Willy lists every group
+PASS  CK1 Willy lists every membership
+PASS  CK1 Willy lists every round
+PASS  CK1 an ordinary account cannot list every group
+PASS  CK1 an ordinary account cannot list every membership
+PASS  CK1 an ordinary account cannot list every round
+PASS  CK1 Willy lists every group's directory (golfer names, 2.31.2)
+PASS  CK1 an ordinary account cannot list every group's directory
+PASS  CK1 Willy still cannot change a group he does not own
+== CK2 last seen: your own membership, that field only, the server's time
+PASS  CK2 a member stamps their own last seen
+PASS  CK2 nobody stamps another member's last seen
+PASS  CK2 last seen must be the server's time
+PASS  CK2 nothing else changes with it
+== CK3 the applications switch
+PASS  CK3 an ordinary account cannot change it
+PASS  CK3 a reviewer turns it to Auto
+PASS  CK3 Willy turns it back to Manual
+PASS  CK3 anyone, signed out, reads the switch
+PASS  CK3 only Manual or Auto
+PASS  CK3 the daily limit is 1 to 500
+PASS  CK3 other settings documents are closed
+== CK4 block lists: reviewers only
+PASS  CK4 a reviewer blocks a domain
+PASS  CK4 a reviewer blocks a name
+PASS  CK4 an ordinary account cannot add to it
+PASS  CK4 an ordinary account cannot read it
+PASS  CK4 a reviewer reads it
+== CK5 account emails
