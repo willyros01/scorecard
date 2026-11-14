@@ -1194,7 +1194,7 @@ export async function sendPasswordReset(email) {
   if (!fb) throw new Error("Firebase has not loaded yet.");
   const address = String(email || "").trim();
   const settings = signInLinkSettings(address);
-  await fb.mod.auth.sendSignInLinkToEmail(fb.auth, address, { ...settings, url: `${settings.url}&reset=1` });
+  await sendSignInEmail(address, { ...settings, url: `${settings.url}&reset=1` });
 }
 /* A value from the link. With Firebase's action URL set to the Cuberoot join
    page (Batch 2), an email link arrives as ?mode=signIn&oobCode=…&continueUrl=…,
@@ -1842,14 +1842,42 @@ function signInLinkSettings(email, approved = false) {
   const url = EMULATORS ? `${location.protocol}//${location.host}${location.pathname}?emulators=1&${tail}` : `${platform.joinBase()}?${tail}`;
   return { url, handleCodeInApp: true };
 }
+/* 2.31.5 (Willy, 13 Nov 2026): Google locked the setting that points
+   Firebase's email links at the join page, so the sign-in emails are sent by
+   The Marker's Cloudflare helper (/send-link), from the apps' own Gmail, with
+   a link straight to the join page and our own wording. If the helper cannot
+   be reached or does not confirm, Firebase sends its own email as before:
+   nobody is ever left without an email. */
+const HELPER_URL = "https://marker.willyros01.workers.dev";
+async function helperBase() {
+  /* markerConfig/public needs a sign-in; an applicant has none yet. */
+  try { return await markerWorkerUrl(); } catch { return HELPER_URL; }
+}
+async function sendSignInEmail(address, settings) {
+  if (!EMULATORS && !(typeof navigator !== "undefined" && navigator.onLine === false)) {
+    try {
+      const base = await helperBase();
+      const ctl = typeof AbortController === "function" ? new AbortController() : null;
+      const timer = ctl ? setTimeout(() => ctl.abort(), 20000) : null;
+      const res = await fetch(base + "/send-link", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: address, url: settings.url }), ...(ctl ? { signal: ctl.signal } : {}),
+      });
+      if (timer) clearTimeout(timer);
+      const data = await res.json().catch(() => ({}));
+      if (data && data.sent === true) return;
+    } catch { /* Firebase sends it below */ }
+  }
+  await fb.mod.auth.sendSignInLinkToEmail(fb.auth, address, settings);
+}
 export async function sendApplicationLink(email) {
-  await fb.mod.auth.sendSignInLinkToEmail(fb.auth, String(email || "").trim(), signInLinkSettings(email));
+  await sendSignInEmail(String(email || "").trim(), signInLinkSettings(email));
   try { localStorage.setItem(APPLY_EMAIL_KEY, String(email || "").trim()); } catch {}
 }
 /* E1: an approved applicant gets Firebase's "Sign in to The Scorecard" link
    (the same link Auto mode uses), never the "reset your password" email. */
 export async function sendApprovalLink(email) {
-  await fb.mod.auth.sendSignInLinkToEmail(fb.auth, String(email || "").trim(), signInLinkSettings(email, true));
+  await sendSignInEmail(String(email || "").trim(), signInLinkSettings(email, true));
 }
 /* E3: "Send me a new link" — for an approved applicant whose link expired, was
    used, or went to junk mail. Firebase sends it to that address only. */
