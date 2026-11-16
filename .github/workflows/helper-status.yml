@@ -1,0 +1,69 @@
+name: Helper status (every 6 hours)
+
+# Read only. Reads The Marker helper's public status page (no sign-in, no names)
+# and records it, so the daily Scorecard check can read the answer from GitHub.
+# The run goes red when account deletions or the daily clean-up are not OK.
+# ?view=1 always answers 200 (the plain address answers 503 on a bad day, for
+# the cron-job.org watchdog). Changes nothing anywhere.
+on:
+  schedule:
+    - cron: "17 3,9,15,21 * * *"   # every 6 hours, off the hour
+  workflow_dispatch:
+  # Once whenever this file changes on main (that is how the first run happens).
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/helper-status.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: helper-status
+  cancel-in-progress: false
+
+jobs:
+  status:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Read the helper status page
+        run: |
+          url="https://marker.willyros01.workers.dev/cleanup-status?view=1"
+          code=000
+          for try in 1 2 3; do
+            code=$(curl -s -o s.json -w '%{http_code}' --max-time 30 "$url" || echo 000)
+            [ "$code" = "200" ] && jq -e . s.json >/dev/null 2>&1 && break
+            echo "Try $try: HTTP $code"; sleep 20
+          done
+          echo "HTTP $code"
+          {
+            echo "### Helper status"
+            echo "HTTP $code"
+            echo '```'
+            jq . s.json 2>/dev/null || head -c 2000 s.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$code" != "200" ] || ! jq -e . s.json >/dev/null 2>&1; then
+            echo "::error title=Status page not readable::HTTP $code from $url"
+            exit 1
+          fi
+          jq . s.json
+
+      - name: Check deletions and daily clean-up
+        run: |
+          ok=$(jq -r '.ok' s.json)
+          why=$(jq -r '.why // ""' s.json)
+          dok=$(jq -r '.deletions.ok' s.json)
+          dmin=$(jq -r '.deletions.minutesAgo' s.json)
+          dfail=$(jq -r '.deletions.failedLastRun // 0' s.json)
+          dwait=$(jq -r '.deletions.waiting // 0' s.json)
+          echo "ok=$ok deletions.ok=$dok minutesAgo=$dmin failedLastRun=$dfail waiting=$dwait"
+          bad=0
+          if [ "$dok" != "true" ]; then
+            echo "::error title=Deletions not running::the deletion job last ran $dmin minutes ago"; bad=1; fi
+          if [ "$dfail" -gt 0 ] 2>/dev/null; then
+            echo "::error title=Deletions failed::$dfail deletion(s) failed on the last run"; bad=1; fi
+          if [ "$ok" != "true" ]; then
+            echo "::error title=Helper not OK::$why"; bad=1; fi
+          exit $bad
